@@ -208,12 +208,12 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           panelClassName="w-[250px]"
           trigger={
             <button type="button" className="focus-ring rounded-full transition hover:opacity-90" aria-label="Cuenta">
-              <Avatar name={displayUser.name} size="md" status="online" />
+              <Avatar name={displayUser.name} src={displayUser.photoUrl} size="md" status="online" />
             </button>
           }
         >
           <div className="flex items-center gap-2.5 px-2.5 py-2">
-            <Avatar name={displayUser.name} size="sm" />
+            <Avatar name={displayUser.name} src={displayUser.photoUrl} size="sm" />
             <div className="min-w-0">
               <p className="truncate text-[12px] font-semibold text-ink">{displayUser.name}</p>
               <p className="text-[10px] text-slate-400">

@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.5.0 — 2026-10-26
+
+### POS y documentos
+- Historial de ventas dentro de POS con filtros por fecha, cliente, método, estado y tipo.
+- Detalle de factura, reimpresión 80/58/A4, anulación con permiso y exportación CSV.
+- Detalle por línea de servicio en POS, guardado en la factura y visible solo en A4.
+- Términos impresos sin la versión `v1.0`.
+
+### Inventario
+- Edición de referencias con nombre, SKU, código de barras, categoría, ubicación, mínimo, costo, precio y garantía.
+- Edición de referencias restringida a administradores y propietario.
+- Campos opcionales de alerta de stock y rotación: `rotativo`, `no_rotativo` y `prueba`.
+- Dashboard y notificaciones solo alertan referencias con aviso activo.
+- Migración 5 con `products.alert_enabled`, `products.rotation` e `invoice_items.note`.
+
+### Perfiles y sesión
+- Foto de perfil visible en topbar, sidebar y lista de usuarios.
+- El admin puede cambiar su propia foto y la foto del propietario sin editar el resto de la cuenta raíz.
+- Nueva operación `users.updatePhoto` con auditoría.
+- Prueba de regresión de cierre de sesión al cerrar la aplicación.
+
+### Calidad
+- Aceptación 1.5.0: 11/11.
+- Migración sobre copia de la base real: OK, sin pérdida de datos.
+- Regresión: F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Smoke empaquetado 1.5.0: 11/11.
+- Instalador `BitacoreTech-1.5.0-x64.exe`.
+
+### Pendiente para siguientes entregas
+- Diccionarios jerárquicos y ficha técnica estructurada.
+- Credenciales cifradas del equipo y reportes de diagnóstico.
+- Identidad por teléfono y múltiples teléfonos.
+- IA de facturas de compra con Gemini, sin guardar imágenes.
+- Firma del instalador, migración Python, catálogo web y piloto.
+
 ## 1.4.0 — 2026-10-26
 
 ### Operación y clientes

@@ -95,6 +95,8 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     warrantyDays: Number(row.warranty_days),
     serials,
     service: bool(row.is_service),
+    alertEnabled: row.alert_enabled === undefined ? true : bool(row.alert_enabled),
+    rotation: row.rotation === 'no_rotativo' || row.rotation === 'prueba' ? row.rotation : 'rotativo',
     iconKey: categoryIconKey(row.category),
     tone: categoryTone(row.category)
   }
@@ -154,8 +156,14 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
       description: line.description,
       quantity: Number(line.quantity),
       unitPrice: money(line.unit_price_cents),
-      lineTotal: money(line.line_total_cents)
+      lineTotal: money(line.line_total_cents),
+      note: line.note ?? null,
+      itemType: line.item_type === 'servicio' ? 'servicio' : 'producto'
     }))
+  const payment = db.get<any>(
+    'SELECT received_cents, change_cents FROM payments WHERE invoice_id = ? ORDER BY created_at DESC LIMIT 1',
+    row.id
+  )
   return {
     id: row.id,
     number: row.number,
@@ -174,6 +182,8 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
     status: row.status,
     items: Number(count),
     lines,
+    received: payment ? money(payment.received_cents ?? row.total_cents) : money(row.total_cents),
+    change: payment ? money(payment.change_cents ?? 0) : 0,
     notes: row.notes,
     createdAt: row.created_at
   }

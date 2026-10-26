@@ -16,6 +16,7 @@ interface AuthContextValue {
   setup: (input: SetupInput) => Promise<AuthSession>
   login: (username: string, password: string) => Promise<AuthSession>
   logout: () => Promise<void>
+  refreshProfile: () => Promise<void>
   setPreviewRole: (role: Role) => Promise<void>
 }
 
@@ -111,6 +112,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const refreshProfile = useCallback(async () => {
+    if (!getAuthToken()) return
+    const info = await api.auth.session()
+    setSession((current) =>
+      current
+        ? {
+            ...current,
+            user: info.user,
+            displayUser: info.displayUser,
+            role: info.role,
+            actualRole: info.actualRole,
+            canPreviewRoles: info.canPreviewRoles,
+            expiresAt: info.expiresAt,
+            roleLabel: info.roleLabel,
+            permissions: info.permissions
+          }
+        : current
+    )
+    setEffectivePermissions(info.permissions)
+  }, [])
+
   const setPreviewRole = useCallback(
     async (role: Role) => {
       if (!session?.canPreviewRoles) return
@@ -148,9 +170,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setup,
       login,
       logout,
+      refreshProfile,
       setPreviewRole
     }
-  }, [session, restoring, setupRequired, setup, login, logout, setPreviewRole])
+  }, [session, restoring, setupRequired, setup, login, logout, refreshProfile, setPreviewRole])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

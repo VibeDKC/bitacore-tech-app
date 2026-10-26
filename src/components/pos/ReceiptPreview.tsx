@@ -72,8 +72,13 @@ function ReceiptCopy({
         </thead>
         <tbody>
           {receipt.lines.map((line) => (
-            <tr key={line.productId} className="border-b border-black/10">
-              <td className="py-0.5 pr-1">{line.name}</td>
+            <tr key={`${line.productId}-${line.note ?? ''}`} className="border-b border-black/10">
+              <td className="py-0.5 pr-1">
+                {line.name}
+                {compact === 'a4' && line.note ? (
+                  <span className="mt-0.5 block text-[0.85em] leading-snug text-black/65">{line.note}</span>
+                ) : null}
+              </td>
               <td className="py-0.5 text-right tabular">{line.quantity}</td>
               <td className="py-0.5 text-right tabular">{formatCurrency(line.price)}</td>
               <td className="py-0.5 text-right tabular font-semibold">{formatCurrency(line.lineTotal)}</td>

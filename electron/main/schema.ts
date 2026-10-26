@@ -119,6 +119,8 @@ CREATE TABLE IF NOT EXISTS products (
   price_cents INTEGER NOT NULL DEFAULT 0,
   warranty_days INTEGER NOT NULL DEFAULT 0,
   is_service INTEGER NOT NULL DEFAULT 0,
+  alert_enabled INTEGER NOT NULL DEFAULT 1,
+  rotation TEXT NOT NULL DEFAULT 'rotativo' CHECK (rotation IN ('rotativo', 'no_rotativo', 'prueba')),
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -325,7 +327,8 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit_price_cents INTEGER NOT NULL DEFAULT 0,
   unit_cost_cents INTEGER NOT NULL DEFAULT 0,
   line_total_cents INTEGER NOT NULL DEFAULT 0,
-  item_type TEXT NOT NULL DEFAULT 'producto'
+  item_type TEXT NOT NULL DEFAULT 'producto',
+  note TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payments (

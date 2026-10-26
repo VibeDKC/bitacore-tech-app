@@ -61,6 +61,7 @@ interface Session {
   userName: string
   username: string
   email: string
+  photoPath: string | null
   actualRole: string
   role: string
   expiresAt: string
@@ -154,6 +155,7 @@ function baseSession(db: Database, row: any) {
     userName: row.name,
     username: row.username,
     email: row.email ?? '',
+    photoPath: row.photo_path ?? null,
     actualRole: row.role,
     role: row.effective_role,
     expiresAt: row.expires_at
@@ -165,7 +167,7 @@ function resolveSession(db: Database, token: string): Session {
   const tokenHash = sha256(token)
   const row = db.get<any>(
     `SELECT s.token_hash, s.user_id, s.effective_role, s.expires_at,
-            u.name, u.username, u.email, u.role
+            u.name, u.username, u.email, u.role, u.photo_path
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND u.active = 1`,
     tokenHash
@@ -186,14 +188,22 @@ function displayUser(session: Session) {
       username: session.username,
       name: session.userName,
       email: session.email,
-      accountRole: session.actualRole
+      accountRole: session.actualRole,
+      photoUrl: session.photoPath
     }
   }
   const identity = simulatedIdentity[session.role]
   if (!identity) {
-    return { id: session.userId, username: session.username, name: session.userName, email: session.email, accountRole: session.role }
+    return {
+      id: session.userId,
+      username: session.username,
+      name: session.userName,
+      email: session.email,
+      accountRole: session.role,
+      photoUrl: null
+    }
   }
-  return { id: `preview_${session.role}`, ...identity, accountRole: session.role }
+  return { id: `preview_${session.role}`, ...identity, accountRole: session.role, photoUrl: null }
 }
 
 function sessionResponse(session: Session) {
@@ -210,7 +220,8 @@ function sessionResponse(session: Session) {
       username: session.username,
       name: session.actualRole === 'superadmin' ? session.userName : displayUser(session).name,
       email: session.email,
-      accountRole: session.actualRole
+      accountRole: session.actualRole,
+      photoUrl: session.actualRole === 'superadmin' ? session.photoPath : displayUser(session).photoUrl ?? null
     },
     displayUser: displayUser(session),
     role: session.role,
@@ -649,11 +660,9 @@ function userDto(db: Database, row: any) {
   }
 }
 
-function listUsers(db: Database, viewerRole: string) {
+function listUsers(db: Database) {
   const rows = db.all<any>('SELECT * FROM users ORDER BY is_protected DESC, created_at ASC')
-  return rows
-    .filter((row) => viewerRole === 'superadmin' || row.role !== 'superadmin')
-    .map((row) => userDto(db, row))
+  return rows.map((row) => userDto(db, row))
 }
 
 function supplierDto(db: Database, row: any) {
@@ -883,10 +892,10 @@ function requireCapabilitySoft(role: string, capability: BackendCapability) {
 }
 function notificationData(db: Database) {
   const low = db.get<{ count: number }>(
-    'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND stock > 0 AND stock <= min_stock'
+    'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND alert_enabled = 1 AND stock > 0 AND stock <= min_stock'
   )?.count ?? 0
   const out = db.get<{ count: number }>(
-    'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND stock <= 0'
+    'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND alert_enabled = 1 AND stock <= 0'
   )?.count ?? 0
   const ready = db.get<{ count: number }>("SELECT COUNT(*) AS count FROM work_orders WHERE status = 'listo'")?.count ?? 0
   const pending = db.get<{ count: number }>("SELECT COUNT(*) AS count FROM purchases WHERE status = 'pendiente'")?.count ?? 0
@@ -1176,7 +1185,8 @@ function sessionPayload(db: Database, user: any, token: string, expires: string)
     username: user.username,
     name: user.name,
     email: user.email,
-    accountRole: user.role
+    accountRole: user.role,
+    photoUrl: user.photo_path ?? null
   }
   return {
     token,
@@ -1448,7 +1458,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         "SELECT COUNT(*) AS count FROM work_orders WHERE status NOT IN ('entregado','no_reparado')"
       )
       const low = db.get<{ count: number }>(
-        'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND stock <= min_stock'
+        'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND alert_enabled = 1 AND stock <= min_stock'
       )
       return {
         openOrders: Number(open?.count ?? 0),
@@ -1474,11 +1484,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
         today.toISOString()
       )
       const stockSummary = { in: 0, low: 0, out: 0 }
+      const alertStock = { low: 0, out: 0 }
       for (const product of products) {
         if (product.service) continue
-        if (product.stock <= 0) stockSummary.out += 1
-        else if (product.stock <= product.minStock) stockSummary.low += 1
-        else stockSummary.in += 1
+        if (product.stock <= 0) {
+          stockSummary.out += 1
+          if (product.alertEnabled) alertStock.out += 1
+        } else if (product.stock <= product.minStock) {
+          stockSummary.low += 1
+          if (product.alertEnabled) alertStock.low += 1
+        } else {
+          stockSummary.in += 1
+        }
       }
       const report = reportData(db, session, '30d')
       const open = orders.filter((order: any) => !['entregado', 'no_reparado'].includes(order.status))
@@ -1490,7 +1507,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           openOrders: open.length,
           diagnosticOrders: orders.filter((order: any) => order.status === 'diagnostico').length,
           readyOrders: orders.filter((order: any) => order.status === 'listo').length,
-          lowStock: stockSummary.low + stockSummary.out,
+          lowStock: alertStock.low + alertStock.out,
           cashExpected: cash ? cashSessionDto(db, cash).expected : 0
         },
         products,
@@ -1840,6 +1857,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const cost = numberValue(payload?.cost ?? 0, 'Costo', { min: 0 })
       const stock = numberValue(payload?.stock ?? 0, 'Stock', { min: 0 })
       const minStock = numberValue(payload?.minStock ?? 0, 'Stock mínimo', { min: 0 })
+      const rotation = schema(payload?.rotation ?? 'rotativo', z.enum(['rotativo', 'no_rotativo', 'prueba']))
+      const alertEnabled = payload?.alertEnabled === undefined ? rotation === 'rotativo' : Boolean(payload.alertEnabled)
       const id = `prod_${sha256(`${sku}|${Date.now()}`).slice(0, 20)}`
       const barcode = String(payload?.barcode ?? `LOCAL${Date.now().toString().slice(-9)}`).slice(0, 60)
       const nowIso = new Date().toISOString()
@@ -1847,8 +1866,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.run(
           `INSERT INTO products
             (id, name, sku, barcode, category, location, stock, min_stock, cost_cents, price_cents,
-             warranty_days, is_service, active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+             warranty_days, is_service, alert_enabled, rotation, active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           id,
           name,
           sku,
@@ -1861,6 +1880,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           toCents(price),
           Math.max(0, Math.round(numberValue(payload?.warrantyDays ?? 0, 'Garantía', { min: 0 }))),
           payload?.service ? 1 : 0,
+          alertEnabled ? 1 : 0,
+          rotation,
           nowIso,
           nowIso
         )
@@ -1882,6 +1903,99 @@ export async function handleRpc(command: string, payload: Payload, token: string
         audit(db, session, 'Creación de producto', 'Producto', `${name} · SKU ${sku}`, id)
       })
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', id), true)
+    }
+
+    case 'inventory.update': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      if (!['admin', 'superadmin'].includes(session.actualRole)) {
+        fail('Solo administradores y el propietario pueden editar referencias de inventario.', 'FORBIDDEN')
+      }
+      const productId = text(payload?.id, 'Producto', 1, 80)
+      const product = db.get<any>('SELECT * FROM products WHERE id = ?', productId)
+      if (!product) fail('Producto no encontrado', 'NOT_FOUND')
+      const updates: string[] = []
+      const params: any[] = []
+      const changed: string[] = []
+      if (payload?.name !== undefined) {
+        updates.push('name = ?')
+        params.push(text(payload.name, 'Nombre', 2, 160))
+        changed.push('nombre')
+      }
+      if (payload?.sku !== undefined) {
+        const sku = text(payload.sku, 'SKU', 2, 60)
+        const duplicate = db.get<any>('SELECT id FROM products WHERE sku = ? AND id <> ?', sku, productId)
+        if (duplicate) fail('Ya existe un producto con ese SKU', 'DUPLICATE')
+        updates.push('sku = ?')
+        params.push(sku)
+        changed.push('SKU')
+      }
+      if (payload?.barcode !== undefined) {
+        updates.push('barcode = ?')
+        params.push(text(payload.barcode, 'Código de barras', 1, 60))
+        changed.push('código de barras')
+      }
+      if (payload?.category !== undefined) {
+        updates.push('category = ?')
+        params.push(text(payload.category, 'Categoría', 2, 80))
+        changed.push('categoría')
+      }
+      if (payload?.location !== undefined) {
+        updates.push('location = ?')
+        params.push(text(payload.location, 'Ubicación', 2, 80))
+        changed.push('ubicación')
+      }
+      if (payload?.minStock !== undefined) {
+        updates.push('min_stock = ?')
+        params.push(numberValue(payload.minStock, 'Stock mínimo', { min: 0 }))
+        changed.push('stock mínimo')
+      }
+      if (payload?.cost !== undefined) {
+        updates.push('cost_cents = ?')
+        params.push(toCents(numberValue(payload.cost, 'Costo', { min: 0 })))
+        changed.push('costo')
+      }
+      if (payload?.price !== undefined) {
+        updates.push('price_cents = ?')
+        params.push(toCents(numberValue(payload.price, 'Precio', { min: 1 })))
+        changed.push('precio')
+      }
+      if (payload?.warrantyDays !== undefined) {
+        updates.push('warranty_days = ?')
+        params.push(Math.max(0, Math.round(numberValue(payload.warrantyDays, 'Garantía', { min: 0 }))))
+        changed.push('garantía')
+      }
+      if (payload?.rotation !== undefined) {
+        const rotation = schema(payload.rotation, z.enum(['rotativo', 'no_rotativo', 'prueba']))
+        updates.push('rotation = ?')
+        params.push(rotation)
+        changed.push('rotación')
+      }
+      if (payload?.alertEnabled !== undefined) {
+        updates.push('alert_enabled = ?')
+        params.push(payload.alertEnabled ? 1 : 0)
+        changed.push(payload.alertEnabled ? 'alerta activada' : 'alerta desactivada')
+      }
+      if (payload?.active !== undefined) {
+        updates.push('active = ?')
+        params.push(payload.active ? 1 : 0)
+        changed.push(payload.active ? 'reactivación' : 'desactivación')
+      }
+      if (!updates.length) fail('No hay cambios para guardar')
+      updates.push('updated_at = ?')
+      params.push(new Date().toISOString())
+      db.tx(() => {
+        db.run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, ...params, productId)
+        audit(
+          db,
+          session,
+          'Actualización de producto',
+          'Producto',
+          `${product.name} · ${changed.join(', ')}`,
+          productId
+        )
+      })
+      return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', productId), canSession(session, 'viewCosts'))
     }
 
     case 'inventory.adjust': {
@@ -2754,7 +2868,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (!customer) fail('Selecciona un cliente válido')
       const lines = schema(
         payload?.lines,
-        z.array(z.object({ productId: z.string().min(1), quantity: z.number().positive() })).min(1)
+        z
+          .array(
+            z.object({
+              productId: z.string().min(1),
+              quantity: z.number().positive(),
+              note: z.string().max(500).optional()
+            })
+          )
+          .min(1)
       )
       const method = schema(payload?.method, z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
       const prepared = lines.map((line) => {
@@ -2763,7 +2885,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
         if (!product.is_service && Number(product.stock) < line.quantity) {
           fail(`Stock insuficiente de ${product.name}. Disponible: ${product.stock}`)
         }
-        return { ...line, product }
+        return {
+          ...line,
+          product,
+          note: product.is_service ? line.note?.trim().slice(0, 500) || null : null
+        }
       })
       const subtotalCents = prepared.reduce((sum, line) => sum + Number(line.product.price_cents) * line.quantity, 0)
       const discount = resolveSaleDiscount(customer, payload, session, subtotalCents)
@@ -2812,8 +2938,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         for (const line of prepared) {
           db.run(
             `INSERT INTO invoice_items
-              (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             `ii_${sha256(`${invoiceId}|${line.productId}`).slice(0, 20)}`,
             invoiceId,
             line.product.id,
@@ -2822,7 +2948,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
             line.product.price_cents,
             line.product.cost_cents,
             Math.round(line.product.price_cents * line.quantity),
-            line.product.is_service ? 'servicio' : 'producto'
+            line.product.is_service ? 'servicio' : 'producto',
+            line.note
           )
           if (!line.product.is_service) {
             db.run('UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?', line.quantity, nowIso, line.product.id)
@@ -2892,10 +3019,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
             name: line.product.name,
             quantity: line.quantity,
             price: money(line.product.price_cents),
-            lineTotal: money(line.product.price_cents * line.quantity)
+            lineTotal: money(line.product.price_cents * line.quantity),
+            note: line.note
           }))
         }
       }
+    }
+
+    case 'invoices.history': {
+      requireModuleAccess(session, 'pos')
+      const rows = db.all<any>('SELECT * FROM invoices ORDER BY created_at DESC LIMIT 500')
+      return rows.map((row) => invoiceDto(db, row))
     }
 
     case 'invoices.list': {
@@ -3381,7 +3515,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
     case 'users.list': {
       requireModuleAccess(session, 'settings')
       requireCap(session, 'manageStaff')
-      return listUsers(db, session.role)
+      return listUsers(db)
     }
 
     case 'users.create': {
@@ -3423,6 +3557,27 @@ export async function handleRpc(command: string, payload: Payload, token: string
         )
         applyPermissionOverrides(db, session, id, role, payload?.permissions)
         audit(db, session, 'Creación de usuario', 'Usuario', `${name} · usuario ${username} · rol ${roleLabels[role]}`, id)
+      })
+      return userDto(db, db.get<any>('SELECT * FROM users WHERE id = ?', id))
+    }
+
+    case 'users.updatePhoto': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'manageStaff')
+      const id = text(payload?.id, 'Usuario', 1, 80)
+      const row = db.get<any>('SELECT * FROM users WHERE id = ?', id)
+      if (!row) fail('Usuario no encontrado', 'NOT_FOUND')
+      const photoPath = normalizeUserPhoto(payload?.photoDataUrl)
+      db.tx(() => {
+        db.run('UPDATE users SET photo_path = ? WHERE id = ?', photoPath, id)
+        audit(
+          db,
+          session,
+          'Actualización de foto de perfil',
+          'Usuario',
+          `${row.name} · ${photoPath ? 'foto actualizada' : 'foto eliminada'}`,
+          id
+        )
       })
       return userDto(db, db.get<any>('SELECT * FROM users WHERE id = ?', id))
     }

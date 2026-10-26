@@ -21,7 +21,7 @@ import {
   Warehouse
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Product, ProductCategory, StockMovement, StockStatus } from '@/types'
+import type { Product, ProductCategory, ProductRotation, StockMovement, StockStatus } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/format'
@@ -62,13 +62,16 @@ const movementSeed = [
 const emptyProductForm = {
   name: '',
   sku: '',
+  barcode: '',
   category: 'Repuestos' as ProductCategory,
   location: 'Bodega A',
   stock: '0',
   minStock: '2',
   cost: '',
   price: '',
-  warrantyDays: '90'
+  warrantyDays: '90',
+  rotation: 'rotativo' as ProductRotation,
+  alertEnabled: true
 }
 
 export function InventoryPage() {
@@ -85,10 +88,12 @@ export function InventoryPage() {
   const [adjustReason, setAdjustReason] = useState('Conteo físico')
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState(emptyProductForm)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState(emptyProductForm)
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [saving, setSaving] = useState(false)
 
-  const canEdit = can(role, 'editInventory')
+  const canEdit = can(role, 'editInventory') && (role === 'admin' || role === 'superadmin')
   const canCosts = can(role, 'viewCosts')
   const selected = items.find((item) => item.id === selectedId) ?? null
 
@@ -116,7 +121,7 @@ export function InventoryPage() {
     return {
       references: physical.length,
       units: physical.reduce((sum, item) => sum + item.stock, 0),
-      alerts: physical.filter((item) => getStockStatus(item) !== 'in').length,
+      alerts: physical.filter((item) => item.alertEnabled && getStockStatus(item) !== 'in').length,
       value: physical.reduce((sum, item) => sum + item.stock * (item.cost ?? 0), 0)
     }
   }, [items])
@@ -172,13 +177,16 @@ export function InventoryPage() {
       const product = await api.inventory.create({
         name: form.name.trim(),
         sku: form.sku.trim(),
+        barcode: form.barcode.trim() || undefined,
         category: form.category,
         location: form.location,
         stock: Number(form.stock) || 0,
         minStock: Number(form.minStock) || 0,
         cost: Number(form.cost) || 0,
         price: Number(form.price),
-        warrantyDays: Number(form.warrantyDays) || 0
+        warrantyDays: Number(form.warrantyDays) || 0,
+        rotation: form.rotation,
+        alertEnabled: form.alertEnabled
       })
       setData((current) => (current ? [product, ...current] : [product]))
       setCreateOpen(false)
@@ -191,9 +199,59 @@ export function InventoryPage() {
     }
   }
 
+  function openEdit(product: Product) {
+    setSelectedId(product.id)
+    setEditForm({
+      name: product.name,
+      sku: product.sku,
+      barcode: product.barcode,
+      category: product.category,
+      location: product.location,
+      stock: String(product.stock),
+      minStock: String(product.minStock),
+      cost: String(product.cost ?? 0),
+      price: String(product.price),
+      warrantyDays: String(product.warrantyDays),
+      rotation: product.rotation,
+      alertEnabled: product.alertEnabled
+    })
+    setEditOpen(true)
+  }
+
+  async function updateProduct() {
+    if (!selected) return
+    if (!editForm.name.trim() || !editForm.sku.trim() || Number(editForm.price) <= 0) {
+      toast.error('Completa nombre, SKU y precio de venta')
+      return
+    }
+    setSaving(true)
+    try {
+      const updated = await api.inventory.update(selected.id, {
+        name: editForm.name.trim(),
+        sku: editForm.sku.trim(),
+        ...(editForm.barcode.trim() ? { barcode: editForm.barcode.trim() } : {}),
+        category: editForm.category,
+        location: editForm.location,
+        minStock: Number(editForm.minStock) || 0,
+        cost: Number(editForm.cost) || 0,
+        price: Number(editForm.price),
+        warrantyDays: Number(editForm.warrantyDays) || 0,
+        rotation: editForm.rotation,
+        alertEnabled: editForm.alertEnabled
+      })
+      setData((current) => (current ? current.map((item) => (item.id === updated.id ? updated : item)) : current))
+      setEditOpen(false)
+      toast.success('Referencia actualizada', { description: `${updated.name} · ${updated.sku}` })
+    } catch (failure) {
+      toast.error('No se pudo actualizar la referencia', { description: errorMessage(failure) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function exportInventory() {
     downloadCsv('bitacoretech-inventario.csv', [
-      ['Producto', 'SKU', 'Categoría', 'Ubicación', 'Stock', 'Stock mínimo', 'Costo', 'Precio', 'Estado'],
+      ['Producto', 'SKU', 'Categoría', 'Ubicación', 'Stock', 'Stock mínimo', 'Costo', 'Precio', 'Rotación', 'Alerta', 'Estado'],
       ...filtered.map((product) => [
         product.name,
         product.sku,
@@ -203,6 +261,8 @@ export function InventoryPage() {
         product.minStock,
         canCosts ? (product.cost ?? 0) : 'Restringido',
         product.price,
+        product.rotation,
+        product.alertEnabled ? 'Activa' : 'Desactivada',
         getStockStatus(product)
       ])
     ])
@@ -380,6 +440,9 @@ export function InventoryPage() {
                     <td className="table-td text-right text-[12px] font-semibold tabular text-ink">{formatCurrency(product.price)}</td>
                     <td className="table-td">
                       <StockStatusBadge product={product} />
+                      <p className={cn('mt-1 text-[8px]', product.alertEnabled ? 'text-success-600' : 'text-slate-400')}>
+                        {product.alertEnabled ? 'Aviso activo' : 'Sin aviso'}
+                      </p>
                     </td>
                     <td className="table-td pr-5 lg:pr-6">
                       <div className="flex items-center justify-end gap-1">
@@ -399,8 +462,7 @@ export function InventoryPage() {
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation()
-                              setSelectedId(product.id)
-                              setAdjustOpen(true)
+                              openEdit(product)
                             }}
                             className="focus-ring flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-brand-600 hover:shadow-sm"
                             aria-label={`Editar ${product.name}`}
@@ -441,14 +503,19 @@ export function InventoryPage() {
         description={selected ? `${selected.sku} · ${selected.category}` : ''}
         width="md"
         footer={
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Button variant="secondary" onClick={() => setSelectedId(null)}>
               Cerrar
             </Button>
             {canEdit && selected ? (
-              <Button onClick={() => setAdjustOpen(true)} leftIcon={<SlidersHorizontal className="h-4 w-4" />}>
-                Ajustar stock
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={() => openEdit(selected)} leftIcon={<Pencil className="h-4 w-4" />}>
+                  Editar referencia
+                </Button>
+                <Button onClick={() => setAdjustOpen(true)} leftIcon={<SlidersHorizontal className="h-4 w-4" />}>
+                  Ajustar stock
+                </Button>
+              </div>
             ) : null}
           </div>
         }
@@ -463,6 +530,12 @@ export function InventoryPage() {
                 <StockStatusBadge product={selected} />
                 <Badge variant="outline">{selected.location}</Badge>
                 <Badge variant="outline">Garantía {selected.warrantyDays} días</Badge>
+                <Badge variant={selected.alertEnabled ? 'warning' : 'neutral'}>
+                  {selected.alertEnabled ? 'Alerta de stock' : 'Sin alerta'}
+                </Badge>
+                <Badge variant="outline">
+                  {selected.rotation === 'rotativo' ? 'Rotativo' : selected.rotation === 'prueba' ? 'Prueba' : 'No rotativo'}
+                </Badge>
               </div>
             </div>
 
@@ -646,6 +719,10 @@ export function InventoryPage() {
             <input value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} className="field" placeholder="SSD-NVME-1TB" />
           </label>
           <label className="block">
+            <span className="field-label">Código de barras (opcional)</span>
+            <input value={form.barcode} onChange={(event) => setForm({ ...form, barcode: event.target.value })} className="field" placeholder="Se genera si se deja vacío" />
+          </label>
+          <label className="block">
             <span className="field-label">Categoría</span>
             <select
               value={form.category}
@@ -687,6 +764,32 @@ export function InventoryPage() {
             <input value={form.minStock} onChange={(event) => setForm({ ...form, minStock: event.target.value })} className="field text-right tabular" inputMode="numeric" />
           </label>
           <label className="block">
+            <span className="field-label">Tipo de rotación</span>
+            <select
+              value={form.rotation}
+              onChange={(event) => {
+                const rotation = event.target.value as ProductRotation
+                setForm({ ...form, rotation, alertEnabled: rotation === 'rotativo' })
+              }}
+              className="field"
+            >
+              <option value="rotativo">Rotativo</option>
+              <option value="no_rotativo">No rotativo</option>
+              <option value="prueba">Prueba / demostración</option>
+            </select>
+          </label>
+          <label className="flex items-end">
+            <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={form.alertEnabled}
+                onChange={(event) => setForm({ ...form, alertEnabled: event.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+              />
+              <span className="text-[11px] font-semibold text-ink">Generar alerta de stock</span>
+            </span>
+          </label>
+          <label className="block">
             <span className="field-label">Costo unitario</span>
             <div className="relative">
               <Tag className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -712,6 +815,122 @@ export function InventoryPage() {
               />
             </div>
           </label>
+        </div>
+      </Modal>
+
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Editar referencia"
+        description={selected ? `${selected.name} · stock actual ${selected.stock}` : 'Producto'}
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setEditOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void updateProduct()} loading={saving} leftIcon={<Pencil className="h-4 w-4" />}>
+              Guardar cambios
+            </Button>
+          </div>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="field-label">Nombre</span>
+            <input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} className="field" />
+          </label>
+          <label className="block">
+            <span className="field-label">SKU</span>
+            <input value={editForm.sku} onChange={(event) => setEditForm({ ...editForm, sku: event.target.value })} className="field" />
+          </label>
+          <label className="block">
+            <span className="field-label">Código de barras</span>
+            <input value={editForm.barcode} onChange={(event) => setEditForm({ ...editForm, barcode: event.target.value })} className="field" />
+          </label>
+          <label className="block">
+            <span className="field-label">Categoría</span>
+            <select
+              value={editForm.category}
+              onChange={(event) => setEditForm({ ...editForm, category: event.target.value as ProductCategory })}
+              className="field"
+            >
+              {categoryOptions.filter((item) => item !== 'Todas').map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">Ubicación</span>
+            <input value={editForm.location} onChange={(event) => setEditForm({ ...editForm, location: event.target.value })} className="field" />
+          </label>
+          <label className="block">
+            <span className="field-label">Garantía (días)</span>
+            <input
+              value={editForm.warrantyDays}
+              onChange={(event) => setEditForm({ ...editForm, warrantyDays: event.target.value })}
+              className="field text-right tabular"
+              inputMode="numeric"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Stock mínimo</span>
+            <input
+              value={editForm.minStock}
+              onChange={(event) => setEditForm({ ...editForm, minStock: event.target.value })}
+              className="field text-right tabular"
+              inputMode="numeric"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Tipo de rotación</span>
+            <select
+              value={editForm.rotation}
+              onChange={(event) => {
+                const rotation = event.target.value as ProductRotation
+                setEditForm({ ...editForm, rotation, alertEnabled: rotation === 'rotativo' })
+              }}
+              className="field"
+            >
+              <option value="rotativo">Rotativo</option>
+              <option value="no_rotativo">No rotativo</option>
+              <option value="prueba">Prueba / demostración</option>
+            </select>
+          </label>
+          <label className="flex items-end">
+            <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={editForm.alertEnabled}
+                onChange={(event) => setEditForm({ ...editForm, alertEnabled: event.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+              />
+              <span className="text-[11px] font-semibold text-ink">Generar alerta de stock</span>
+            </span>
+          </label>
+          <label className="block">
+            <span className="field-label">Costo unitario</span>
+            <input
+              value={editForm.cost}
+              onChange={(event) => setEditForm({ ...editForm, cost: event.target.value })}
+              className="field text-right tabular"
+              inputMode="numeric"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Precio de venta</span>
+            <input
+              value={editForm.price}
+              onChange={(event) => setEditForm({ ...editForm, price: event.target.value })}
+              className="field text-right tabular"
+              inputMode="numeric"
+            />
+          </label>
+          <div className="rounded-xl border border-line bg-slate-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-slate-500 sm:col-span-2">
+            El stock no se edita aquí. Para ingresar o retirar unidades usa <b>Ajustar stock</b> y conserva el kardex.
+          </div>
         </div>
       </Modal>
     </div>

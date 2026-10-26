@@ -182,7 +182,7 @@ export interface SettleInput {
 
 export interface PosSaleInput {
   customerId: string
-  lines: Array<{ productId: string; quantity: number }>
+  lines: Array<{ productId: string; quantity: number; note?: string }>
   method: PaymentMethod
   discountType?: 'percent' | 'amount'
   discountValue?: number
@@ -296,6 +296,9 @@ export const api = {
     async create(input: Record<string, unknown>) {
       return hydrateProduct(await rpc<ApiProduct>('inventory.create', input))
     },
+    async update(id: string, input: Record<string, unknown>) {
+      return hydrateProduct(await rpc<ApiProduct>('inventory.update', { id, ...input }))
+    },
     async adjust(productId: string, quantity: number, reason: string) {
       return hydrateProduct(await rpc<ApiProduct>('inventory.adjust', { productId, quantity, reason }))
     }
@@ -361,6 +364,9 @@ export const api = {
   invoices: {
     list() {
       return rpc<Invoice[]>('invoices.list')
+    },
+    history() {
+      return rpc<Invoice[]>('invoices.history')
     },
     annul(id: string, reason: string) {
       return rpc<Invoice>('invoices.annul', { id, reason })
@@ -442,6 +448,9 @@ export const api = {
     },
     update(id: string, input: Record<string, unknown>) {
       return rpc<AppUser>('users.update', { id, ...input })
+    },
+    updatePhoto(id: string, photoDataUrl: string | null) {
+      return rpc<AppUser>('users.updatePhoto', { id, photoDataUrl })
     }
   },
   backups: {

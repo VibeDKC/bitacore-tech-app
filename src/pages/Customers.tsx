@@ -1096,6 +1096,9 @@ export function CustomersPage() {
                     <div key={line.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                       <div>
                         <p className="text-[11px] text-slate-700">{line.description}</p>
+                        {line.note ? (
+                          <p className="mt-0.5 max-w-[360px] text-[10px] leading-snug text-slate-500">{line.note}</p>
+                        ) : null}
                         <p className="text-[9px] text-slate-400">
                           {line.quantity} × {formatCurrency(line.unitPrice)}
                         </p>

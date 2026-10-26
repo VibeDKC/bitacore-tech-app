@@ -29,7 +29,9 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { SearchInput, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { SegmentedTabs } from '@/components/ui/Tabs'
 import { ReceiptPreviewModal } from '@/components/pos/ReceiptPreview'
+import { SalesHistory } from '@/components/pos/SalesHistory'
 import { cn } from '@/lib/utils'
 
 const categories: Array<'Todos' | ProductCategory> = [
@@ -74,6 +76,7 @@ export function POSPage() {
   const legal = data?.legal ?? defaultLegalConfig
   const cashSession = data?.cashSession ?? null
 
+  const [view, setView] = useState<'venta' | 'historial'>('venta')
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<'Todos' | ProductCategory>('Todos')
   const [cart, setCart] = useState<CartLine[]>([])
@@ -168,6 +171,12 @@ export function POSPage() {
     setCart((current) => current.filter((line) => line.product.id !== productId))
   }
 
+  function updateLineNote(productId: string, note: string) {
+    setCart((current) =>
+      current.map((line) => (line.product.id === productId ? { ...line, note: note.slice(0, 500) } : line))
+    )
+  }
+
   function openPayment() {
     if (!cart.length) {
       toast.error('Agrega productos a la venta')
@@ -199,7 +208,7 @@ export function POSPage() {
     try {
       const result = await api.pos.sell({
         customerId: customer.id,
-        lines: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })),
+        lines: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity, note: line.note })),
         method,
         discountType: loyaltyActive ? loyaltyType : discountType,
         discountValue: loyaltyActive ? loyaltyValue : Number(discountInput) || 0,
@@ -274,6 +283,25 @@ export function POSPage() {
         }
       />
 
+      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-white/70 p-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedTabs
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'venta', label: 'Nueva venta' },
+            { value: 'historial', label: 'Historial de ventas' }
+          ]}
+        />
+        <p className="px-2 text-[10px] text-slate-400">
+          {view === 'venta'
+            ? 'Carrito, servicios y cobro del turno actual.'
+            : 'Consulta, reimprime y audita todas las ventas registradas.'}
+        </p>
+      </div>
+
+      {view === 'historial' ? (
+        <SalesHistory legal={legal} canAnnul={can(role, 'annulInvoice')} onChanged={reload} />
+      ) : (
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="card overflow-hidden">
           <div className="border-b border-line px-5 py-4">
@@ -436,6 +464,19 @@ export function POSPage() {
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-1 text-[12px] font-semibold text-ink">{line.product.name}</p>
                         <p className="mt-0.5 text-[10px] text-slate-400">{formatCurrency(line.product.price)} c/u</p>
+                        {line.product.service ? (
+                          <label className="mt-1.5 block">
+                            <span className="sr-only">Detalle del servicio</span>
+                            <textarea
+                              value={line.note ?? ''}
+                              onChange={(event) => updateLineNote(line.product.id, event.target.value)}
+                              rows={2}
+                              maxLength={500}
+                              placeholder="Detalle del servicio (solo aparece en la factura A4)"
+                              className="field resize-none px-2 py-1.5 text-[10px] leading-snug"
+                            />
+                          </label>
+                        ) : null}
                         <div className="mt-1.5 flex items-center justify-between gap-2">
                           <div className="flex items-center rounded-lg border border-line">
                             <button
@@ -586,6 +627,7 @@ export function POSPage() {
           </div>
         </div>
       </div>
+      )}
 
       <Modal
         open={paymentOpen}

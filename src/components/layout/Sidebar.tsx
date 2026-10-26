@@ -148,7 +148,7 @@ export function Sidebar({
       <div className="px-3 pb-4 pt-4">
         <div className="rounded-2xl border border-line bg-slate-50/70 p-2.5">
           <div className="flex items-center gap-2.5">
-            <Avatar name={displayUser.name} size="sm" status="online" />
+            <Avatar name={displayUser.name} src={displayUser.photoUrl} size="sm" status="online" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[12px] font-semibold text-ink">{displayUser.name}</p>
               <p className="truncate text-[10px] text-slate-400">
@@ -182,7 +182,7 @@ export function Sidebar({
           </div>
         </div>
         <p className="mt-3 px-1 text-center text-[9px] font-medium uppercase tracking-[0.14em] text-slate-300">
-          BitacoreTech Taller & POS · v1.4.0
+          BitacoreTech Taller & POS · v1.5.0
         </p>
       </div>
     </aside>

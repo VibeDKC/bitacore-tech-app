@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { cn, initials } from '@/lib/utils'
 
 const sizes = {
@@ -10,25 +11,45 @@ const sizes = {
 
 export function Avatar({
   name,
+  src,
   size = 'md',
   status,
   className
 }: {
   name: string
+  src?: string | null
   size?: keyof typeof sizes
   status?: 'online' | 'offline'
   className?: string
 }) {
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    setFailed(false)
+  }, [src])
+
   return (
     <span className={cn('relative inline-flex shrink-0', className)}>
-      <span
-        className={cn(
-          'inline-flex items-center justify-center rounded-full bg-gradient-to-br from-brand-500 via-brand-600 to-indigo-800 font-semibold text-white shadow-[0_8px_20px_-10px_rgba(91,75,214,0.9)] ring-2 ring-white',
-          sizes[size]
-        )}
-      >
-        {initials(name)}
-      </span>
+      {src && !failed ? (
+        <img
+          src={src}
+          alt={name}
+          onError={() => setFailed(true)}
+          className={cn(
+            'inline-flex rounded-full object-cover shadow-[0_8px_20px_-10px_rgba(91,75,214,0.9)] ring-2 ring-white',
+            sizes[size]
+          )}
+        />
+      ) : (
+        <span
+          className={cn(
+            'inline-flex items-center justify-center rounded-full bg-gradient-to-br from-brand-500 via-brand-600 to-indigo-800 font-semibold text-white shadow-[0_8px_20px_-10px_rgba(91,75,214,0.9)] ring-2 ring-white',
+            sizes[size]
+          )}
+        >
+          {initials(name)}
+        </span>
+      )}
       {status ? (
         <span
           className={cn(

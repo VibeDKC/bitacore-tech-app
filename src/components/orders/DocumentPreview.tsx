@@ -232,7 +232,7 @@ function TicketSheet({ order, data, variant }: { order: WorkOrder; data: Documen
 
       <div className="mt-2.5 border-t border-black/30 pt-2">
         <p className={cn('font-bold uppercase tracking-[0.1em]', narrow ? 'text-[6.5px]' : 'text-[7px]')}>
-          Términos esenciales · {data.legalVersion}
+          Términos esenciales
         </p>
         <ol className="mt-1 list-decimal space-y-0.5 pl-3">
           {data.shortClauses.slice(0, 3).map((clause) => (
@@ -395,7 +395,7 @@ function A4Copy({
 
           <div className="mt-1.5">
             <p className="text-[6.5px] font-semibold uppercase tracking-[0.1em] opacity-60">
-              Términos legales completos · {data.legalVersion}
+              Términos legales completos
             </p>
             <ol className="mt-0.5 grid grid-cols-2 gap-x-3 gap-y-0 pl-3 text-[7px] leading-[1.3]">
               {data.fullClauses.map((clause, index) => (

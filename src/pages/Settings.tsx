@@ -147,7 +147,7 @@ const accessMeta = {
 } as const
 
 export function SettingsPage() {
-  const { role, actualRole, displayUser } = useAuth()
+  const { role, actualRole, displayUser, user, refreshProfile } = useAuth()
   const { data, loading, error, reload, setData } = useApi(async () => {
     const settings = await api.settings.get()
     const [users, backups] = await Promise.all([
@@ -166,6 +166,9 @@ export function SettingsPage() {
   const [purgePassword, setPurgePassword] = useState('')
   const [saving, setSaving] = useState<string | null>(null)
   const [userSaving, setUserSaving] = useState(false)
+  const [photoMember, setPhotoMember] = useState<AppUser | null>(null)
+  const [photoDraft, setPhotoDraft] = useState<string | null>(null)
+  const [photoSaving, setPhotoSaving] = useState(false)
   const [backupSaving, setBackupSaving] = useState(false)
   const [backupPasswordOpen, setBackupPasswordOpen] = useState(false)
   const [backupPasswordForm, setBackupPasswordForm] = useState({ password: '', confirm: '' })
@@ -277,7 +280,7 @@ export function SettingsPage() {
     setRolePermissionsDraft(permissions)
   }, [data])
 
-  const visibleStaff = isSuperadmin ? staff : staff.filter((member) => member.role !== 'superadmin')
+  const visibleStaff = staff
   const visibleMatrix = permissionMatrix
     .map((group) => ({
       ...group,
@@ -756,6 +759,7 @@ export function SettingsPage() {
       setData((current) =>
         current ? { ...current, users: current.users.map((member) => (member.id === updated.id ? updated : member)) } : current
       )
+      if (user?.id === updated.id) await refreshProfile()
       setEditUser(null)
       toast.success('Usuario actualizado', { description: `${updated.name} · ${roleLabels[updated.role]}` })
     } catch (failure) {
@@ -779,7 +783,7 @@ export function SettingsPage() {
     return 'inherit'
   }
 
-  function handleUserPhoto(file: File | null) {
+  function processUserPhoto(file: File | null, onReady: (dataUrl: string) => void) {
     if (!file) return
     if (!file.type.startsWith('image/')) {
       toast.error('Selecciona una imagen PNG, JPEG o WebP')
@@ -803,11 +807,39 @@ export function SettingsPage() {
         const width = image.width * scale
         const height = image.height * scale
         context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height)
-        setUserForm((current) => ({ ...current, photoDataUrl: canvas.toDataURL('image/jpeg', 0.82) }))
+        onReady(canvas.toDataURL('image/jpeg', 0.82))
       }
       image.src = String(reader.result ?? '')
     }
     reader.readAsDataURL(file)
+  }
+
+  function handleUserPhoto(file: File | null) {
+    processUserPhoto(file, (photoDataUrl) => setUserForm((current) => ({ ...current, photoDataUrl })))
+  }
+
+  function openPhotoEditor(member: AppUser) {
+    setPhotoMember(member)
+    setPhotoDraft(member.photoUrl ?? null)
+  }
+
+  async function saveUserPhoto() {
+    if (!photoMember || photoSaving) return
+    setPhotoSaving(true)
+    try {
+      const updated = await api.users.updatePhoto(photoMember.id, photoDraft)
+      setData((current) =>
+        current ? { ...current, users: current.users.map((member) => (member.id === updated.id ? updated : member)) } : current
+      )
+      if (user?.id === updated.id) await refreshProfile()
+      setPhotoMember(null)
+      setPhotoDraft(null)
+      toast.success('Foto de perfil actualizada', { description: updated.name })
+    } catch (failure) {
+      toast.error('No se pudo guardar la foto', { description: errorMessage(failure) })
+    } finally {
+      setPhotoSaving(false)
+    }
   }
 
   const switchClass = (active: boolean) =>
@@ -1184,7 +1216,7 @@ export function SettingsPage() {
                     <h2 className="font-display text-[16px] font-bold text-ink">Equipo del taller</h2>
                     <p className="mt-0.5 text-[11px] text-slate-400">
                       {visibleStaff.length} cuentas
-                      {isSuperadmin ? ' · la cuenta raíz está protegida' : ' · gestión de técnicos y cajeros'}
+                      {isSuperadmin ? ' · la cuenta raíz está protegida' : ' · foto de cualquier cuenta; ficha completa según permisos'}
                     </p>
                   </div>
                   {canManageStaff ? (
@@ -1199,7 +1231,7 @@ export function SettingsPage() {
                     return (
                       <div key={member.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex min-w-0 items-center gap-3">
-                          <Avatar name={member.name} size="sm" status={member.active ? 'online' : 'offline'} />
+                          <Avatar name={member.name} src={member.photoUrl} size="sm" status={member.active ? 'online' : 'offline'} />
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <p className="truncate text-[12px] font-semibold text-ink">{member.name}</p>
@@ -1222,8 +1254,19 @@ export function SettingsPage() {
                           <span className="hidden w-[130px] text-right text-[9px] text-slate-400 lg:block">
                             {formatLastAccess(member.lastAccess)}
                           </span>
+                          {canManageStaff ? (
+                            <button
+                              type="button"
+                              onClick={() => openPhotoEditor(member)}
+                              className="focus-ring flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-brand-50 hover:text-brand-600"
+                              aria-label={`Cambiar foto de ${member.name}`}
+                              title="Cambiar foto de perfil"
+                            >
+                              <Camera className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                           {member.role === 'superadmin' || !editable ? (
-                            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-300" title="Solo el propietario puede editar esta cuenta">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-300" title="Solo el propietario puede editar la ficha completa de esta cuenta">
                               <LockKeyhole className="h-3.5 w-3.5" />
                             </span>
                           ) : (
@@ -1978,7 +2021,7 @@ export function SettingsPage() {
                         </Badge>
                       </div>
                       <div className="mt-4 flex items-center gap-3 rounded-xl border border-warning-100 bg-warning-50/60 p-3">
-                        <Avatar name={displayUser.name} size="sm" />
+                        <Avatar name={displayUser.name} src={displayUser.photoUrl} size="sm" />
                         <div className="min-w-0 flex-1">
                           <p className="text-[11px] font-semibold text-ink">Cuenta raíz</p>
                           <p className="text-[9px] text-slate-400">No puede ser eliminada ni desactivada por un Administrador.</p>
@@ -2248,6 +2291,65 @@ export function SettingsPage() {
             </label>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(photoMember)}
+        onClose={() => {
+          setPhotoMember(null)
+          setPhotoDraft(null)
+        }}
+        title="Foto de perfil"
+        description={photoMember ? `${photoMember.name} · @${photoMember.username}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPhotoMember(null)
+                setPhotoDraft(null)
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={() => void saveUserPhoto()} loading={photoSaving} leftIcon={<Save className="h-4 w-4" />}>
+              Guardar foto
+            </Button>
+          </div>
+        }
+      >
+        {photoMember ? (
+          <div className="flex flex-col items-center gap-4 text-center">
+            {photoDraft ? (
+              <img src={photoDraft} alt={`Foto de ${photoMember.name}`} className="h-24 w-24 rounded-full object-cover ring-4 ring-brand-50" />
+            ) : (
+              <Avatar name={photoMember.name} size="xl" />
+            )}
+            <div className="flex flex-wrap justify-center gap-2">
+              <label className="focus-ring inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300">
+                <Camera className="h-3.5 w-3.5" />
+                Cambiar foto
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(event) =>
+                    processUserPhoto(event.target.files?.[0] ?? null, (dataUrl) => setPhotoDraft(dataUrl))
+                  }
+                />
+              </label>
+              {photoDraft ? (
+                <Button variant="ghost" size="sm" onClick={() => setPhotoDraft(null)} leftIcon={<Trash2 className="h-3.5 w-3.5" />}>
+                  Quitar
+                </Button>
+              ) : null}
+            </div>
+            <p className="max-w-[260px] text-[10px] leading-relaxed text-slate-400">
+              Se recorta a 256 px y se guarda en la base local. Solo cambia la foto; no concede acceso al resto de la ficha.
+            </p>
+          </div>
+        ) : null}
       </Modal>
 
       <Modal

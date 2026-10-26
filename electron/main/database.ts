@@ -79,10 +79,13 @@ export class Database {
     this.ensureColumn('work_orders', 'equipment_id', 'TEXT REFERENCES equipment(id)')
     this.ensureColumn('invoices', 'discount_type', "TEXT NOT NULL DEFAULT 'percent'")
     this.ensureColumn('invoices', 'discount_value', 'REAL NOT NULL DEFAULT 0')
+    this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
+    this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
+    this.ensureColumn('invoice_items', 'note', 'TEXT')
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4]) {
+    for (const version of [1, 2, 3, 4, 5]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }

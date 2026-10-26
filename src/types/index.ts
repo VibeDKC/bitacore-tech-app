@@ -55,6 +55,8 @@ export type ProductCategory =
   | 'Insumos'
   | 'Servicios'
 
+export type ProductRotation = 'rotativo' | 'no_rotativo' | 'prueba'
+
 export interface Product {
   id: string
   name: string
@@ -69,6 +71,8 @@ export interface Product {
   price: number
   warrantyDays: number
   serials: string[]
+  alertEnabled: boolean
+  rotation: ProductRotation
   icon: LucideIcon
   iconKey?: string
   tone: string
@@ -329,7 +333,7 @@ export type PaymentMethod = 'Efectivo' | 'Transferencia' | 'Tarjeta' | 'Mixto'
 export interface Invoice {
   id: string
   number: string
-  type?: 'venta' | 'orden'
+  type?: 'venta' | 'ot'
   customerId?: string
   customerName: string
   orderId?: string | null
@@ -349,7 +353,11 @@ export interface Invoice {
     quantity: number
     unitPrice: number
     lineTotal: number
+    note?: string | null
+    itemType?: 'producto' | 'servicio'
   }>
+  received?: number
+  change?: number
   notes?: string | null
   createdAt?: string
 }
@@ -428,6 +436,7 @@ export interface TopProduct {
 export interface CartLine {
   product: Product
   quantity: number
+  note?: string
 }
 
 export interface DashboardStat {
@@ -498,6 +507,7 @@ export interface AuthUser {
   name: string
   email: string
   accountRole: Role
+  photoUrl?: string | null
 }
 
 export interface AuthSession {
@@ -676,5 +686,12 @@ export interface SaleReceipt {
   received: number
   change: number
   customerName: string
-  lines: Array<{ productId: string; name: string; quantity: number; price: number; lineTotal: number }>
+  lines: Array<{
+    productId: string
+    name: string
+    quantity: number
+    price: number
+    lineTotal: number
+    note?: string | null
+  }>
 }

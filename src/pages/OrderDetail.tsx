@@ -661,7 +661,7 @@ export function OrderDetailPage() {
                     : 'No registrado'
                 ],
                 ['Presupuesto estimado', intake?.estimate ? formatCurrency(intake.estimate) : 'No definido'],
-                ['Términos legales', intake ? `${intake.legal.version} · abandono ${intake.legal.abandonmentDays} días` : 'No registrado']
+                ['Términos legales', intake ? `Aceptados · abandono ${intake.legal.abandonmentDays} días` : 'No registrado']
               ].map(([label, value]) => (
                 <div key={label}>
                   <dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</dt>
@@ -687,7 +687,7 @@ export function OrderDetailPage() {
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
                   <div>
                     <p className="text-[10px] font-semibold text-brand-900">
-                      Términos aceptados · {intake.legal.version}
+                      Términos aceptados
                     </p>
                     <p className="mt-0.5 text-[9px] leading-relaxed text-brand-700/75">
                       Snapshot inmutable del {formatDateTime(intake.legal.acceptedAt)} · garantía {intake.legal.warrantyDays} días · abandono {intake.legal.abandonmentDays} días.
