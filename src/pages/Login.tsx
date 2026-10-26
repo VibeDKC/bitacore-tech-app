@@ -42,7 +42,7 @@ const features = [
 ]
 
 export function LoginPage() {
-  const { isAuthenticated, login } = useAuth()
+  const { isAuthenticated, login, setupRequired, setup } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -51,9 +51,66 @@ export function LoginPage() {
   const [remember, setRemember] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [setupForm, setSetupForm] = useState({
+    name: '',
+    businessName: 'BitacoreTech',
+    username: '',
+    email: '',
+    password: '',
+    confirm: '',
+    demo: false
+  })
+  const [setupError, setSetupError] = useState('')
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />
+  }
+
+  async function handleSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSetupError('')
+    const form = {
+      ...setupForm,
+      name: setupForm.name.trim(),
+      businessName: setupForm.businessName.trim(),
+      username: setupForm.username.trim().toLowerCase(),
+      email: setupForm.email.trim()
+    }
+    if (form.name.length < 3) {
+      setSetupError('Escribe el nombre del propietario.')
+      return
+    }
+    if (!/^[a-z0-9._-]+$/.test(form.username)) {
+      setSetupError('El usuario solo puede tener letras, números, punto, guion y guion bajo.')
+      return
+    }
+    if (form.password.length < 8) {
+      setSetupError('La contraseña debe tener al menos 8 caracteres.')
+      return
+    }
+    if (form.password !== setupForm.confirm) {
+      setSetupError('Las contraseñas no coinciden.')
+      return
+    }
+    setLoading(true)
+    try {
+      const session = await setup({
+        name: form.name,
+        businessName: form.businessName || 'BitacoreTech',
+        username: form.username,
+        email: form.email || undefined,
+        password: form.password,
+        demo: form.demo
+      })
+      toast.success('Taller configurado', {
+        description: `Bienvenido, ${session.user.name}.`
+      })
+      navigate('/', { replace: true })
+    } catch (setupFailure) {
+      setSetupError(setupFailure instanceof Error ? setupFailure.message : 'No fue posible configurar el taller.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -147,93 +204,207 @@ export function LoginPage() {
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Logo />
               <span className="rounded-full border border-line bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                v1.0
+                v1.3.0
               </span>
             </div>
 
             <div className="hidden items-center gap-2 lg:flex">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-slate-50 text-slate-500">
-                <LockKeyhole className="h-4 w-4" />
+                {setupRequired ? <Sparkles className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
               </span>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Acceso privado</p>
-                <p className="text-[11px] text-slate-500">Solo personal autorizado</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  {setupRequired ? 'Configuración inicial' : 'Acceso privado'}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {setupRequired ? 'Crea la cuenta del propietario' : 'Solo personal autorizado'}
+                </p>
               </div>
             </div>
 
-            <h2 className="mt-8 font-display text-[30px] font-bold tracking-[-0.03em] text-ink">Bienvenido de nuevo</h2>
-            <p className="mt-2 text-sm leading-relaxed text-slate-500">
-              Ingresa con tu cuenta de propietario para administrar el taller y el punto de venta.
-            </p>
+            {setupRequired ? (
+              <>
+                <h2 className="mt-8 font-display text-[30px] font-bold tracking-[-0.03em] text-ink">Configura tu taller</h2>
+                <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                  Crea la cuenta del propietario. Es la única cuenta con acceso total y no se crean credenciales por defecto.
+                </p>
 
-            <form onSubmit={handleSubmit} className="mt-7 space-y-4">
-              <label className="block">
-                <span className="field-label">Usuario</span>
-                <input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  className="field h-11"
-                  placeholder="superadmin"
-                  autoComplete="username"
-                  autoFocus
-                />
-              </label>
+                <form onSubmit={handleSetup} className="mt-7 space-y-4">
+                  <label className="block">
+                    <span className="field-label">Nombre del propietario</span>
+                    <input
+                      value={setupForm.name}
+                      onChange={(event) => setSetupForm({ ...setupForm, name: event.target.value })}
+                      className="field h-11"
+                      placeholder="Nombre y apellido"
+                      autoComplete="name"
+                      autoFocus
+                    />
+                  </label>
 
-              <label className="block">
-                <span className="field-label">Contraseña</span>
-                <div className="relative">
-                  <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    type={showPassword ? 'text' : 'password'}
-                    className="field h-11 pr-11"
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((value) => !value)}
-                    className="focus-ring absolute right-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </label>
+                  <label className="block">
+                    <span className="field-label">Nombre del taller o negocio</span>
+                    <input
+                      value={setupForm.businessName}
+                      onChange={(event) => setSetupForm({ ...setupForm, businessName: event.target.value })}
+                      className="field h-11"
+                      placeholder="BitacoreTech"
+                      autoComplete="organization"
+                    />
+                  </label>
 
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(event) => setRemember(event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                  />
-                  Mantener sesión en este equipo
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    toast('Recuperación de acceso', {
-                      description: 'Solicita al propietario o a un administrador que restablezca tu contraseña desde Configuración → Usuarios.'
-                    })
-                  }
-                  className="text-xs font-semibold text-brand-600 hover:text-brand-700"
-                >
-                  ¿Olvidaste tu clave?
-                </button>
-              </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="field-label">Usuario</span>
+                      <input
+                        value={setupForm.username}
+                        onChange={(event) => setSetupForm({ ...setupForm, username: event.target.value })}
+                        className="field h-11"
+                        placeholder="usuario"
+                        autoComplete="username"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Correo (opcional)</span>
+                      <input
+                        value={setupForm.email}
+                        onChange={(event) => setSetupForm({ ...setupForm, email: event.target.value })}
+                        className="field h-11"
+                        placeholder="correo@taller.co"
+                        type="email"
+                        autoComplete="email"
+                      />
+                    </label>
+                  </div>
 
-              {error ? (
-                <div className="rounded-xl border border-danger-100 bg-danger-50 px-3.5 py-2.5 text-xs font-medium text-danger-700">
-                  {error}
-                </div>
-              ) : null}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="field-label">Contraseña</span>
+                      <input
+                        value={setupForm.password}
+                        onChange={(event) => setSetupForm({ ...setupForm, password: event.target.value })}
+                        type={showPassword ? 'text' : 'password'}
+                        className="field h-11"
+                        placeholder="Mínimo 8 caracteres"
+                        autoComplete="new-password"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">Confirmar contraseña</span>
+                      <input
+                        value={setupForm.confirm}
+                        onChange={(event) => setSetupForm({ ...setupForm, confirm: event.target.value })}
+                        type={showPassword ? 'text' : 'password'}
+                        className="field h-11"
+                        placeholder="Repite la contraseña"
+                        autoComplete="new-password"
+                      />
+                    </label>
+                  </div>
 
-              <Button type="submit" size="lg" className="w-full" loading={loading} rightIcon={<ArrowRight className="h-4 w-4" />}>
-                Ingresar al taller
-              </Button>
-            </form>
+                  <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-slate-50/70 p-3 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={setupForm.demo}
+                      onChange={(event) => setSetupForm({ ...setupForm, demo: event.target.checked })}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                    />
+                    <span>
+                      Cargar datos de demostración
+                      <span className="mt-0.5 block text-[9px] leading-relaxed text-slate-400">
+                        Solo para pruebas: crea productos, clientes y OT ficticias. Las cuentas demo usan claves aleatorias.
+                      </span>
+                    </span>
+                  </label>
+
+                  {setupError ? (
+                    <div className="rounded-xl border border-danger-100 bg-danger-50 px-3.5 py-2.5 text-xs font-medium text-danger-700">
+                      {setupError}
+                    </div>
+                  ) : null}
+
+                  <Button type="submit" size="lg" className="w-full" loading={loading} rightIcon={<ArrowRight className="h-4 w-4" />}>
+                    Crear cuenta y entrar
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <>
+                <h2 className="mt-8 font-display text-[30px] font-bold tracking-[-0.03em] text-ink">Bienvenido de nuevo</h2>
+                <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                  Ingresa con tu cuenta para administrar el taller y el punto de venta.
+                </p>
+
+                <form onSubmit={handleSubmit} className="mt-7 space-y-4">
+                  <label className="block">
+                    <span className="field-label">Usuario</span>
+                    <input
+                      value={username}
+                      onChange={(event) => setUsername(event.target.value)}
+                      className="field h-11"
+                      placeholder="usuario"
+                      autoComplete="username"
+                      autoFocus
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="field-label">Contraseña</span>
+                    <div className="relative">
+                      <input
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        type={showPassword ? 'text' : 'password'}
+                        className="field h-11 pr-11"
+                        placeholder="••••••••"
+                        autoComplete="current-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((value) => !value)}
+                        className="focus-ring absolute right-2.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                        aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </label>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={remember}
+                        onChange={(event) => setRemember(event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                      />
+                      Mantener sesión en este equipo
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        toast('Recuperación de acceso', {
+                          description: 'Solicita al propietario o a un administrador que restablezca tu contraseña desde Configuración → Usuarios.'
+                        })
+                      }
+                      className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+                    >
+                      ¿Olvidaste tu clave?
+                    </button>
+                  </div>
+
+                  {error ? (
+                    <div className="rounded-xl border border-danger-100 bg-danger-50 px-3.5 py-2.5 text-xs font-medium text-danger-700">
+                      {error}
+                    </div>
+                  ) : null}
+
+                  <Button type="submit" size="lg" className="w-full" loading={loading} rightIcon={<ArrowRight className="h-4 w-4" />}>
+                    Ingresar al taller
+                  </Button>
+                </form>
+              </>
+            )}
 
             <div className="mt-6 rounded-2xl border border-line bg-slate-50/70 p-3.5">
               <div className="flex items-start gap-2.5">
@@ -243,7 +414,9 @@ export function LoginPage() {
                 <div>
                   <p className="text-[11px] font-semibold text-ink">Acceso protegido</p>
                   <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-                    Las contraseñas se guardan con hash scrypt y cada inicio de sesión queda registrado en la auditoría.
+                    {setupRequired
+                      ? 'La cuenta del propietario se guarda con hash scrypt y la configuración inicial queda registrada en la auditoría.'
+                      : 'Las contraseñas se guardan con hash scrypt y cada inicio de sesión queda registrado en la auditoría.'}
                   </p>
                 </div>
               </div>

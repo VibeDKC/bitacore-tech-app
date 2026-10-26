@@ -32,6 +32,7 @@ import type {
   SettingsData,
   StockMovement,
   Supplier,
+  TechnicianOption,
   WorkOrder
 } from '@/types'
 import type { AuthSession } from '@/types'
@@ -140,6 +141,20 @@ function hydrateProducts(products: ApiProduct[]): Product[] {
 
 export interface LoginResult extends AuthSession {}
 
+export interface SetupStatus {
+  setupRequired: boolean
+  hasUsers: boolean
+}
+
+export interface SetupInput {
+  name: string
+  username: string
+  password: string
+  email?: string
+  businessName?: string
+  demo?: boolean
+}
+
 export interface SessionInfo {
   user: AuthSession['user']
   displayUser: AuthSession['displayUser']
@@ -204,6 +219,12 @@ export interface NewOrderInput {
 
 export const api = {
   auth: {
+    status() {
+      return rpc<SetupStatus>('auth.status')
+    },
+    setup(input: SetupInput) {
+      return rpc<LoginResult>('auth.setup', input as unknown as Record<string, unknown>)
+    },
     login(username: string, password: string, remember = true) {
       return rpc<LoginResult>('auth.login', { username, password, remember })
     },
@@ -224,6 +245,9 @@ export const api = {
     async get() {
       const data = await rpc<Omit<DashboardData, 'products'> & { products: ApiProduct[] }>('dashboard.get')
       return { ...data, products: hydrateProducts(data.products) }
+    },
+    badges() {
+      return rpc<{ openOrders: number; lowStock: number }>('dashboard.badges')
     }
   },
   notifications: {
@@ -264,6 +288,9 @@ export const api = {
     }
   },
   orders: {
+    technicians() {
+      return rpc<TechnicianOption[]>('orders.technicians')
+    },
     list() {
       return rpc<WorkOrder[]>('orders.list')
     },
@@ -272,6 +299,9 @@ export const api = {
     },
     create(input: NewOrderInput) {
       return rpc<WorkOrder>('orders.create', input as unknown as Record<string, unknown>)
+    },
+    reassignTechnician(id: string, technicianId: string, reason: string) {
+      return rpc<WorkOrder>('orders.reassignTechnician', { id, technicianId, reason })
     },
     update(id: string, input: { diagnosis?: string; notes?: string; promisedAt?: string }) {
       return rpc<WorkOrder>('orders.update', { id, ...input })
@@ -346,6 +376,14 @@ export const api = {
     },
     create(input: Record<string, unknown>) {
       return rpc<Purchase>('purchases.create', input)
+    }
+  },
+  suppliers: {
+    create(input: { name: string; nit?: string; contact?: string; phone?: string; category?: string }) {
+      return rpc<Supplier>('suppliers.create', input as unknown as Record<string, unknown>)
+    },
+    update(id: string, input: { name?: string; nit?: string; contact?: string; phone?: string; category?: string; active?: boolean }) {
+      return rpc<Supplier>('suppliers.update', { id, ...input })
     }
   },
   reports: {

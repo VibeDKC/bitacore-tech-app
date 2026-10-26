@@ -8,6 +8,7 @@ import {
   FileText,
   MessageCircle,
   PackagePlus,
+  Pencil,
   Phone,
   Plus,
   ReceiptText,
@@ -31,6 +32,7 @@ import { Select } from '@/components/ui/Input'
 import { Drawer } from '@/components/ui/Drawer'
 import { Modal } from '@/components/ui/Modal'
 import { SegmentedTabs } from '@/components/ui/Tabs'
+import { PurchaseReceiptModal } from '@/components/purchases/PurchaseReceipt'
 import { cn } from '@/lib/utils'
 
 interface PurchaseLine {
@@ -68,6 +70,18 @@ export function PurchasesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [supplierOpen, setSupplierOpen] = useState(false)
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
+  const [supplierSaving, setSupplierSaving] = useState(false)
+  const [supplierFilter, setSupplierFilter] = useState<string | null>(null)
+  const [receiptTarget, setReceiptTarget] = useState<Purchase | null>(null)
+  const [supplierForm, setSupplierForm] = useState({
+    name: '',
+    nit: '',
+    contact: '',
+    phone: '',
+    category: 'Repuestos'
+  })
   const [form, setForm] = useState<PurchaseForm>({
     supplierId: '',
     number: '',
@@ -78,6 +92,11 @@ export function PurchasesPage() {
 
   const canCreate = can(role, 'createPurchase')
   const selected = purchases.find((purchase) => purchase.id === selectedId) ?? null
+  const visiblePurchases = useMemo(
+    () => (supplierFilter ? purchases.filter((purchase) => purchase.supplierId === supplierFilter) : purchases),
+    [purchases, supplierFilter]
+  )
+  const filterSupplier = suppliers.find((supplier) => supplier.id === supplierFilter) ?? null
   const stockProducts = products.filter((product) => !product.service)
 
   useEffect(() => {
@@ -121,6 +140,54 @@ export function PurchasesPage() {
       ...current,
       lines: current.lines.length > 1 ? current.lines.filter((_, lineIndex) => lineIndex !== index) : current.lines
     }))
+  }
+
+  function openNewSupplier() {
+    setEditingSupplier(null)
+    setSupplierForm({ name: '', nit: '', contact: '', phone: '', category: 'Repuestos' })
+    setSupplierOpen(true)
+  }
+
+  function openEditSupplier(supplier: Supplier) {
+    setEditingSupplier(supplier)
+    setSupplierForm({
+      name: supplier.name,
+      nit: supplier.nit === '—' ? '' : supplier.nit,
+      contact: supplier.contact === '—' ? '' : supplier.contact,
+      phone: supplier.phone === '—' ? '' : supplier.phone,
+      category: supplier.category
+    })
+    setSupplierOpen(true)
+  }
+
+  async function saveSupplier() {
+    if (supplierSaving) return
+    if (supplierForm.name.trim().length < 2) {
+      toast.error('Escribe el nombre del proveedor')
+      return
+    }
+    setSupplierSaving(true)
+    try {
+      if (editingSupplier) {
+        await api.suppliers.update(editingSupplier.id, supplierForm)
+        toast.success('Proveedor actualizado')
+      } else {
+        await api.suppliers.create(supplierForm)
+        toast.success('Proveedor creado')
+      }
+      setSupplierOpen(false)
+      await reload()
+    } catch (failure) {
+      toast.error('No se pudo guardar el proveedor', { description: errorMessage(failure) })
+    } finally {
+      setSupplierSaving(false)
+    }
+  }
+
+  function showSupplierHistory(supplier: Supplier) {
+    setSupplierFilter(supplier.id)
+    setTab('compras')
+    setSelectedId(null)
   }
 
   async function createPurchase() {
@@ -265,7 +332,7 @@ export function PurchasesPage() {
           value={tab}
           onChange={setTab}
           options={[
-            { value: 'compras', label: 'Facturas de compra', count: purchases.length },
+            { value: 'compras', label: 'Facturas de compra', count: visiblePurchases.length },
             { value: 'proveedores', label: 'Proveedores', count: suppliers.length }
           ]}
         />
@@ -274,6 +341,18 @@ export function PurchasesPage() {
           IVA 19% solo en compras · ventas sin IVA por ahora
         </div>
       </div>
+
+      {filterSupplier ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5">
+          <Badge variant="brand">Proveedor: {filterSupplier.name}</Badge>
+          <span className="text-[10px] text-brand-800/70">
+            {visiblePurchases.length} compra{visiblePurchases.length === 1 ? '' : 's'} en el historial.
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setSupplierFilter(null)}>
+            Quitar filtro
+          </Button>
+        </div>
+      ) : null}
 
       {tab === 'compras' ? (
         <div className="card overflow-hidden">
@@ -292,7 +371,7 @@ export function PurchasesPage() {
                 </tr>
               </thead>
               <tbody>
-                {purchases.map((purchase) => (
+                {visiblePurchases.map((purchase) => (
                   <tr
                     key={purchase.id}
                     onClick={() => setSelectedId(purchase.id)}
@@ -326,10 +405,12 @@ export function PurchasesPage() {
                     </td>
                   </tr>
                 ))}
-                {!purchases.length ? (
+                {!visiblePurchases.length ? (
                   <tr>
                     <td colSpan={8} className="px-6 py-10 text-center text-[11px] text-slate-400">
-                      No hay compras registradas todavía.
+                      {filterSupplier
+                        ? `No hay compras registradas para ${filterSupplier.name}.`
+                        : 'No hay compras registradas todavía.'}
                     </td>
                   </tr>
                 ) : null}
@@ -337,7 +418,10 @@ export function PurchasesPage() {
             </table>
           </div>
           <div className="flex flex-col items-start justify-between gap-2 border-t border-line px-5 py-3.5 text-[10px] text-slate-400 sm:flex-row sm:items-center lg:px-6">
-            <span>{purchases.length} facturas de compra registradas.</span>
+            <span>
+              {visiblePurchases.length} factura{visiblePurchases.length === 1 ? '' : 's'} de compra
+              {filterSupplier ? ` de ${filterSupplier.name}` : ' registradas'}.
+            </span>
             <span>El IVA se registra únicamente en las compras a proveedores.</span>
           </div>
         </div>
@@ -361,22 +445,27 @@ export function PurchasesPage() {
                       <Phone className="h-3 w-3 text-slate-300" /> {supplier.contact} · {supplier.phone}
                     </span>
                   </div>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <Button variant="secondary" size="sm" onClick={() => openWhatsApp(supplier)} leftIcon={<MessageCircle className="h-3.5 w-3.5" />}>
                       WhatsApp
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        setTab('compras')
-                        toast(`${supplier.name}`, {
-                          description: `${supplier.purchases} compras registradas en el historial.`
-                        })
-                      }}
+                      onClick={() => showSupplierHistory(supplier)}
                     >
                       Ver historial
                     </Button>
+                    {canCreate ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditSupplier(supplier)}
+                        leftIcon={<Pencil className="h-3.5 w-3.5" />}
+                      >
+                        Editar
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -389,14 +478,14 @@ export function PurchasesPage() {
               </span>
               <p className="mt-3 text-sm font-semibold text-ink">Proveedores activos</p>
               <p className="mt-1 max-w-sm text-xs text-slate-500">
-                Los proveedores existentes se administran desde la base local. Asócialos a cada compra para controlar el IVA.
+                Crea y edita proveedores para asociarlos a cada compra y controlar el IVA soportado.
               </p>
               <Button
                 variant="secondary"
                 size="sm"
                 className="mt-3"
                 leftIcon={<Plus className="h-3.5 w-3.5" />}
-                onClick={() => toast('Proveedores', { description: 'La creación de proveedores se habilitará en una próxima versión.' })}
+                onClick={openNewSupplier}
               >
                 Agregar proveedor
               </Button>
@@ -416,7 +505,7 @@ export function PurchasesPage() {
             <Button variant="secondary" onClick={() => setSelectedId(null)}>
               Cerrar
             </Button>
-            <Button onClick={() => toast('Comprobante de compra', { description: 'El comprobante se genera con la factura del proveedor.' })}>
+            <Button onClick={() => selected && setReceiptTarget(selected)}>
               Imprimir comprobante
             </Button>
           </div>
@@ -614,6 +703,78 @@ export function PurchasesPage() {
           </div>
         </div>
       </Modal>
+      <Modal
+        open={supplierOpen}
+        onClose={() => setSupplierOpen(false)}
+        title={editingSupplier ? 'Editar proveedor' : 'Nuevo proveedor'}
+        description="Datos de contacto y NIT para asociar compras y controlar el IVA."
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setSupplierOpen(false)} disabled={supplierSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void saveSupplier()} loading={supplierSaving}>
+              {editingSupplier ? 'Guardar cambios' : 'Crear proveedor'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="field-label">Nombre o razón social</span>
+            <input
+              value={supplierForm.name}
+              onChange={(event) => setSupplierForm({ ...supplierForm, name: event.target.value })}
+              className="field"
+              placeholder="Distribuidora Andina S.A.S."
+              autoFocus
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">NIT</span>
+            <input
+              value={supplierForm.nit}
+              onChange={(event) => setSupplierForm({ ...supplierForm, nit: event.target.value })}
+              className="field"
+              placeholder="900123456-1"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Categoría</span>
+            <input
+              value={supplierForm.category}
+              onChange={(event) => setSupplierForm({ ...supplierForm, category: event.target.value })}
+              className="field"
+              placeholder="Repuestos"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Contacto</span>
+            <input
+              value={supplierForm.contact}
+              onChange={(event) => setSupplierForm({ ...supplierForm, contact: event.target.value })}
+              className="field"
+              placeholder="Nombre del vendedor"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Teléfono</span>
+            <input
+              value={supplierForm.phone}
+              onChange={(event) => setSupplierForm({ ...supplierForm, phone: event.target.value })}
+              className="field"
+              placeholder="310 000 0000"
+            />
+          </label>
+        </div>
+      </Modal>
+
+      <PurchaseReceiptModal
+        purchase={receiptTarget}
+        open={Boolean(receiptTarget)}
+        onClose={() => setReceiptTarget(null)}
+      />
     </div>
   )
 }

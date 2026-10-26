@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { AuthSession, AuthUser, Role } from '@/types'
-import { api, getAuthToken, setAuthToken } from '@/lib/backend'
+import { api, getAuthToken, setAuthToken, type SetupInput } from '@/lib/backend'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -11,6 +11,8 @@ interface AuthContextValue {
   canPreviewRoles: boolean
   isAuthenticated: boolean
   restoring: boolean
+  setupRequired: boolean
+  setup: (input: SetupInput) => Promise<AuthSession>
   login: (username: string, password: string, remember?: boolean) => Promise<AuthSession>
   logout: () => Promise<void>
   setPreviewRole: (role: Role) => Promise<void>
@@ -29,10 +31,23 @@ const guestUser: AuthUser = {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [restoring, setRestoring] = useState(true)
+  const [setupRequired, setSetupRequired] = useState(false)
 
   useEffect(() => {
     let active = true
     async function restore() {
+      try {
+        const status = await api.auth.status()
+        if (!active) return
+        if (status.setupRequired) {
+          setAuthToken(null)
+          setSetupRequired(true)
+          setRestoring(false)
+          return
+        }
+      } catch {
+        // Si el estado falla, se intenta restaurar la sesión normal.
+      }
       if (!getAuthToken()) {
         setRestoring(false)
         return
@@ -63,10 +78,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const setup = useCallback(async (input: SetupInput) => {
+    const result = await api.auth.setup(input)
+    setAuthToken(result.token, false)
+    setSession(result)
+    setSetupRequired(false)
+    return result
+  }, [])
+
   const login = useCallback(async (username: string, password: string, remember = true) => {
     const result = await api.auth.login(username, password, remember)
     setAuthToken(result.token, remember)
     setSession(result)
+    setSetupRequired(false)
     return result
   }, [])
 
@@ -112,11 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canPreviewRoles: Boolean(session?.canPreviewRoles),
       isAuthenticated: Boolean(session),
       restoring,
+      setupRequired,
+      setup,
       login,
       logout,
       setPreviewRole
     }
-  }, [session, restoring, login, logout, setPreviewRole])
+  }, [session, restoring, setupRequired, setup, login, logout, setPreviewRole])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

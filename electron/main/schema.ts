@@ -192,6 +192,21 @@ CREATE TABLE IF NOT EXISTS work_order_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS work_order_assignments (
+  id TEXT PRIMARY KEY,
+  work_order_id TEXT NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  from_user_id TEXT,
+  from_name TEXT,
+  to_user_id TEXT NOT NULL,
+  to_name TEXT NOT NULL,
+  reason TEXT,
+  assigned_by TEXT NOT NULL,
+  assigned_by_name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_order_assignments_order ON work_order_assignments(work_order_id);
+
 CREATE TABLE IF NOT EXISTS work_order_evidence (
   id TEXT PRIMARY KEY,
   work_order_id TEXT NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,

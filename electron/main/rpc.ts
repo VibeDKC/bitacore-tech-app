@@ -43,6 +43,7 @@ import {
   type BackendCapability
 } from './permissions'
 import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './security'
+import { runDemoSeed, type SeedOwner } from './seed'
 
 type Payload = Record<string, any>
 
@@ -287,6 +288,12 @@ function getOrderOrFail(db: Database, id: string) {
   return row
 }
 
+function technicianOptions(db: Database) {
+  return db.all<{ id: string; name: string }>(
+    "SELECT id, name FROM users WHERE active = 1 AND role IN ('tecnico', 'admin') ORDER BY role = 'tecnico' DESC, name ASC"
+  )
+}
+
 function getEvidenceOrFail(db: Database, id: string) {
   const row = db.get<any>(
     `SELECT e.*, w.number AS order_number
@@ -447,17 +454,31 @@ function supplierDto(db: Database, row: any) {
 }
 
 function purchaseDto(db: Database, row: any) {
-  const supplier = db.get<{ name: string }>('SELECT name FROM suppliers WHERE id = ?', row.supplier_id)
+  const supplier = db.get<{ name: string; nit: string }>('SELECT name, nit FROM suppliers WHERE id = ?', row.supplier_id)
+  const lines = db
+    .all<any>('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY rowid ASC', row.id)
+    .map((line) => ({
+      id: line.id,
+      productId: line.product_id ?? null,
+      description: line.description,
+      quantity: Number(line.quantity),
+      unitPrice: money(line.unit_price_cents),
+      lineTotal: money(Number(line.unit_price_cents) * Number(line.quantity))
+    }))
   return {
     id: row.id,
     number: row.number,
+    supplierId: row.supplier_id,
     supplier: supplier?.name ?? 'Proveedor',
+    supplierNit: supplier?.nit ?? '—',
     date: row.purchase_date,
     items: row.item_count,
     subtotal: money(row.subtotal_cents),
     iva: money(row.iva_cents),
     total: money(row.total_cents),
-    status: row.status
+    status: row.status,
+    notes: row.notes ?? null,
+    lines
   }
 }
 
@@ -828,13 +849,152 @@ function backupList(db: Database) {
   })
 }
 
+function issueSession(db: Database, user: any, remember: boolean) {
+  const sessionToken = newToken()
+  const tokenHash = sha256(sessionToken)
+  const security = db.getSetting<any>('security_config', DEFAULT_SETTINGS.security)
+  const hours = security.sessionHours ?? 12
+  const rememberDays = security.rememberDays ?? 30
+  const expires = new Date(Date.now() + (remember ? rememberDays : hours) * 3600_000).toISOString()
+  db.run(
+    'INSERT INTO sessions (token_hash, user_id, effective_role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
+    tokenHash,
+    user.id,
+    user.role,
+    new Date().toISOString(),
+    expires
+  )
+  db.run('UPDATE users SET last_login_at = ? WHERE id = ?', new Date().toISOString(), user.id)
+  return { token: sessionToken, expires }
+}
+
+function sessionPayload(user: any, token: string, expires: string) {
+  const profile = {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    email: user.email,
+    accountRole: user.role
+  }
+  return {
+    token,
+    user: profile,
+    displayUser: profile,
+    role: user.role,
+    actualRole: user.role,
+    canPreviewRoles: user.role === 'superadmin',
+    expiresAt: expires,
+    roleLabel: roleLabels[user.role]
+  }
+}
+
 export async function handleRpc(command: string, payload: Payload, token: string | undefined, runtime: Runtime): Promise<any> {
   if (command === 'app.info') {
     return { version: runtime.version, platform: process.platform, currency: 'COP', locale: 'es-CO' }
   }
 
+  if (command === 'auth.status') {
+    const db = currentSession()
+    const users = db.count('users')
+    return { setupRequired: users === 0, hasUsers: users > 0 }
+  }
+
+  if (command === 'auth.setup') {
+    const db = currentSession()
+    if (db.count('users') > 0) fail('La aplicación ya está configurada.', 'ALREADY_SETUP')
+    const name = text(payload?.name, 'Nombre del propietario', 3, 160)
+    const username = text(payload?.username, 'Usuario', 3, 60).toLowerCase()
+    if (!/^[a-z0-9._-]+$/.test(username)) {
+      fail('El usuario solo puede tener letras, números, punto, guion y guion bajo.')
+    }
+    const password = text(payload?.password, 'Contraseña', 8, 200)
+    const email = typeof payload?.email === 'string' && payload.email.trim()
+      ? payload.email.trim().slice(0, 200)
+      : '—'
+    const businessName = typeof payload?.businessName === 'string' && payload.businessName.trim()
+      ? payload.businessName.trim().slice(0, 160)
+      : DEFAULT_LEGAL.businessName
+    const demo = Boolean(payload?.demo)
+    const owner: SeedOwner = { id: 'u1', username, name, email, password }
+
+    db.tx(() => {
+      if (demo) runDemoSeed(db, owner)
+      if (db.count('users') === 0) {
+        db.run(
+          `INSERT INTO users (id, username, name, email, role, password_hash, active, is_protected, created_at, created_by)
+           VALUES (?, ?, ?, ?, 'superadmin', ?, 1, 1, ?, NULL)`,
+          owner.id,
+          owner.username,
+          owner.name,
+          owner.email,
+          hashPassword(owner.password),
+          new Date().toISOString()
+        )
+      } else {
+        // El seed demo ya creó u1; se asegura que use las credenciales elegidas.
+        db.run(
+          `UPDATE users
+           SET username = ?, name = ?, email = ?, password_hash = ?, role = 'superadmin', active = 1, is_protected = 1
+           WHERE id = ?`,
+          owner.username,
+          owner.name,
+          owner.email,
+          hashPassword(owner.password),
+          owner.id
+        )
+      }
+
+      const legal = db.getSetting<any>('legal_config', DEFAULT_LEGAL)
+      const updatedAt = new Date().toISOString()
+      const nextLegal = { ...legal, businessName, updatedAt }
+      db.setSetting('legal_config', nextLegal)
+      db.run(
+        'INSERT OR REPLACE INTO legal_versions (id, version, config_json, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
+        'legal_setup',
+        nextLegal.version,
+        JSON.stringify(nextLegal),
+        owner.id,
+        updatedAt
+      )
+
+      db.appendAudit({
+        userId: owner.id,
+        userName: owner.name,
+        role: 'Propietario',
+        action: 'Configuración inicial',
+        entity: 'Sistema',
+        detail: `Propietario ${owner.username} creado. Negocio: ${businessName}.${demo ? ' Datos de demostración cargados.' : ''}`
+      })
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('setup_completed', '1')")
+    })
+
+    const created = db.get<any>('SELECT * FROM users WHERE id = ?', owner.id)
+    if (!created) fail('No se pudo crear la cuenta del propietario.', 'INTERNAL_ERROR')
+    const issued = issueSession(db, created, false)
+    const sessionLike = {
+      token: issued.token,
+      tokenHash: sha256(issued.token),
+      userId: created.id,
+      userName: created.name,
+      username: created.username,
+      email: created.email ?? '',
+      actualRole: 'superadmin',
+      role: 'superadmin',
+      expiresAt: issued.expires
+    } as Session
+    try {
+      await createBackup(db, runtime, sessionLike)
+    } catch (error) {
+      console.error('[BitacoreTech] No se pudo crear el respaldo inicial', error)
+    }
+    return sessionPayload(created, issued.token, issued.expires)
+  }
+
   if (command === 'auth.login') {
     const db = currentSession()
+    if (db.count('users') === 0) {
+      fail('La aplicación aún no está configurada. Crea la cuenta del propietario.', 'SETUP_REQUIRED')
+    }
     const username = text(payload?.username, 'Usuario', 3, 80).toLowerCase()
     const password = typeof payload?.password === 'string' ? payload.password : ''
     const remember = Boolean(payload?.remember)
@@ -867,21 +1027,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
     }
 
     loginAttempts.delete(username)
-    const sessionToken = newToken()
-    const tokenHash = sha256(sessionToken)
-    const security = db.getSetting<any>('security_config', DEFAULT_SETTINGS.security)
-    const hours = security.sessionHours ?? 12
-    const rememberDays = security.rememberDays ?? 30
-    const expires = new Date(Date.now() + (remember ? rememberDays : hours) * 3600_000).toISOString()
-    db.run(
-      'INSERT INTO sessions (token_hash, user_id, effective_role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
-      tokenHash,
-      user.id,
-      user.role,
-      new Date().toISOString(),
-      expires
-    )
-    db.run('UPDATE users SET last_login_at = ? WHERE id = ?', new Date().toISOString(), user.id)
+    const issued = issueSession(db, user, remember)
     db.appendAudit({
       userId: user.id,
       userName: user.name,
@@ -890,23 +1036,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       entity: 'Sesión',
       detail: `Acceso correcto para ${user.username}.`
     })
-    const profile = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      email: user.email,
-      accountRole: user.role
-    }
-    return {
-      token: sessionToken,
-      user: profile,
-      displayUser: user.role === 'superadmin' ? profile : profile,
-      role: user.role,
-      actualRole: user.role,
-      canPreviewRoles: user.role === 'superadmin',
-      expiresAt: expires,
-      roleLabel: roleLabels[user.role]
-    }
+    return sessionPayload(user, issued.token, issued.expires)
   }
 
   if (command === 'auth.session') {
@@ -950,6 +1080,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
   }
 
   switch (command) {
+    case 'dashboard.badges': {
+      requireModuleAccess(session, 'dashboard')
+      const open = db.get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM work_orders WHERE status NOT IN ('entregado','no_reparado')"
+      )
+      const low = db.get<{ count: number }>(
+        'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND stock <= min_stock'
+      )
+      return {
+        openOrders: Number(open?.count ?? 0),
+        lowStock: Number(low?.count ?? 0)
+      }
+    }
+
     case 'dashboard.get': {
       requireModuleAccess(session, 'dashboard')
       const products = db
@@ -976,6 +1120,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const report = reportData(db, session, '30d')
       const open = orders.filter((order: any) => !['entregado', 'no_reparado'].includes(order.status))
+      const cash = currentCashSession(db)
       return {
         stats: {
           salesToday: money(todayInvoices.reduce((sum, invoice) => sum + Number(invoice.total_cents), 0)),
@@ -984,11 +1129,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
           diagnosticOrders: orders.filter((order: any) => order.status === 'diagnostico').length,
           readyOrders: orders.filter((order: any) => order.status === 'listo').length,
           lowStock: stockSummary.low + stockSummary.out,
-          cashExpected: cashSessionDto(db, currentCashSession(db) ?? {})?.expected ?? 0
+          cashExpected: cash ? cashSessionDto(db, cash).expected : 0
         },
         products,
         orders,
-        cashSession: currentCashSession(db) ? cashSessionDto(db, currentCashSession(db)) : null,
+        cashSession: cash ? cashSessionDto(db, cash) : null,
         stockSummary,
         chartData: report.chartData,
         technicianStats: report.technicianStats,
@@ -1167,6 +1312,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
         )
       })
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', productId), true)
+    }
+
+    case 'orders.technicians': {
+      requireModuleAccess(session, 'orders')
+      return technicianOptions(db)
     }
 
     case 'orders.list': {
@@ -1397,12 +1547,24 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const reportedIssue = text(payload?.reportedIssue, 'Falla reportada', 4, 3000)
       const nowIso = new Date().toISOString()
       const technicianName = typeof payload?.technician === 'string' ? payload.technician : ''
-      const technician =
-        (typeof payload?.technicianId === 'string' && payload.technicianId
-          ? db.get<any>('SELECT * FROM users WHERE id = ? AND active = 1', payload.technicianId)
-          : null) ??
-        db.get<any>('SELECT * FROM users WHERE name = ? AND active = 1', technicianName) ??
-        db.get<any>("SELECT * FROM users WHERE role IN ('tecnico','admin') AND active = 1 ORDER BY role = 'tecnico' DESC LIMIT 1")
+      const requestedTechnicianId = typeof payload?.technicianId === 'string' ? payload.technicianId : ''
+      let technician: any = null
+      if (requestedTechnicianId) {
+        technician = db.get<any>(
+          "SELECT * FROM users WHERE id = ? AND active = 1 AND role IN ('tecnico', 'admin')",
+          requestedTechnicianId
+        )
+        if (!technician) fail('El técnico seleccionado no está activo.')
+      } else if (technicianName) {
+        technician = db.get<any>(
+          "SELECT * FROM users WHERE name = ? AND active = 1 AND role IN ('tecnico', 'admin')",
+          technicianName
+        )
+        if (!technician) fail('El técnico seleccionado no está activo.')
+      }
+      if (!technician && technicianOptions(db).length > 0) {
+        fail('Selecciona un técnico para asignar la orden de trabajo.')
+      }
       const id = `wo_${sha256(`${customerId}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
       const number = db.orderNumber()
       const intake = {
@@ -1451,7 +1613,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           accessories,
           physicalCondition,
           reportedIssue,
-          technician?.id ?? session.userId,
+          technician?.id ?? null,
           nowIso,
           promisedAt,
           typeof payload?.notes === 'string' ? payload.notes.slice(0, 3000) : null,
@@ -1473,6 +1635,31 @@ export async function handleRpc(command: string, payload: Payload, token: string
           displayUser(session).name,
           nowIso
         )
+        if (technician) {
+          db.run(
+            `INSERT INTO work_order_assignments
+              (id, work_order_id, from_user_id, from_name, to_user_id, to_name, reason, assigned_by, assigned_by_name, created_at)
+             VALUES (?, ?, NULL, NULL, ?, ?, 'Asignación inicial', ?, ?, ?)`,
+            `asg_${sha256(`${id}|${technician.id}|${nowIso}`).slice(0, 20)}`,
+            id,
+            technician.id,
+            technician.name,
+            session.userId,
+            displayUser(session).name,
+            nowIso
+          )
+          db.run(
+            `INSERT INTO work_order_events
+              (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
+             VALUES (?, ?, 'recibido', 'Asignación de técnico', ?, ?, ?, 'done', ?)`,
+            `evt_${Date.now()}_tech`,
+            id,
+            `OT asignada a ${technician.name}.`,
+            session.userId,
+            displayUser(session).name,
+            nowIso
+          )
+        }
         if (preparedEvidence.length) insertEvidenceRows(db, preparedEvidence)
         audit(
           db,
@@ -1488,6 +1675,66 @@ export async function handleRpc(command: string, payload: Payload, token: string
         throw error
       }
       return orderDto(db, getOrderOrFail(db, id))
+    }
+
+    case 'orders.reassignTechnician': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'assignTechnician')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      if (['entregado', 'no_reparado'].includes(row.status)) {
+        fail('La OT ya está cerrada; no se puede reasignar.')
+      }
+      const technicianId = text(payload?.technicianId, 'Técnico', 1, 80)
+      const technician = db.get<any>(
+        "SELECT * FROM users WHERE id = ? AND active = 1 AND role IN ('tecnico', 'admin')",
+        technicianId
+      )
+      if (!technician) fail('Selecciona un técnico activo.')
+      if (row.technician_id === technician.id) fail('La OT ya está asignada a ese técnico.')
+      const reason = text(payload?.reason, 'Motivo de la reasignación', 3, 500)
+      const from = row.technician_id
+        ? db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', row.technician_id)
+        : null
+      const now = new Date().toISOString()
+      db.tx(() => {
+        db.run('UPDATE work_orders SET technician_id = ?, updated_at = ? WHERE id = ?', technician.id, now, row.id)
+        db.run(
+          `INSERT INTO work_order_assignments
+            (id, work_order_id, from_user_id, from_name, to_user_id, to_name, reason, assigned_by, assigned_by_name, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `asg_${sha256(`${row.id}|${technician.id}|${Date.now()}`).slice(0, 20)}`,
+          row.id,
+          row.technician_id ?? null,
+          from?.name ?? null,
+          technician.id,
+          technician.name,
+          reason,
+          session.userId,
+          displayUser(session).name,
+          now
+        )
+        db.run(
+          `INSERT INTO work_order_events
+            (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
+           VALUES (?, ?, ?, 'Reasignación de técnico', ?, ?, ?, 'done', ?)`,
+          `evt_${Date.now()}`,
+          row.id,
+          row.status,
+          `De ${from?.name ?? 'Sin asignar'} a ${technician.name}. Motivo: ${reason}`,
+          session.userId,
+          displayUser(session).name,
+          now
+        )
+        audit(
+          db,
+          session,
+          'Reasignación de técnico',
+          'Orden de trabajo',
+          `${row.number} · ${from?.name ?? 'Sin asignar'} → ${technician.name} · ${reason}`,
+          row.id
+        )
+      })
+      return orderDto(db, getOrderOrFail(db, row.id))
     }
 
     case 'orders.update': {
@@ -2075,6 +2322,78 @@ export async function handleRpc(command: string, payload: Payload, token: string
     case 'suppliers.list': {
       requireModuleAccess(session, 'purchases')
       return db.all<any>('SELECT * FROM suppliers WHERE active = 1 ORDER BY name ASC').map((row) => supplierDto(db, row))
+    }
+
+    case 'suppliers.create': {
+      requireModuleAccess(session, 'purchases')
+      requireCap(session, 'createPurchase')
+      const name = text(payload?.name, 'Nombre del proveedor', 2, 160)
+      if (db.get<any>('SELECT id FROM suppliers WHERE name = ? COLLATE NOCASE', name)) {
+        fail('Ya existe un proveedor con ese nombre.', 'DUPLICATE')
+      }
+      const nit = typeof payload?.nit === 'string' && payload.nit.trim() ? payload.nit.trim().slice(0, 40) : '—'
+      const contact = typeof payload?.contact === 'string' && payload.contact.trim() ? payload.contact.trim().slice(0, 120) : '—'
+      const phone = typeof payload?.phone === 'string' && payload.phone.trim() ? payload.phone.trim().slice(0, 80) : '—'
+      const category = typeof payload?.category === 'string' && payload.category.trim() ? payload.category.trim().slice(0, 80) : 'Repuestos'
+      const id = `sup_${sha256(`${name}|${Date.now()}`).slice(0, 20)}`
+      db.tx(() => {
+        db.run(
+          `INSERT INTO suppliers (id, name, nit, contact, phone, category, active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+          id,
+          name,
+          nit,
+          contact,
+          phone,
+          category,
+          new Date().toISOString()
+        )
+        audit(db, session, 'Creación de proveedor', 'Proveedor', `${name} · NIT ${nit}`, id)
+      })
+      return supplierDto(db, db.get<any>('SELECT * FROM suppliers WHERE id = ?', id))
+    }
+
+    case 'suppliers.update': {
+      requireModuleAccess(session, 'purchases')
+      requireCap(session, 'createPurchase')
+      const id = text(payload?.id, 'Proveedor', 1, 80)
+      const row = db.get<any>('SELECT * FROM suppliers WHERE id = ?', id)
+      if (!row) fail('Proveedor no encontrado', 'NOT_FOUND')
+      const updates: string[] = []
+      const params: any[] = []
+      if (typeof payload?.name === 'string') {
+        const name = text(payload.name, 'Nombre del proveedor', 2, 160)
+        const duplicate = db.get<any>('SELECT id FROM suppliers WHERE name = ? COLLATE NOCASE AND id <> ?', name, id)
+        if (duplicate) fail('Ya existe un proveedor con ese nombre.', 'DUPLICATE')
+        updates.push('name = ?')
+        params.push(name)
+      }
+      if (payload?.nit !== undefined) {
+        updates.push('nit = ?')
+        params.push(typeof payload.nit === 'string' && payload.nit.trim() ? payload.nit.trim().slice(0, 40) : '—')
+      }
+      if (payload?.contact !== undefined) {
+        updates.push('contact = ?')
+        params.push(typeof payload.contact === 'string' && payload.contact.trim() ? payload.contact.trim().slice(0, 120) : '—')
+      }
+      if (payload?.phone !== undefined) {
+        updates.push('phone = ?')
+        params.push(typeof payload.phone === 'string' && payload.phone.trim() ? payload.phone.trim().slice(0, 80) : '—')
+      }
+      if (payload?.category !== undefined) {
+        updates.push('category = ?')
+        params.push(typeof payload.category === 'string' && payload.category.trim() ? payload.category.trim().slice(0, 80) : 'Repuestos')
+      }
+      if (payload?.active !== undefined) {
+        updates.push('active = ?')
+        params.push(payload.active ? 1 : 0)
+      }
+      if (!updates.length) fail('No hay cambios para guardar')
+      db.tx(() => {
+        db.run(`UPDATE suppliers SET ${updates.join(', ')} WHERE id = ?`, ...params, id)
+        audit(db, session, 'Actualización de proveedor', 'Proveedor', `${row.name} actualizado`, id)
+      })
+      return supplierDto(db, db.get<any>('SELECT * FROM suppliers WHERE id = ?', id))
     }
 
     case 'purchases.create': {

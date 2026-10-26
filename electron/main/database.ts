@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { DEFAULT_LEGAL } from './defaults'
 import { sha256, newId } from './security'
 import { SCHEMA_V1 } from './schema'
-import { runSeed } from './seed'
+import { ensureReferenceData } from './seed'
 
 export const APP_DATA_FOLDER = 'BitacoreTech'
 export const LEGACY_APP_DATA_FOLDER = 'octestr-taller'
@@ -45,7 +45,7 @@ export class Database {
     this.db = new DatabaseSync(path)
     this.configure()
     this.migrate()
-    runSeed(this)
+    ensureReferenceData(this)
   }
 
   private configure() {
@@ -65,6 +65,7 @@ export class Database {
     const now = new Date().toISOString()
     this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', 1, now)
     this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', 2, now)
+    this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', 3, now)
   }
 
   private ensureColumn(table: string, column: string, definition: string) {
@@ -86,6 +87,7 @@ export class Database {
     this.db = new DatabaseSync(this.path)
     this.configure()
     this.migrate()
+    ensureReferenceData(this)
   }
 
   get<T = Row>(sql: string, ...params: Bound[]): T | undefined {

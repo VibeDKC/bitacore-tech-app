@@ -21,6 +21,7 @@ import {
   Phone,
   Plus,
   Printer,
+  RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -30,7 +31,7 @@ import {
   Wrench
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { LegalConfig, LockType, PaymentMethod, PowerState, Product, WorkOrderStatus } from '@/types'
+import type { LegalConfig, LockType, PaymentMethod, PowerState, Product, TechnicianOption, WorkOrderStatus } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { canCancelWorkOrder, nextWorkOrderStatus, workOrderStatusConfig, workOrderStatusOrder } from '@/lib/status'
@@ -120,6 +121,11 @@ export function OrderDetailPage() {
   const [cancelModal, setCancelModal] = useState(false)
   const [documentOpen, setDocumentOpen] = useState(false)
   const [evidenceModal, setEvidenceModal] = useState(false)
+  const [techModal, setTechModal] = useState(false)
+  const [techOptions, setTechOptions] = useState<TechnicianOption[]>([])
+  const [techId, setTechId] = useState('')
+  const [techReason, setTechReason] = useState('')
+  const [techSaving, setTechSaving] = useState(false)
   const [evidenceDrafts, setEvidenceDrafts] = useState<EvidenceDraft[]>([])
   const [savingEvidence, setSavingEvidence] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Efectivo')
@@ -167,6 +173,8 @@ export function OrderDetailPage() {
   const canBill = status === 'listo' && can(role, 'settleOrder')
   const canDeposit = can(role, 'settleOrder') && !['entregado', 'no_reparado'].includes(status) && total > 0 && balance > 0
   const canAuthorizeNoCharge = can(role, 'authorizeNoCharge')
+  const canReassignTechnician =
+    can(role, 'assignTechnician') && !['entregado', 'no_reparado'].includes(status)
   const activeConditions = intake
     ? Object.entries(intake.conditions)
         .filter(([, active]) => active)
@@ -196,6 +204,44 @@ export function OrderDetailPage() {
   function applyOrder(updated: typeof order) {
     if (!updated) return
     setData((current) => (current ? { ...current, order: updated } : current))
+  }
+
+  async function openTechModal() {
+    if (!order) return
+    try {
+      const options = await api.orders.technicians()
+      setTechOptions(options)
+      setTechId(options.find((item) => item.id !== order.technicianId)?.id ?? '')
+      setTechReason('')
+      setTechModal(true)
+    } catch (failure) {
+      toast.error('No se pudieron cargar los técnicos', { description: errorMessage(failure) })
+    }
+  }
+
+  async function reassignTechnician() {
+    if (!order || techSaving) return
+    if (!techId) {
+      toast.error('Selecciona el técnico que recibirá la OT')
+      return
+    }
+    if (techReason.trim().length < 3) {
+      toast.error('Escribe el motivo de la reasignación')
+      return
+    }
+    setTechSaving(true)
+    try {
+      const updated = await api.orders.reassignTechnician(order.id, techId, techReason.trim())
+      applyOrder(updated)
+      setTechModal(false)
+      toast.success('Técnico reasignado', {
+        description: `${order.number} quedó asignada a ${updated.technician}.`
+      })
+    } catch (failure) {
+      toast.error('No se pudo reasignar la OT', { description: errorMessage(failure) })
+    } finally {
+      setTechSaving(false)
+    }
   }
 
   function openSettlement() {
@@ -503,6 +549,15 @@ export function OrderDetailPage() {
                 </span>
                 <span className="flex items-center gap-1">
                   <UserRound className="h-3 w-3" /> {order.technician}
+                  {canReassignTechnician ? (
+                    <button
+                      type="button"
+                      onClick={() => void openTechModal()}
+                      className="focus-ring ml-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-semibold text-brand-600 transition hover:bg-brand-50"
+                    >
+                      <RefreshCw className="h-2.5 w-2.5" /> Reasignar
+                    </button>
+                  ) : null}
                 </span>
                 <span className="flex items-center gap-1">
                   <Package className="h-3 w-3" /> Serial {order.serial}
@@ -643,6 +698,57 @@ export function OrderDetailPage() {
                 ) : null}
               </div>
             ) : null}
+          </div>
+
+          <div className="card p-5 lg:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display text-[16px] font-bold text-ink">Trazabilidad de técnico</h2>
+                <p className="mt-0.5 text-[11px] text-slate-400">Asignación actual e historial de cambios.</p>
+              </div>
+              {canReassignTechnician ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void openTechModal()}
+                  leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+                >
+                  Reasignar
+                </Button>
+              ) : null}
+            </div>
+            <div className="mt-4 rounded-xl border border-line bg-slate-50/60 p-3.5">
+              <div className="flex items-center gap-3">
+                <Avatar name={order.technician} size="sm" />
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">Técnico actual</p>
+                  <p className="text-[12px] font-semibold text-ink">{order.technician}</p>
+                </div>
+              </div>
+              {(order.assignments?.length ?? 0) ? (
+                <div className="mt-3 space-y-2 border-t border-line pt-3">
+                  {order.assignments!.map((assignment) => (
+                    <div
+                      key={assignment.id}
+                      className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between"
+                    >
+                      <p className="text-[10px] text-slate-600">
+                        <span className="font-semibold">{assignment.fromName ?? 'Sin asignar'}</span> →{' '}
+                        <span className="font-semibold">{assignment.toName}</span>
+                        {assignment.reason ? <span className="text-slate-400"> · {assignment.reason}</span> : null}
+                      </p>
+                      <p className="text-[9px] text-slate-400">
+                        {formatDateTime(assignment.createdAt)} · {assignment.assignedByName}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 border-t border-line pt-3 text-[10px] text-slate-400">
+                  Sin historial de asignaciones.
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="card p-5 lg:p-6">
@@ -1392,6 +1498,52 @@ export function OrderDetailPage() {
           bare
           description="Documenta el estado después de la reparación o detalles adicionales que sustenten el trabajo realizado. Puedes cargar archivos aunque el equipo no tenga cámara."
         />
+      </Modal>
+
+      <Modal
+        open={techModal}
+        onClose={() => setTechModal(false)}
+        title="Reasignar técnico"
+        description={order ? `${order.number} · ${order.brand} ${order.model}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setTechModal(false)} disabled={techSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void reassignTechnician()} loading={techSaving} leftIcon={<RefreshCw className="h-4 w-4" />}>
+              Reasignar
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <label className="block">
+            <span className="field-label">Nuevo técnico</span>
+            <select value={techId} onChange={(event) => setTechId(event.target.value)} className="field">
+              <option value="">Selecciona un técnico</option>
+              {techOptions.map((technician) => (
+                <option key={technician.id} value={technician.id} disabled={technician.id === order?.technicianId}>
+                  {technician.name}
+                  {technician.id === order?.technicianId ? ' (actual)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">Motivo de la reasignación</span>
+            <textarea
+              value={techReason}
+              onChange={(event) => setTechReason(event.target.value)}
+              rows={3}
+              className="field resize-none"
+              placeholder="Ej. el técnico anterior quedó sin disponibilidad, el cliente pidió otro especialista…"
+            />
+          </label>
+          <div className="rounded-xl border border-warning-100 bg-warning-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-warning-800">
+            La asignación anterior y el motivo quedan en la auditoría y en la trazabilidad de la OT. No se permite reasignar una OT entregada o cerrada.
+          </div>
+        </div>
       </Modal>
 
       <DocumentPreviewModal

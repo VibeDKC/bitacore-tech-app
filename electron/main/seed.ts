@@ -1,30 +1,104 @@
 import seedJson from './seed-data.json'
 import type { Database } from './database'
 import { DEFAULT_LEGAL, DEFAULT_SETTINGS, STATUS_CONFIG } from './defaults'
-import { hashPassword, newId, sha256 } from './security'
+import { hashPassword, newToken, sha256 } from './security'
 
 const seed = seedJson as any
 const now = () => new Date().toISOString()
 const cents = (value: number) => Math.round(Number(value || 0) * 100)
 const iso = (value: unknown) => (typeof value === 'string' && value ? value : now())
 
-export function runSeed(db: Database) {
-  const seeded = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'seeded'")
-  if (seeded?.value === '1') return
-  db.tx(() => seedAll(db))
+export interface SeedOwner {
+  id: string
+  username: string
+  name: string
+  email: string
+  password: string
 }
 
-function seedAll(db: Database) {
+/**
+ * Datos mínimos que toda instalación necesita para abrir la aplicación:
+ * estados, configuración, versión legal inicial y secuencias. No crea
+ * usuarios ni datos de demostración. El propietario se crea en el primer
+ * arranque mediante auth.setup.
+ */
+export function ensureReferenceData(db: Database) {
+  const reference = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'reference_seeded'")
+  if (reference?.value === '1') return
+
+  // Una base creada por la versión anterior ya tiene todo el catálogo de
+  // referencia y usuarios. No se debe sobrescribir su configuración.
+  const seeded = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'seeded'")
+  if (seeded?.value === '1') {
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('reference_seeded', '1')")
+    return
+  }
+
+  db.tx(() => {
+    for (const status of STATUS_CONFIG) {
+      db.run(
+        `INSERT OR REPLACE INTO order_status_config
+          (status, label, short_label, description, tone, position, is_terminal, requires_payment, is_cancel)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status.status,
+        status.label,
+        status.shortLabel,
+        status.description,
+        status.tone,
+        status.position,
+        status.isTerminal,
+        status.requiresPayment,
+        status.isCancel
+      )
+    }
+
+    db.setSetting('legal_config', DEFAULT_LEGAL)
+    db.setSetting('print_config', DEFAULT_SETTINGS.print)
+    db.setSetting('ai_config', DEFAULT_SETTINGS.ai)
+    db.setSetting('security_config', DEFAULT_SETTINGS.security)
+    db.setSetting('business_config', DEFAULT_SETTINGS.business)
+    db.setSetting('charts_history', [])
+
+    db.run(
+      'INSERT OR IGNORE INTO legal_versions (id, version, config_json, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
+      'legal_v1',
+      DEFAULT_LEGAL.version,
+      JSON.stringify(DEFAULT_LEGAL),
+      'system',
+      DEFAULT_LEGAL.updatedAt
+    )
+
+    for (const key of ['order', 'invoice', 'payment', 'purchase', 'cash_session']) {
+      db.run('INSERT OR IGNORE INTO sequences (key, value) VALUES (?, 0)', key)
+    }
+
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('reference_seeded', '1')")
+  })
+}
+
+/**
+ * Datos ficticios para probar la aplicación. Solo se ejecuta cuando el
+ * propietario lo elige explícitamente en el primer arranque. Las cuentas
+ * demo reciben contraseñas aleatorias: nadie puede iniciar sesión con una
+ * credencial conocida.
+ */
+export function runDemoSeed(db: Database, owner: SeedOwner) {
+  const seeded = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'seeded'")
+  if (seeded?.value === '1') return
+  db.tx(() => seedAll(db, owner))
+}
+
+function seedAll(db: Database, owner: SeedOwner) {
   const createdAt = '2026-10-01T08:00:00'
 
   const users = [
     {
-      id: 'u1',
-      username: 'superadmin',
-      name: 'Propietario BitacoreTech',
-      email: 'propietario@bitacoretech.co',
+      id: owner.id,
+      username: owner.username,
+      name: owner.name,
+      email: owner.email,
       role: 'superadmin',
-      password: '3mm4hy3r',
+      password: owner.password,
       protected: 1,
       active: 1
     },
@@ -34,7 +108,7 @@ function seedAll(db: Database) {
       name: 'Andrea Salazar',
       email: 'andrea@bitacoretech.co',
       role: 'admin',
-      password: 'demo1234',
+      password: newToken(),
       protected: 0,
       active: 1
     },
@@ -44,7 +118,7 @@ function seedAll(db: Database) {
       name: 'Camila Restrepo',
       email: 'camila@bitacoretech.co',
       role: 'cajero',
-      password: 'demo1234',
+      password: newToken(),
       protected: 0,
       active: 1
     },
@@ -54,7 +128,7 @@ function seedAll(db: Database) {
       name: 'Julián Vélez',
       email: 'julian@bitacoretech.co',
       role: 'tecnico',
-      password: 'demo1234',
+      password: newToken(),
       protected: 0,
       active: 1
     },
@@ -64,7 +138,7 @@ function seedAll(db: Database) {
       name: 'Santiago Mejía',
       email: 'santiago@bitacoretech.co',
       role: 'tecnico',
-      password: 'demo1234',
+      password: newToken(),
       protected: 0,
       active: 0
     }
@@ -434,7 +508,7 @@ function seedAll(db: Database) {
   db.setSetting('charts_history', seed.chartData ?? [])
 
   db.run(
-    'INSERT INTO legal_versions (id, version, config_json, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO legal_versions (id, version, config_json, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
     'legal_v1',
     DEFAULT_LEGAL.version,
     JSON.stringify(DEFAULT_LEGAL),

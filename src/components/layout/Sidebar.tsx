@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import {
   ChartNoAxesCombined,
   ChevronDown,
@@ -19,6 +20,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { ModuleKey, Role } from '@/types'
 import { canAccessModule, roleLabels, roleShortLabels } from '@/lib/permissions'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/backend'
 import { Avatar } from '@/components/ui/Avatar'
 import { Logo } from '@/components/ui/Logo'
 import { DropdownDivider, DropdownItem, DropdownLabel, DropdownMenu } from '@/components/ui/DropdownMenu'
@@ -35,8 +37,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   { key: 'dashboard', label: 'Dashboard', path: '/', icon: LayoutDashboard },
   { key: 'pos', label: 'Punto de venta', path: '/pos', icon: ShoppingCart },
-  { key: 'orders', label: 'Órdenes de trabajo', path: '/ordenes', icon: Wrench, badge: '8' },
-  { key: 'inventory', label: 'Inventario', path: '/inventario', icon: Package, badge: '2' },
+  { key: 'orders', label: 'Órdenes de trabajo', path: '/ordenes', icon: Wrench },
+  { key: 'inventory', label: 'Inventario', path: '/inventario', icon: Package },
   { key: 'customers', label: 'Clientes', path: '/clientes', icon: Users },
   { key: 'purchases', label: 'Compras', path: '/compras', icon: Truck },
   { key: 'cash', label: 'Caja', path: '/caja', icon: Wallet },
@@ -56,6 +58,21 @@ export function Sidebar({
 }) {
   const { displayUser, role, logout } = useAuth()
   const navigate = useNavigate()
+  const [badges, setBadges] = useState<{ openOrders: number; lowStock: number } | null>(null)
+  useEffect(() => {
+    let active = true
+    api.dashboard
+      .badges()
+      .then((data) => {
+        if (active) setBadges(data)
+      })
+      .catch(() => {
+        // Los contadores son informativos; no bloquean la navegación.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
   const items = navItems.filter((item) => canAccessModule(role, item.key))
   const canOpenSettings = canAccessModule(role, 'settings')
 
@@ -85,6 +102,7 @@ export function Sidebar({
       <nav className="no-scrollbar flex-1 space-y-1 overflow-y-auto px-3">
         {items.map((item) => {
           const Icon = item.icon
+          const badge = item.key === 'orders' ? badges?.openOrders : item.key === 'inventory' ? badges?.lowStock : undefined
           return (
             <NavLink
               key={item.key}
@@ -110,14 +128,14 @@ export function Sidebar({
                     strokeWidth={isActive ? 2.2 : 1.9}
                   />
                   <span className="flex-1 truncate">{item.label}</span>
-                  {item.badge ? (
+                  {badge ? (
                     <span
                       className={cn(
                         'rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular',
                         isActive ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-500'
                       )}
                     >
-                      {item.badge}
+                      {badge}
                     </span>
                   ) : null}
                 </>
@@ -164,7 +182,7 @@ export function Sidebar({
           </div>
         </div>
         <p className="mt-3 px-1 text-center text-[9px] font-medium uppercase tracking-[0.14em] text-slate-300">
-          BitacoreTech Taller & POS · v1.1
+          BitacoreTech Taller & POS · v1.3.0
         </p>
       </div>
     </aside>

@@ -810,7 +810,7 @@ export function SettingsPage() {
                   </div>
                   {canManageStaff ? (
                     <Button size="sm" onClick={() => setInviteOpen(true)} leftIcon={<UserPlus className="h-3.5 w-3.5" />}>
-                      Invitar usuario
+                      Añadir usuario
                     </Button>
                   ) : null}
                 </div>

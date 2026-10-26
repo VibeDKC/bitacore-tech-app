@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   ArrowUpRight,
   CalendarDays,
@@ -16,7 +17,7 @@ import {
   Wrench
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Customer } from '@/types'
+import type { Customer, Invoice } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { api, errorMessage, type CustomerDetail } from '@/lib/backend'
@@ -43,6 +44,7 @@ const emptyForm = {
 
 export function CustomersPage() {
   const { role } = useAuth()
+  const navigate = useNavigate()
   const { data, loading, error, reload, setData } = useApi(() => api.customers.list(), [])
   const items = data ?? []
   const [query, setQuery] = useState('')
@@ -50,6 +52,7 @@ export function CustomersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<CustomerDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [invoiceDetail, setInvoiceDetail] = useState<Invoice | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -437,7 +440,12 @@ export function CustomersPage() {
               {selectedInvoices.length ? (
                 <div className="space-y-1.5">
                   {selectedInvoices.map((invoice) => (
-                    <div key={invoice.id} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-2.5">
+                    <button
+                      key={invoice.id}
+                      type="button"
+                      onClick={() => setInvoiceDetail(invoice)}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-brand-200 hover:bg-brand-50/40"
+                    >
                       <div>
                         <p className="text-[11px] font-semibold text-ink">{invoice.number}</p>
                         <p className="mt-0.5 text-[9px] text-slate-400">{formatDate(invoice.date)} · {invoice.method}</p>
@@ -448,7 +456,7 @@ export function CustomersPage() {
                           {invoice.status === 'activa' ? 'Activa' : 'Anulada'}
                         </Badge>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -463,7 +471,15 @@ export function CustomersPage() {
               {selectedOrders.length ? (
                 <div className="space-y-1.5">
                   {selectedOrders.map((order) => (
-                    <div key={order.id} className="rounded-xl border border-line px-3 py-2.5">
+                    <button
+                      key={order.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(null)
+                        navigate(`/ordenes/${order.id}`)
+                      }}
+                      className="w-full rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-brand-200 hover:bg-brand-50/40"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[11px] font-semibold text-ink">{order.number}</p>
                         <WorkOrderStatusBadge status={order.status} />
@@ -471,7 +487,7 @@ export function CustomersPage() {
                       <p className="mt-1 text-[10px] text-slate-400">
                         {order.brand} {order.model} · {formatDate(order.createdAt)}
                       </p>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -537,6 +553,80 @@ export function CustomersPage() {
             <input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} className="field" placeholder="Dirección de contacto" />
           </label>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(invoiceDetail)}
+        onClose={() => setInvoiceDetail(null)}
+        title={invoiceDetail ? `Factura ${invoiceDetail.number}` : 'Factura'}
+        description={
+          invoiceDetail
+            ? `${invoiceDetail.customerName ?? selected?.name ?? 'Cliente'} · ${formatDate(invoiceDetail.date)}`
+            : undefined
+        }
+        size="md"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setInvoiceDetail(null)}>
+              Cerrar
+            </Button>
+          </div>
+        }
+      >
+        {invoiceDetail ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-slate-50/60 p-3.5">
+              <div>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">Total de la factura</p>
+                <p className="tabular mt-1 font-display text-xl font-bold text-ink">{formatCurrency(invoiceDetail.total)}</p>
+              </div>
+              <Badge variant={invoiceDetail.status === 'activa' ? 'success' : 'danger'}>
+                {invoiceDetail.status === 'activa' ? 'Activa' : 'Anulada'}
+              </Badge>
+            </div>
+
+            <div>
+              <p className="field-label">Detalle</p>
+              <div className="divide-y divide-line rounded-xl border border-line">
+                {invoiceDetail.lines?.length ? (
+                  invoiceDetail.lines.map((line) => (
+                    <div key={line.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                      <div>
+                        <p className="text-[11px] text-slate-700">{line.description}</p>
+                        <p className="text-[9px] text-slate-400">
+                          {line.quantity} × {formatCurrency(line.unitPrice)}
+                        </p>
+                      </div>
+                      <p className="tabular text-[11px] font-semibold text-ink">{formatCurrency(line.lineTotal)}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="px-3.5 py-4 text-center text-[10px] text-slate-400">Sin detalle de líneas.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-line bg-slate-50/60 p-3.5 text-[11px]">
+              <div className="flex justify-between text-slate-500">
+                <span>Subtotal</span>
+                <span className="tabular font-semibold text-ink">{formatCurrency(invoiceDetail.subtotal ?? invoiceDetail.total)}</span>
+              </div>
+              <div className="mt-1.5 flex justify-between text-slate-500">
+                <span>Descuento</span>
+                <span className="tabular font-semibold text-ink">{formatCurrency(invoiceDetail.discount ?? 0)}</span>
+              </div>
+              <div className="mt-2 flex justify-between border-t border-line pt-2 font-semibold text-ink">
+                <span>Total</span>
+                <span className="tabular">{formatCurrency(invoiceDetail.total)}</span>
+              </div>
+            </div>
+
+            <p className="text-[10px] leading-relaxed text-slate-400">
+              Comprobante interno de venta. El pago se registró con {invoiceDetail.method}. No reemplaza la factura
+              electrónica DIAN.
+            </p>
+          </div>
+        ) : null}
       </Modal>
     </div>
   )

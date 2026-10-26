@@ -26,18 +26,18 @@ npm run build
 npm start
 ```
 
-## Acceso inicial
+## Primer arranque
 
-La primera vez se crea una base de datos con datos ficticios de ejemplo y estas cuentas:
+La primera vez **no se crean usuarios ni credenciales por defecto**. La aplicación muestra la pantalla **Configura tu taller**, donde se registra:
 
-| Rol | Usuario | Contraseña |
-| --- | --- | --- |
-| Propietario / cuenta raíz | `superadmin` | `3mm4hy3r` |
-| Administrador | `andrea` | `demo1234` |
-| Técnico | `julian` | `demo1234` |
-| Cajero | `camila` | `demo1234` |
+- Nombre del propietario.
+- Nombre del taller o negocio.
+- Usuario y contraseña (mínimo 8 caracteres).
+- Correo de contacto opcional.
 
-Cambia las contraseñas desde **Configuración → Seguridad** antes de usar la aplicación con información real.
+La configuración inicial crea la cuenta raíz, registra la auditoría y genera un respaldo completo. En ese momento se puede elegir **Cargar datos de demostración** para probar la aplicación con productos, clientes y OT ficticias. Las cuentas demo de ese modo reciben contraseñas aleatorias; no se publican credenciales conocidas.
+
+Si actualizas desde una instalación anterior, la base existente conserva sus usuarios y datos. Cambia las contraseñas demo desde **Configuración → Seguridad** antes de usar información real.
 
 ## Datos, evidencias y respaldos
 
@@ -96,6 +96,9 @@ Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. La c
 - Cobro al pasar a `entregado`, con libro de pagos y saldo separado del total. La entrega sin cobro requiere autorización y motivo auditado.
 - POS con carrito, descuentos según rol, efectivo/tarjeta/mixto y factura interna sin IVA.
 - Compras a proveedores con IVA del 19 % y actualización de inventario.
+- Proveedores con alta y edición desde la interfaz, filtro de historial y comprobante de compra imprimible.
+- Asignación y reasignación de técnico con historial, motivo y auditoría; bloqueo en OT cerradas.
+- Historial de cliente con acceso directo a la factura y a la OT seleccionadas.
 - Caja con apertura, movimientos, arqueo por denominaciones y cierre de turno.
 - Reportes de ventas, compras, margen bruto, utilidad neta restringida y estadísticas por técnico.
 - Inventario con SKU, código de barras Code128, seriales, ubicaciones, stock mínimo y exportación CSV.
@@ -121,6 +124,20 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm start` | Ejecuta el build de producción. |
 | `npm run typecheck` | Solo verificación de tipos. |
 | `npm run dist` | Genera el instalador NSIS x64 en `release/`. |
+| `npm run test:acceptance:f0f1` | Prueba aislada de primer arranque, login, auditoría y respaldo inicial. |
+| `npm run test:acceptance:f2f3` | Prueba aislada de proveedores, compra, comprobante, técnico, OT e historiales. |
+
+## Pruebas de aceptación
+
+Las pruebas usan una carpeta temporal y **no tocan los datos reales** del negocio. Ejecuta primero el build:
+
+```bash
+npm run build
+npm run test:acceptance:f0f1
+npm run test:acceptance:f2f3
+```
+
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK` y `15/15 OK`.
 
 ## Empaquetado
 
@@ -128,7 +145,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.1.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.3.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -141,5 +158,5 @@ El instalador queda en `release/` como `BitacoreTech-1.1.0-x64.exe`. La configur
 - Las ventas no llevan IVA; las compras sí aplican IVA del 19 %.
 - No se emiten facturas electrónicas DIAN.
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
-- La IA es opcional y su clave solo se guarda como huella SHA-256, nunca en texto plano.
+- La IA es opcional y su integración real (facturas, diagnóstico y resúmenes) está pendiente para el Tramo 4. Hoy solo existe la configuración y la huella de la clave; no se guarda la clave en texto plano.
 - Las fotos de evidencia se conservan en la carpeta de datos y en cada respaldo completo; no se envían a servicios externos.

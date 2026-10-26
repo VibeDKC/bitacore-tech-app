@@ -31,6 +31,7 @@ export type Capability =
   | 'editInventory'
   | 'createOrder'
   | 'diagnoseOrder'
+  | 'assignTechnician'
   | 'settleOrder'
   | 'authorizeNoCharge'
   | 'viewAudit'
@@ -242,6 +243,23 @@ export interface TimelineEvent {
   state: 'done' | 'current' | 'pending'
 }
 
+export interface WorkOrderAssignment {
+  id: string
+  fromUserId: string | null
+  fromName: string | null
+  toUserId: string
+  toName: string
+  reason: string
+  assignedBy: string
+  assignedByName: string
+  createdAt: string
+}
+
+export interface TechnicianOption {
+  id: string
+  name: string
+}
+
 export interface WorkOrder {
   id: string
   number: string
@@ -263,6 +281,7 @@ export interface WorkOrder {
   deliveredAt?: string
   items: WorkOrderItem[]
   timeline: TimelineEvent[]
+  assignments?: WorkOrderAssignment[]
   notes?: string
   intake?: WorkOrderIntake
   settlement?: Settlement
@@ -296,6 +315,13 @@ export interface Invoice {
   method: PaymentMethod
   status: 'activa' | 'anulada'
   items: number
+  lines?: Array<{
+    id: string
+    description: string
+    quantity: number
+    unitPrice: number
+    lineTotal: number
+  }>
   notes?: string | null
   createdAt?: string
 }
@@ -398,13 +424,24 @@ export interface Supplier {
 export interface Purchase {
   id: string
   number: string
+  supplierId?: string
   supplier: string
+  supplierNit?: string
   date: string
   items: number
   subtotal: number
   iva: number
   total: number
   status: 'recibida' | 'pendiente'
+  notes?: string | null
+  lines?: Array<{
+    id: string
+    productId: string | null
+    description: string
+    quantity: number
+    unitPrice: number
+    lineTotal: number
+  }>
 }
 
 export interface LegalConfig {

@@ -57,6 +57,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'editInventory',
     'createOrder',
     'diagnoseOrder',
+    'assignTechnician',
     'settleOrder',
     'authorizeNoCharge',
     'viewAudit',
@@ -80,6 +81,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'editInventory',
     'createOrder',
     'diagnoseOrder',
+    'assignTechnician',
     'settleOrder',
     'authorizeNoCharge',
     'useAI',
@@ -114,6 +116,7 @@ export const permissionMatrix: Array<{
     items: [
       { label: 'Ventas y POS', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'full' } },
       { label: 'Órdenes de trabajo', roles: { superadmin: 'full', admin: 'full', tecnico: 'full', cajero: 'none' } },
+      { label: 'Asignar y reasignar técnico', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
       { label: 'Evidencias fotográficas', roles: { superadmin: 'full', admin: 'full', tecnico: 'partial', cajero: 'none' } },
       { label: 'Clientes', roles: { superadmin: 'full', admin: 'full', tecnico: 'full', cajero: 'full' } },
       { label: 'Inventario', roles: { superadmin: 'full', admin: 'partial', tecnico: 'readonly', cajero: 'readonly' } },

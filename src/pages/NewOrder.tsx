@@ -33,6 +33,7 @@ import type {
   LockType,
   PowerState,
   TechnicalSheet,
+  TechnicianOption,
   WorkOrder,
   WorkOrderIntake
 } from '@/types'
@@ -139,14 +140,19 @@ export function NewOrderPage() {
   const canCreate = can(role, 'createOrder')
   const { data: bootstrap, loading: bootLoading, error: bootError } = useApi(
     async () => {
-      const [customers, legal] = await Promise.all([api.customers.list(), api.legal.get()])
-      return { customers, legal }
+      const [customers, legal, technicians] = await Promise.all([
+        api.customers.list(),
+        api.legal.get(),
+        api.orders.technicians()
+      ])
+      return { customers, legal, technicians }
     },
     []
   )
 
   const [customerList, setCustomerList] = useState<Customer[]>([])
   const [legalConfig, setLegalConfig] = useState<LegalConfig>(defaultLegalConfig)
+  const [technicians, setTechnicians] = useState<TechnicianOption[]>([])
   const [customerId, setCustomerId] = useState('')
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerDropdown, setCustomerDropdown] = useState(false)
@@ -158,6 +164,8 @@ export function NewOrderPage() {
     if (!bootstrap) return
     setCustomerList(bootstrap.customers)
     setLegalConfig(bootstrap.legal)
+    setTechnicians(bootstrap.technicians)
+    setTechnicianId((current) => current || bootstrap.technicians[0]?.id || '')
   }, [bootstrap])
 
   const [category, setCategory] = useState<DeviceCategory>('laptop')
@@ -181,7 +189,7 @@ export function NewOrderPage() {
   const [reportedIssue, setReportedIssue] = useState('')
   const [estimate, setEstimate] = useState('')
   const [diagnosticFee, setDiagnosticFee] = useState('')
-  const [technician, setTechnician] = useState('Julián Vélez')
+  const [technicianId, setTechnicianId] = useState('')
   const [promisedAt, setPromisedAt] = useState(defaultPromiseDate)
   const [notes, setNotes] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -332,7 +340,7 @@ export function NewOrderPage() {
     setReportedIssue('')
     setEstimate('')
     setDiagnosticFee('')
-    setTechnician('Julián Vélez')
+    setTechnicianId(technicians[0]?.id ?? '')
     setPromisedAt(defaultPromiseDate())
     setNotes('')
     setAdvancedOpen(false)
@@ -435,7 +443,7 @@ export function NewOrderPage() {
         accessories: accessories.join(', ') || 'Sin accesorios',
         physicalCondition,
         reportedIssue: reportedIssue.trim(),
-        technician,
+        technicianId,
         promisedAt: new Date(`${promisedAt}T17:00:00`).toISOString(),
         notes: notes.trim(),
         intake: intake as unknown as Record<string, unknown>,
@@ -1014,17 +1022,30 @@ export function NewOrderPage() {
                 <span className="mt-1 block text-[9px] text-slate-400">Opcional. Se cobra al entregar si aplica.</span>
               </label>
               <label className="block">
-                <span className="field-label">Técnico receptor</span>
+                <span className="field-label">Técnico asignado</span>
                 <div className="relative">
-                  <Select value={technician} onChange={(event) => setTechnician(event.target.value)}>
-                    {['Julián Vélez', 'Santiago Mejía'].map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
+                  <Select
+                    value={technicianId}
+                    onChange={(event) => setTechnicianId(event.target.value)}
+                    disabled={!technicians.length}
+                  >
+                    {technicians.length ? (
+                      technicians.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Sin técnicos activos</option>
+                    )}
                   </Select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                 </div>
+                <span className="mt-1 block text-[9px] text-slate-400">
+                  {technicians.length
+                    ? 'La asignación queda registrada en la trazabilidad de la OT.'
+                    : 'Crea un usuario con rol Técnico en Configuración → Usuarios para asignarlo.'}
+                </span>
               </label>
               <label className="block">
                 <span className="field-label">Fecha promesa</span>
@@ -1373,7 +1394,7 @@ export function NewOrderPage() {
                 ['Cliente', createdOrder.customerName],
                 ['Equipo', `${createdOrder.brand} ${createdOrder.model}`],
                 ['Serial', createdOrder.serial],
-                ['Técnico receptor', createdOrder.intake?.receivedBy ?? createdOrder.technician],
+                ['Técnico asignado', createdOrder.technician],
                 ['Presupuesto', createdOrder.intake?.estimate ? formatCurrency(createdOrder.intake.estimate) : 'Por definir']
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-line px-3.5 py-2.5">

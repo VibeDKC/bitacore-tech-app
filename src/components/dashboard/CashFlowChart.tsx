@@ -35,6 +35,13 @@ function ChartTooltip({ active, payload, label }: any) {
 export function CashFlowChart({ data = [] }: { data?: ChartPoint[] }) {
   const chartData = data
   const lastIndex = chartData.length - 1
+  const last = chartData.length ? chartData[chartData.length - 1] : undefined
+  const previous = chartData.length > 1 ? chartData[chartData.length - 2] : undefined
+  const growth =
+    last && previous && previous.income > 0
+      ? Math.round(((last.income - previous.income) / previous.income) * 1000) / 10
+      : null
+  const positive = last ? last.income >= last.expenses : null
 
   return (
     <div className="card overflow-hidden p-5 lg:p-6">
@@ -52,12 +59,9 @@ export function CashFlowChart({ data = [] }: { data?: ChartPoint[] }) {
             <span className="h-2 w-2 rounded-full bg-rose-400" />
             Egresos
           </span>
-          <button
-            type="button"
-            className="focus-ring hidden items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-500 shadow-sm transition hover:text-ink sm:inline-flex"
-          >
+          <span className="hidden items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-500 shadow-sm sm:inline-flex">
             Últimos 12 meses
-          </button>
+          </span>
         </div>
       </div>
 
@@ -105,11 +109,25 @@ export function CashFlowChart({ data = [] }: { data?: ChartPoint[] }) {
       </div>
 
       <div className="mt-2 flex items-center justify-between border-t border-line/70 pt-4">
-        <p className="text-[10px] text-slate-400">Octubre acumula un crecimiento del 6,6% frente a septiembre.</p>
-        <span className="hidden items-center gap-1.5 rounded-full bg-success-50 px-2 py-1 text-[10px] font-semibold text-success-700 sm:inline-flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-success-500" />
-          Flujo positivo
-        </span>
+        <p className="text-[10px] text-slate-400">
+          {!last
+            ? 'Aún no hay movimientos de caja para graficar.'
+            : growth === null
+              ? `Ingresos de ${last.month}: ${formatCurrency(last.income)}.`
+              : `${last.month} acumula un crecimiento del ${growth.toLocaleString('es-CO', { maximumFractionDigits: 1 })}% frente a ${previous?.month}.`}
+        </p>
+        {positive === null ? null : (
+          <span
+            className={
+              positive
+                ? 'hidden items-center gap-1.5 rounded-full bg-success-50 px-2 py-1 text-[10px] font-semibold text-success-700 sm:inline-flex'
+                : 'hidden items-center gap-1.5 rounded-full bg-danger-50 px-2 py-1 text-[10px] font-semibold text-danger-700 sm:inline-flex'
+            }
+          >
+            <span className={positive ? 'h-1.5 w-1.5 rounded-full bg-success-500' : 'h-1.5 w-1.5 rounded-full bg-danger-500'} />
+            {positive ? 'Flujo positivo' : 'Flujo negativo'}
+          </span>
+        )}
       </div>
     </div>
   )

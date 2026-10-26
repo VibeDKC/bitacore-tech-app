@@ -17,6 +17,7 @@ export type BackendCapability =
   | 'editInventory'
   | 'createOrder'
   | 'diagnoseOrder'
+  | 'assignTechnician'
   | 'settleOrder'
   | 'viewAudit'
   | 'viewFullAudit'
@@ -54,6 +55,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'editInventory',
     'createOrder',
     'diagnoseOrder',
+    'assignTechnician',
     'settleOrder',
     'viewAudit',
     'viewFullAudit',
@@ -77,6 +79,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'editInventory',
     'createOrder',
     'diagnoseOrder',
+    'assignTechnician',
     'settleOrder',
     'useAI',
     'applyDiscount',

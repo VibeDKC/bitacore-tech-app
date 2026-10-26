@@ -116,6 +116,15 @@ export function paymentDto(row: any) {
 
 export function invoiceDto(db: Database, row: any, includeCustomer = true) {
   const count = db.get<{ count: number }>('SELECT COUNT(*) AS count FROM invoice_items WHERE invoice_id = ?', row.id)?.count ?? 0
+  const lines = db
+    .all<any>('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY rowid ASC', row.id)
+    .map((line) => ({
+      id: line.id,
+      description: line.description,
+      quantity: Number(line.quantity),
+      unitPrice: money(line.unit_price_cents),
+      lineTotal: money(line.line_total_cents)
+    }))
   return {
     id: row.id,
     number: row.number,
@@ -131,6 +140,7 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
     method: row.payment_method ?? 'Efectivo',
     status: row.status,
     items: Number(count),
+    lines,
     notes: row.notes,
     createdAt: row.created_at
   }
@@ -143,6 +153,10 @@ export function orderDto(db: Database, row: any) {
   )
   const eventRows = db.all<any>(
     'SELECT * FROM work_order_events WHERE work_order_id = ? ORDER BY created_at ASC, rowid ASC',
+    row.id
+  )
+  const assignmentRows = db.all<any>(
+    'SELECT * FROM work_order_assignments WHERE work_order_id = ? ORDER BY created_at ASC, rowid ASC',
     row.id
   )
   const paymentRows = db.all<any>('SELECT * FROM payments WHERE order_id = ? ORDER BY created_at ASC, rowid ASC', row.id)
@@ -233,6 +247,17 @@ export function orderDto(db: Database, row: any) {
     })),
     notes: row.notes ?? '',
     intake,
+    assignments: assignmentRows.map((assignment) => ({
+      id: assignment.id,
+      fromUserId: assignment.from_user_id ?? null,
+      fromName: assignment.from_name ?? null,
+      toUserId: assignment.to_user_id,
+      toName: assignment.to_name,
+      reason: assignment.reason ?? '',
+      assignedBy: assignment.assigned_by,
+      assignedByName: assignment.assigned_by_name,
+      createdAt: assignment.created_at
+    })),
     settlement,
     payments,
     paidAmount: money(paidCents),
