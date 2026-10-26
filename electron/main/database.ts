@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { DEFAULT_LEGAL } from './defaults'
 import { sha256, newId } from './security'
 import { SCHEMA_V1 } from './schema'
-import { ensureReferenceData } from './seed'
+import { ensureDictionaries, ensureReferenceData } from './seed'
 import { ALL_CAPABILITIES, capabilitiesForRole } from './permissions'
 
 export const APP_DATA_FOLDER = 'BitacoreTech'
@@ -47,6 +47,7 @@ export class Database {
     this.configure()
     this.migrate()
     ensureReferenceData(this)
+    ensureDictionaries(this)
   }
 
   private configure() {
@@ -79,13 +80,14 @@ export class Database {
     this.ensureColumn('work_orders', 'equipment_id', 'TEXT REFERENCES equipment(id)')
     this.ensureColumn('invoices', 'discount_type', "TEXT NOT NULL DEFAULT 'percent'")
     this.ensureColumn('invoices', 'discount_value', 'REAL NOT NULL DEFAULT 0')
+    this.ensureColumn('products', 'service_type', 'TEXT')
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5]) {
+    for (const version of [1, 2, 3, 4, 5, 6]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -98,8 +100,6 @@ export class Database {
   }
 
   private ensureRolePermissions() {
-    const done = this.get<{ value: string }>("SELECT value FROM meta WHERE key = 'role_permissions_seeded'")
-    if (done?.value === '1') return
     const now = new Date().toISOString()
     for (const role of ['superadmin', 'admin', 'tecnico', 'cajero'] as const) {
       const granted = new Set(capabilitiesForRole(role))
@@ -191,6 +191,7 @@ export class Database {
     this.configure()
     this.migrate()
     ensureReferenceData(this)
+    ensureDictionaries(this)
   }
 
   get<T = Row>(sql: string, ...params: Bound[]): T | undefined {

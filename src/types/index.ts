@@ -1,5 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 
+export * from './dictionaries'
+
 export type Role = 'superadmin' | 'admin' | 'tecnico' | 'cajero'
 
 export type ModuleKey =
@@ -25,6 +27,7 @@ export type Capability =
   | 'purgeData'
   | 'configureLegal'
   | 'configureAI'
+  | 'manageDictionaries'
   | 'annulInvoice'
   | 'closeCash'
   | 'createPurchase'
@@ -62,7 +65,8 @@ export interface Product {
   name: string
   sku: string
   barcode: string
-  category: ProductCategory
+  /** Nombre del nodo activo de inventory_category. */
+  category: string
   location: string
   stock: number
   minStock: number
@@ -77,6 +81,7 @@ export interface Product {
   iconKey?: string
   tone: string
   service?: boolean
+  serviceType?: string | null
 }
 
 export type StockStatus = 'in' | 'low' | 'out'
@@ -145,13 +150,59 @@ export type IntakeConditionKey =
 
 export type IntakeConditions = Partial<Record<IntakeConditionKey, boolean>>
 
-export interface TechnicalSheet {
+export interface TechnicalSheetCpu {
+  brand?: string
+  family?: string
+  model?: string
+}
+
+export type GpuKind = '' | 'none' | 'integrated' | 'dedicated'
+
+export interface TechnicalSheetGpu {
+  type?: GpuKind
+  brand?: string
+  model?: string
+  vram?: string
+}
+
+export interface TechnicalSheetRamModule {
+  id: string
+  type?: string
+  capacity?: string
+  speed?: string
+  brand?: string
+  warranty?: string
+}
+
+export interface TechnicalSheetStorageDrive {
+  id: string
+  type?: string
+  capacity?: string
+  speed?: string
+  model?: string
+  health?: string
+  warranty?: string
+}
+
+export interface TechnicalSheetLegacy {
   os?: string
   cpu?: string
   gpu?: string
   ram?: string
   storage?: string
   battery?: string
+}
+
+export interface TechnicalSheet {
+  os?: string
+  cpu?: TechnicalSheetCpu
+  gpu?: TechnicalSheetGpu
+  ramModules?: TechnicalSheetRamModule[]
+  storageDrives?: TechnicalSheetStorageDrive[]
+  battery?: string
+  notes?: string
+  /** Datos de las OT creadas antes de 1.6.0. */
+  legacy?: TechnicalSheetLegacy
 }
 
 export interface LegalSnapshot {

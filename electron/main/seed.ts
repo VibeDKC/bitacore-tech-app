@@ -78,6 +78,148 @@ export function ensureReferenceData(db: Database) {
 }
 
 /**
+ * Diccionarios editables. Se siembran una sola vez por base; después el
+ * propietario o un administrador pueden crear, ordenar, activar o renombrar
+ * nodos desde Configuración → Diccionarios.
+ */
+export function ensureDictionaries(db: Database) {
+  const done = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'dictionaries_seeded'")
+  if (done?.value === '1') return
+  const nowIso = now()
+
+  const insert = (
+    type: string,
+    name: string,
+    options: { parentId?: string | null; code?: string | null; sort?: number; system?: boolean } = {}
+  ) => {
+    const parentId = options.parentId ?? null
+    const existing = db.get<{ id: string }>(
+      "SELECT id FROM dictionary_nodes WHERE type = ? AND IFNULL(parent_id, '') = IFNULL(?, '') AND name = ? COLLATE NOCASE",
+      type,
+      parentId,
+      name
+    )
+    if (existing) return existing.id
+    const id = `dict_${sha256(`${type}|${parentId ?? ''}|${name.toLowerCase()}`).slice(0, 20)}`
+    db.run(
+      `INSERT INTO dictionary_nodes
+        (id, parent_id, type, code, name, sort_order, active, system, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+      id,
+      parentId,
+      type,
+      options.code ?? null,
+      name,
+      options.sort ?? 0,
+      options.system === false ? 0 : 1,
+      nowIso,
+      nowIso
+    )
+    return id
+  }
+
+  const seedRoots = (type: string, names: string[]) => {
+    names.forEach((name, index) => insert(type, name, { sort: index + 1 }))
+  }
+
+  const nextSort = (type: string, parentId: string | null = null) =>
+    Number(
+      db.get<{ next: number }>(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM dictionary_nodes WHERE type = ? AND IFNULL(parent_id, '') = IFNULL(?, '')",
+        type,
+        parentId
+      )?.next ?? 1
+    )
+
+  db.tx(() => {
+    const deviceTypes: Array<[string, string]> = [
+      ['Laptop', 'laptop'],
+      ['PC Torre', 'pc_torre'],
+      ['Celular', 'celular'],
+      ['Consola', 'consola'],
+      ['Impresora', 'impresora'],
+      ['Otro', 'otro']
+    ]
+    deviceTypes.forEach(([name, code], index) => insert('device_type', name, { code, sort: index + 1 }))
+
+    seedRoots('os', [
+      'Windows 11',
+      'Windows 10',
+      'Windows 8.1',
+      'Windows 7',
+      'macOS Sonoma',
+      'macOS Sequoia',
+      'macOS Ventura',
+      'Ubuntu',
+      'Debian',
+      'Fedora',
+      'Android',
+      'iOS',
+      'ChromeOS',
+      'Otro'
+    ])
+
+    const cpuFamilies: Record<string, string[]> = {
+      Intel: ['Core i3', 'Core i5', 'Core i7', 'Core i9', 'Xeon', 'Pentium', 'Celeron'],
+      AMD: ['Ryzen 3', 'Ryzen 5', 'Ryzen 7', 'Ryzen 9', 'Threadripper', 'Athlon'],
+      Apple: ['M1', 'M2', 'M3', 'M4', 'M1 Pro', 'M1 Max', 'M2 Pro', 'M2 Max', 'M3 Pro', 'M3 Max', 'M4 Pro', 'M4 Max'],
+      Qualcomm: ['Snapdragon X Elite', 'Snapdragon X Plus'],
+      Otro: []
+    }
+    Object.entries(cpuFamilies).forEach(([brand, families], brandIndex) => {
+      const parentId = insert('cpu_brand', brand, { sort: brandIndex + 1 })
+      families.forEach((family, familyIndex) => insert('cpu_brand', family, { parentId, sort: familyIndex + 1 }))
+    })
+
+    seedRoots('gpu_brand', ['NVIDIA', 'AMD', 'Intel', 'Apple', 'Qualcomm', 'Otro'])
+    seedRoots('ram_type', ['DDR3', 'DDR3L', 'DDR4', 'DDR5', 'LPDDR4', 'LPDDR4X', 'LPDDR5', 'LPDDR5X', 'Otro'])
+    seedRoots('storage_type', ['HDD', 'SSD SATA', 'SSD M.2 NVMe', 'SSD M.2 SATA', 'eMMC', 'UFS', 'SSD externo', 'Otro'])
+    seedRoots('inventory_category', [
+      'Almacenamiento',
+      'Memoria',
+      'Periféricos',
+      'Repuestos',
+      'Componentes',
+      'Accesorios',
+      'Insumos',
+      'Servicios',
+      'Equipos reacondicionados',
+      'Herramientas e insumos'
+    ])
+    seedRoots('inventory_location', ['Bodega A', 'Bodega B', 'Mostrador', 'Taller', 'Caja de despiece', 'Estante A'])
+    seedRoots('supplier_category', ['Repuestos', 'Tecnología', 'Consumibles', 'Servicios', 'Papelería', 'Otro'])
+    seedRoots('service_type', [
+      'Mantenimiento preventivo',
+      'Mantenimiento correctivo',
+      'Diagnóstico',
+      'Formateo e instalación',
+      'Instalación de drivers',
+      'Reparación de hardware',
+      'Recuperación de datos',
+      'Configuración de red',
+      'Otro'
+    ])
+
+    // Valores históricos que ya existían en la base y no están en la semilla.
+    // Se agregan para que inventario y recepción no pierdan opciones al migrar.
+    for (const row of db.all<{ value: string }>("SELECT DISTINCT category AS value FROM products WHERE category <> ''")) {
+      insert('inventory_category', row.value, { sort: nextSort('inventory_category'), system: false })
+    }
+    for (const row of db.all<{ value: string }>("SELECT DISTINCT location AS value FROM products WHERE location <> ''")) {
+      insert('inventory_location', row.value, { sort: nextSort('inventory_location'), system: false })
+    }
+    for (const row of db.all<{ value: string }>("SELECT DISTINCT category AS value FROM suppliers WHERE category <> ''")) {
+      insert('supplier_category', row.value, { sort: nextSort('supplier_category'), system: false })
+    }
+    for (const row of db.all<{ value: string }>("SELECT DISTINCT category_label AS value FROM work_orders WHERE category_label <> ''")) {
+      insert('device_type', row.value, { sort: nextSort('device_type'), system: false })
+    }
+
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('dictionaries_seeded', '1')")
+  })
+}
+
+/**
  * Datos ficticios para probar la aplicación. Solo se ejecuta cuando el
  * propietario lo elige explícitamente en el primer arranque. Las cuentas
  * demo reciben contraseñas aleatorias: nadie puede iniciar sesión con una

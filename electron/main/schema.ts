@@ -66,6 +66,22 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS dictionary_nodes (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT REFERENCES dictionary_nodes(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  code TEXT,
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  system INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dictionary_type ON dictionary_nodes(type, parent_id, sort_order);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_code ON dictionary_nodes(type, code) WHERE code IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS customers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -119,6 +135,7 @@ CREATE TABLE IF NOT EXISTS products (
   price_cents INTEGER NOT NULL DEFAULT 0,
   warranty_days INTEGER NOT NULL DEFAULT 0,
   is_service INTEGER NOT NULL DEFAULT 0,
+  service_type TEXT,
   alert_enabled INTEGER NOT NULL DEFAULT 1,
   rotation TEXT NOT NULL DEFAULT 'rotativo' CHECK (rotation IN ('rotativo', 'no_rotativo', 'prueba')),
   active INTEGER NOT NULL DEFAULT 1,

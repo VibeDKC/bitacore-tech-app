@@ -51,6 +51,7 @@ import {
 import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './security'
 import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import { runDemoSeed, type SeedOwner } from './seed'
+import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
 
@@ -663,6 +664,59 @@ function userDto(db: Database, row: any) {
 function listUsers(db: Database) {
   const rows = db.all<any>('SELECT * FROM users ORDER BY is_protected DESC, created_at ASC')
   return rows.map((row) => userDto(db, row))
+}
+
+const DICTIONARY_TYPE_VALUES = DICTIONARY_TYPES.map((item) => item.value) as [DictionaryType, ...DictionaryType[]]
+
+function dictionaryUsageCount(db: Database, row: any) {
+  if (row.type === 'inventory_category') {
+    return Number(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM products WHERE category = ?', row.name)?.count ?? 0)
+  }
+  if (row.type === 'inventory_location') {
+    return Number(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM products WHERE location = ?', row.name)?.count ?? 0)
+  }
+  if (row.type === 'supplier_category') {
+    return Number(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM suppliers WHERE category = ?', row.name)?.count ?? 0)
+  }
+  if (row.type === 'service_type') {
+    return Number(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM products WHERE service_type = ?', row.name)?.count ?? 0)
+  }
+  if (row.type === 'device_type') {
+    return Number(
+      db.get<{ count: number }>('SELECT COUNT(*) AS count FROM work_orders WHERE category_label = ?', row.name)?.count ?? 0
+    )
+  }
+  return 0
+}
+
+function dictionaryNodeDto(db: Database, row: any) {
+  return {
+    id: row.id,
+    parentId: row.parent_id ?? null,
+    type: row.type,
+    code: row.code ?? null,
+    name: row.name,
+    sortOrder: Number(row.sort_order),
+    active: Boolean(row.active),
+    system: Boolean(row.system),
+    usageCount: dictionaryUsageCount(db, row),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+function dictionaryDescendants(db: Database, id: string) {
+  return db
+    .all<{ id: string }>(
+      `WITH RECURSIVE descendants(id) AS (
+         SELECT id FROM dictionary_nodes WHERE parent_id = ?
+         UNION ALL
+         SELECT node.id FROM dictionary_nodes node JOIN descendants parent ON node.parent_id = parent.id
+       )
+       SELECT id FROM descendants`,
+      id
+    )
+    .map((item) => item.id)
 }
 
 function supplierDto(db: Database, row: any) {
@@ -1859,6 +1913,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const minStock = numberValue(payload?.minStock ?? 0, 'Stock mínimo', { min: 0 })
       const rotation = schema(payload?.rotation ?? 'rotativo', z.enum(['rotativo', 'no_rotativo', 'prueba']))
       const alertEnabled = payload?.alertEnabled === undefined ? rotation === 'rotativo' : Boolean(payload.alertEnabled)
+      const service = Boolean(payload?.service)
+      const serviceType =
+        service && typeof payload?.serviceType === 'string' && payload.serviceType.trim()
+          ? text(payload.serviceType, 'Tipo de servicio', 1, 80)
+          : null
+      if (serviceType) {
+        const serviceNode = db.get<any>(
+          "SELECT id FROM dictionary_nodes WHERE type = 'service_type' AND name = ? COLLATE NOCASE AND active = 1",
+          serviceType
+        )
+        if (!serviceNode) fail('Selecciona un tipo de servicio activo del diccionario.')
+      }
       const id = `prod_${sha256(`${sku}|${Date.now()}`).slice(0, 20)}`
       const barcode = String(payload?.barcode ?? `LOCAL${Date.now().toString().slice(-9)}`).slice(0, 60)
       const nowIso = new Date().toISOString()
@@ -1866,8 +1932,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.run(
           `INSERT INTO products
             (id, name, sku, barcode, category, location, stock, min_stock, cost_cents, price_cents,
-             warranty_days, is_service, alert_enabled, rotation, active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+             warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           id,
           name,
           sku,
@@ -1879,7 +1945,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           toCents(cost),
           toCents(price),
           Math.max(0, Math.round(numberValue(payload?.warrantyDays ?? 0, 'Garantía', { min: 0 }))),
-          payload?.service ? 1 : 0,
+          service ? 1 : 0,
+          serviceType,
           alertEnabled ? 1 : 0,
           rotation,
           nowIso,
@@ -1964,6 +2031,38 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('warranty_days = ?')
         params.push(Math.max(0, Math.round(numberValue(payload.warrantyDays, 'Garantía', { min: 0 }))))
         changed.push('garantía')
+      }
+      let nextService = Boolean(product.is_service)
+      if (payload?.service !== undefined) {
+        nextService = Boolean(payload.service)
+        updates.push('is_service = ?')
+        params.push(nextService ? 1 : 0)
+        changed.push(nextService ? 'marcado como servicio' : 'marcado como producto')
+        if (!nextService) {
+          updates.push('service_type = NULL')
+          changed.push('tipo de servicio retirado')
+        }
+      }
+      if (payload?.serviceType !== undefined && nextService) {
+        const rawServiceType =
+          typeof payload.serviceType === 'string' && payload.serviceType.trim()
+            ? text(payload.serviceType, 'Tipo de servicio', 1, 80)
+            : null
+        if (rawServiceType) {
+          if (rawServiceType !== (product.service_type ?? null)) {
+            const serviceNode = db.get<any>(
+              "SELECT id FROM dictionary_nodes WHERE type = 'service_type' AND name = ? COLLATE NOCASE AND active = 1",
+              rawServiceType
+            )
+            if (!serviceNode) fail('Selecciona un tipo de servicio activo del diccionario.')
+          }
+          updates.push('service_type = ?')
+          params.push(rawServiceType)
+          changed.push('tipo de servicio')
+        } else {
+          updates.push('service_type = NULL')
+          changed.push('tipo de servicio retirado')
+        }
       }
       if (payload?.rotation !== undefined) {
         const rotation = schema(payload.rotation, z.enum(['rotativo', 'no_rotativo', 'prueba']))
@@ -3413,6 +3512,200 @@ export async function handleRpc(command: string, payload: Payload, token: string
         )
       })
       return settingsData(db)
+    }
+
+    case 'dictionaries.list': {
+      return db
+        .all<any>('SELECT * FROM dictionary_nodes ORDER BY type ASC, parent_id ASC, sort_order ASC, name ASC')
+        .map((row) => dictionaryNodeDto(db, row))
+    }
+
+    case 'dictionaries.create': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'manageDictionaries')
+      const type = schema(payload?.type, z.enum(DICTIONARY_TYPE_VALUES))
+      const parentId =
+        typeof payload?.parentId === 'string' && payload.parentId
+          ? text(payload.parentId, 'Elemento padre', 1, 80)
+          : null
+      if (parentId) {
+        const parent = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', parentId)
+        if (!parent) fail('El elemento padre no existe')
+        if (parent.type !== type) fail('El elemento padre debe ser del mismo tipo')
+      }
+      const name = text(payload?.name, 'Nombre', 1, 120)
+      const duplicate = db.get<any>(
+        "SELECT id FROM dictionary_nodes WHERE type = ? AND IFNULL(parent_id, '') = IFNULL(?, '') AND name = ? COLLATE NOCASE",
+        type,
+        parentId,
+        name
+      )
+      if (duplicate) fail('Ya existe un valor con ese nombre en este nivel.', 'DUPLICATE')
+      const code =
+        typeof payload?.code === 'string' && payload.code.trim()
+          ? text(payload.code, 'Código', 1, 60)
+          : null
+      if (code) {
+        const codeDuplicate = db.get<any>('SELECT id FROM dictionary_nodes WHERE type = ? AND code = ?', type, code)
+        if (codeDuplicate) fail('Ya existe un valor con ese código en este tipo.', 'DUPLICATE')
+      }
+      const nextSort =
+        db.get<{ next: number }>(
+          'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM dictionary_nodes WHERE type = ? AND IFNULL(parent_id, \'\') = IFNULL(?, \'\')',
+          type,
+          parentId
+        )?.next ?? 1
+      const sortOrder =
+        payload?.sortOrder === undefined ? Number(nextSort) : numberValue(payload.sortOrder, 'Orden', { min: 0, max: 99999 })
+      const active = payload?.active === undefined ? true : Boolean(payload.active)
+      const id = `dict_${sha256(`${type}|${parentId ?? ''}|${name}|${Date.now()}`).slice(0, 20)}`
+      const nowIso = new Date().toISOString()
+      db.tx(() => {
+        db.run(
+          `INSERT INTO dictionary_nodes
+            (id, parent_id, type, code, name, sort_order, active, system, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          id,
+          parentId,
+          type,
+          code,
+          name,
+          sortOrder,
+          active ? 1 : 0,
+          nowIso,
+          nowIso
+        )
+        const typeLabel = DICTIONARY_TYPES.find((item) => item.value === type)?.label ?? type
+        audit(db, session, 'Creación de diccionario', 'Diccionario', `${typeLabel} · ${name}`, id)
+      })
+      return dictionaryNodeDto(db, db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', id))
+    }
+
+    case 'dictionaries.update': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'manageDictionaries')
+      const id = text(payload?.id, 'Elemento', 1, 80)
+      const row = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', id)
+      if (!row) fail('Elemento de diccionario no encontrado', 'NOT_FOUND')
+      const updates: string[] = []
+      const params: any[] = []
+      const changed: string[] = []
+      const nextName = payload?.name !== undefined ? text(payload.name, 'Nombre', 1, 120) : row.name
+      const currentParent = row.parent_id ?? null
+      const nextParent =
+        payload?.parentId !== undefined
+          ? typeof payload.parentId === 'string' && payload.parentId
+            ? text(payload.parentId, 'Elemento padre', 1, 80)
+            : null
+          : currentParent
+      const parentChanged = nextParent !== currentParent
+      if (parentChanged) {
+        if (row.system) fail('Los elementos del sistema no pueden cambiar de nivel.')
+        if (nextParent) {
+          if (nextParent === id || dictionaryDescendants(db, id).includes(nextParent)) {
+            fail('No puedes mover un elemento dentro de sí mismo.')
+          }
+          const parent = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', nextParent)
+          if (!parent) fail('El elemento padre no existe')
+          if (parent.type !== row.type) fail('El elemento padre debe ser del mismo tipo')
+        }
+      }
+      if (nextName !== row.name || parentChanged) {
+        const duplicate = db.get<any>(
+          "SELECT id FROM dictionary_nodes WHERE type = ? AND IFNULL(parent_id, '') = IFNULL(?, '') AND name = ? COLLATE NOCASE AND id <> ?",
+          row.type,
+          nextParent,
+          nextName,
+          id
+        )
+        if (duplicate) fail('Ya existe un valor con ese nombre en este nivel.', 'DUPLICATE')
+      }
+      if (nextName !== row.name) {
+        updates.push('name = ?')
+        params.push(nextName)
+        changed.push('nombre')
+      }
+      if (parentChanged) {
+        updates.push('parent_id = ?')
+        params.push(nextParent)
+        changed.push('nivel')
+      }
+      if (payload?.code !== undefined) {
+        const nextCode =
+          typeof payload.code === 'string' && payload.code.trim()
+            ? text(payload.code, 'Código', 1, 60)
+            : null
+        if (row.system && nextCode !== (row.code ?? null)) {
+          fail('El código de un elemento del sistema no se puede cambiar.')
+        }
+        if (nextCode && nextCode !== (row.code ?? null)) {
+          const duplicate = db.get<any>('SELECT id FROM dictionary_nodes WHERE type = ? AND code = ? AND id <> ?', row.type, nextCode, id)
+          if (duplicate) fail('Ya existe un valor con ese código en este tipo.', 'DUPLICATE')
+        }
+        if (nextCode !== (row.code ?? null)) {
+          updates.push('code = ?')
+          params.push(nextCode)
+          changed.push('código')
+        }
+      }
+      if (payload?.sortOrder !== undefined) {
+        const nextSort = numberValue(payload.sortOrder, 'Orden', { min: 0, max: 99999 })
+        if (nextSort !== Number(row.sort_order)) {
+          updates.push('sort_order = ?')
+          params.push(nextSort)
+          changed.push('orden')
+        }
+      }
+      if (payload?.active !== undefined) {
+        const nextActive = Boolean(payload.active)
+        if (nextActive !== Boolean(row.active)) {
+          updates.push('active = ?')
+          params.push(nextActive ? 1 : 0)
+          changed.push(nextActive ? 'activación' : 'desactivación')
+        }
+      }
+      if (!updates.length) fail('No hay cambios para guardar')
+      const nowIso = new Date().toISOString()
+      updates.push('updated_at = ?')
+      params.push(nowIso, id)
+      db.tx(() => {
+        db.run(`UPDATE dictionary_nodes SET ${updates.join(', ')} WHERE id = ?`, ...params)
+        if (nextName !== row.name) {
+          if (row.type === 'inventory_category') {
+            db.run('UPDATE products SET category = ?, updated_at = ? WHERE category = ?', nextName, nowIso, row.name)
+          } else if (row.type === 'inventory_location') {
+            db.run('UPDATE products SET location = ?, updated_at = ? WHERE location = ?', nextName, nowIso, row.name)
+          } else if (row.type === 'supplier_category') {
+            db.run('UPDATE suppliers SET category = ? WHERE category = ?', nextName, row.name)
+          } else if (row.type === 'service_type') {
+            db.run('UPDATE products SET service_type = ?, updated_at = ? WHERE service_type = ?', nextName, nowIso, row.name)
+          }
+        }
+        const typeLabel = DICTIONARY_TYPES.find((item) => item.value === row.type)?.label ?? row.type
+        audit(db, session, 'Actualización de diccionario', 'Diccionario', `${typeLabel} · ${nextName} · ${changed.join(', ')}`, id)
+      })
+      return dictionaryNodeDto(db, db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', id))
+    }
+
+    case 'dictionaries.delete': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'manageDictionaries')
+      const id = text(payload?.id, 'Elemento', 1, 80)
+      const row = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', id)
+      if (!row) fail('Elemento de diccionario no encontrado', 'NOT_FOUND')
+      if (row.system) fail('Los valores del sistema no se eliminan; puedes desactivarlos.')
+      const children = Number(
+        db.get<{ count: number }>('SELECT COUNT(*) AS count FROM dictionary_nodes WHERE parent_id = ?', id)?.count ?? 0
+      )
+      if (children > 0) fail('Primero elimina o mueve los elementos hijos.')
+      const usage = dictionaryUsageCount(db, row)
+      if (usage > 0) fail(`Este valor está en uso (${usage}). Desactívalo en lugar de eliminarlo.`)
+      db.tx(() => {
+        db.run('DELETE FROM dictionary_nodes WHERE id = ?', id)
+        const typeLabel = DICTIONARY_TYPES.find((item) => item.value === row.type)?.label ?? row.type
+        audit(db, session, 'Eliminación de diccionario', 'Diccionario', `${typeLabel} · ${row.name}`, id)
+      })
+      return { deleted: true }
     }
 
     case 'settings.get': {

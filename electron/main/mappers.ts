@@ -95,6 +95,7 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     warrantyDays: Number(row.warranty_days),
     serials,
     service: bool(row.is_service),
+    serviceType: row.service_type ?? null,
     alertEnabled: row.alert_enabled === undefined ? true : bool(row.alert_enabled),
     rotation: row.rotation === 'no_rotativo' || row.rotation === 'prueba' ? row.rotation : 'rotativo',
     iconKey: categoryIconKey(row.category),

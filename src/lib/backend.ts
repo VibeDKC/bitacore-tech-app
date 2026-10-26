@@ -19,6 +19,8 @@ import type {
   ChartPoint,
   Customer,
   DashboardData,
+  DictionaryNode,
+  DictionaryType,
   Equipment,
   EvidenceInput,
   EvidenceStage,
@@ -424,6 +426,30 @@ export const api = {
     },
     updateSection(section: 'print' | 'ai' | 'security' | 'business' | 'equipment', value: Record<string, unknown>) {
       return rpc<SettingsData>('settings.updateSection', { section, value })
+    }
+  },
+  dictionaries: {
+    list() {
+      return rpc<DictionaryNode[]>('dictionaries.list')
+    },
+    create(input: {
+      type: DictionaryType
+      name: string
+      parentId?: string | null
+      code?: string | null
+      sortOrder?: number
+      active?: boolean
+    }) {
+      return rpc<DictionaryNode>('dictionaries.create', input as Record<string, unknown>)
+    },
+    update(
+      id: string,
+      input: { name?: string; parentId?: string | null; code?: string | null; sortOrder?: number; active?: boolean }
+    ) {
+      return rpc<DictionaryNode>('dictionaries.update', { id, ...input })
+    },
+    remove(id: string) {
+      return rpc<{ deleted: boolean }>('dictionaries.delete', { id })
     }
   },
   permissions: {

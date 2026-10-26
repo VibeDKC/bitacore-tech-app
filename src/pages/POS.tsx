@@ -16,12 +16,13 @@ import {
   Wallet
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CartLine, Customer, Invoice, PaymentMethod, ProductCategory, SaleReceipt } from '@/types'
+import type { CartLine, Customer, Invoice, PaymentMethod, SaleReceipt } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/format'
 import { getStockStatus } from '@/lib/status'
 import { api, errorMessage } from '@/lib/backend'
+import { dictionaryValues } from '@/lib/dictionaries'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig } from '@/lib/legalConfig'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -33,18 +34,6 @@ import { SegmentedTabs } from '@/components/ui/Tabs'
 import { ReceiptPreviewModal } from '@/components/pos/ReceiptPreview'
 import { SalesHistory } from '@/components/pos/SalesHistory'
 import { cn } from '@/lib/utils'
-
-const categories: Array<'Todos' | ProductCategory> = [
-  'Todos',
-  'Almacenamiento',
-  'Memoria',
-  'Periféricos',
-  'Repuestos',
-  'Componentes',
-  'Accesorios',
-  'Insumos',
-  'Servicios'
-]
 
 const paymentMethods: Array<{ value: PaymentMethod; label: string; hint: string; icon: typeof Banknote }> = [
   { value: 'Efectivo', label: 'Efectivo', hint: 'Recibe y calcula el cambio', icon: Banknote },
@@ -62,23 +51,29 @@ export function POSPage() {
   const { role } = useAuth()
   const navigate = useNavigate()
   const { data, loading, error, reload } = useApi(async () => {
-    const [products, customers, cash, legal] = await Promise.all([
+    const [products, customers, cash, legal, dictionaries] = await Promise.all([
       api.inventory.list(),
       api.customers.list(),
       api.cash.current(),
-      api.legal.get().catch(() => defaultLegalConfig)
+      api.legal.get().catch(() => defaultLegalConfig),
+      api.dictionaries.list()
     ])
-    return { products, customers, cashSession: cash.current, legal }
+    return { products, customers, cashSession: cash.current, legal, dictionaries }
   }, [])
 
   const products = useMemo(() => data?.products ?? [], [data?.products])
   const customers = useMemo(() => data?.customers ?? [], [data?.customers])
   const legal = data?.legal ?? defaultLegalConfig
   const cashSession = data?.cashSession ?? null
+  const categories = useMemo(() => {
+    const fromDictionary = dictionaryValues(data?.dictionaries ?? [], 'inventory_category')
+    const names = fromDictionary.length ? fromDictionary : Array.from(new Set(products.map((product) => product.category)))
+    return ['Todos', ...names]
+  }, [data?.dictionaries, products])
 
   const [view, setView] = useState<'venta' | 'historial'>('venta')
   const [query, setQuery] = useState('')
-  const [category, setCategory] = useState<'Todos' | ProductCategory>('Todos')
+  const [category, setCategory] = useState('Todos')
   const [cart, setCart] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState('')
   const [discountType, setDiscountType] = useState<'percent' | 'amount'>('percent')
@@ -380,7 +375,7 @@ export function POSPage() {
                     <div>
                       <p className="tabular text-[14px] font-bold text-ink">{formatCurrency(product.price)}</p>
                       <p className="mt-0.5 text-[9px] text-slate-400">
-                        {product.service ? 'Servicio' : `${product.stock} en stock`}
+                        {product.service ? product.serviceType || 'Servicio' : `${product.stock} en stock`}
                       </p>
                     </div>
                     {unavailable ? (

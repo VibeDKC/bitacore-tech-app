@@ -28,6 +28,7 @@ import { toast } from 'sonner'
 import type {
   Customer,
   DeviceCategory,
+  DictionaryNode,
   Equipment,
   IntakeConditionKey,
   LegalConfig,
@@ -45,6 +46,7 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig, resolveLegalClause } from '@/lib/legalConfig'
+import { activeDictionaryNodes } from '@/lib/dictionaries'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -53,6 +55,8 @@ import { EvidenceCapture } from '@/components/evidence/EvidenceCapture'
 import type { EvidenceDraft } from '@/lib/evidence'
 import { SearchInput, Select } from '@/components/ui/Input'
 import { DocumentPreviewModal } from '@/components/orders/DocumentPreview'
+import { TechnicalSheetForm } from '@/components/orders/TechnicalSheetForm'
+import { emptyTechnicalSheet, normalizeTechnicalSheet, sanitizeTechnicalSheet } from '@/lib/technicalSheet'
 import { cn } from '@/lib/utils'
 
 const deviceOptions: Array<{
@@ -115,15 +119,6 @@ const emptyCustomerForm = {
   address: ''
 }
 
-const emptyTechnicalSheet: TechnicalSheet = {
-  os: '',
-  cpu: '',
-  gpu: '',
-  ram: '',
-  storage: '',
-  battery: ''
-}
-
 function defaultPromiseDate() {
   const date = new Date()
   date.setDate(date.getDate() + 3)
@@ -141,12 +136,13 @@ export function NewOrderPage() {
   const canCreate = can(role, 'createOrder')
   const { data: bootstrap, loading: bootLoading, error: bootError } = useApi(
     async () => {
-      const [customers, legal, technicians] = await Promise.all([
+      const [customers, legal, technicians, dictionaries] = await Promise.all([
         api.customers.list(),
         api.legal.get(),
-        api.orders.technicians()
+        api.orders.technicians(),
+        api.dictionaries.list()
       ])
-      return { customers, legal, technicians }
+      return { customers, legal, technicians, dictionaries }
     },
     []
   )
@@ -154,6 +150,7 @@ export function NewOrderPage() {
   const [customerList, setCustomerList] = useState<Customer[]>([])
   const [legalConfig, setLegalConfig] = useState<LegalConfig>(defaultLegalConfig)
   const [technicians, setTechnicians] = useState<TechnicianOption[]>([])
+  const [dictionaries, setDictionaries] = useState<DictionaryNode[]>([])
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([])
   const [equipmentId, setEquipmentId] = useState('')
   const [customerId, setCustomerId] = useState('')
@@ -168,6 +165,7 @@ export function NewOrderPage() {
     setCustomerList(bootstrap.customers)
     setLegalConfig(bootstrap.legal)
     setTechnicians(bootstrap.technicians)
+    setDictionaries(bootstrap.dictionaries)
     setTechnicianId((current) => current || bootstrap.technicians[0]?.id || '')
   }, [bootstrap])
 
@@ -196,6 +194,7 @@ export function NewOrderPage() {
 
   function applyEquipment(equipment: Equipment) {
     setCategory((equipment.category as DeviceCategory) || 'otro')
+    setDeviceLabel(equipment.categoryLabel || equipment.equipmentType || 'Equipo')
     setBrand(equipment.brand)
     setModel(equipment.model)
     setSerial(equipment.serial)
@@ -205,11 +204,7 @@ export function NewOrderPage() {
         ? equipment.accessories.split(',').map((item) => item.trim()).filter(Boolean)
         : []
     )
-    setTechnicalSheet(
-      equipment.technicalSheet
-        ? { ...emptyTechnicalSheet, ...(equipment.technicalSheet as Partial<TechnicalSheet>) }
-        : emptyTechnicalSheet
-    )
+    setTechnicalSheet(normalizeTechnicalSheet(equipment.technicalSheet))
   }
 
   function selectEquipment(id: string) {
@@ -219,7 +214,7 @@ export function NewOrderPage() {
       setModel('')
       setSerial('')
       setAccessories([])
-      setTechnicalSheet(emptyTechnicalSheet)
+      setTechnicalSheet(emptyTechnicalSheet())
       return
     }
     const equipment = equipmentList.find((item) => item.id === id)
@@ -227,6 +222,7 @@ export function NewOrderPage() {
   }
 
   const [category, setCategory] = useState<DeviceCategory>('laptop')
+  const [deviceLabel, setDeviceLabel] = useState('Laptop')
   const [brand, setBrand] = useState('')
   const [model, setModel] = useState('')
   const [serial, setSerial] = useState('')
@@ -251,7 +247,7 @@ export function NewOrderPage() {
   const [promisedAt, setPromisedAt] = useState(defaultPromiseDate)
   const [notes, setNotes] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [technicalSheet, setTechnicalSheet] = useState<TechnicalSheet>(emptyTechnicalSheet)
+  const [technicalSheet, setTechnicalSheet] = useState<TechnicalSheet>(() => emptyTechnicalSheet())
 
   const [legalAccepted, setLegalAccepted] = useState(false)
   const [legalOpen, setLegalOpen] = useState(false)
@@ -261,9 +257,35 @@ export function NewOrderPage() {
   const [evidenceDrafts, setEvidenceDrafts] = useState<EvidenceDraft[]>([])
   const [evidenceWarningOpen, setEvidenceWarningOpen] = useState(false)
 
+  const deviceCards = useMemo(() => {
+    const fromDictionary = activeDictionaryNodes(dictionaries, 'device_type').map((node) => {
+      const base = node.code ? deviceOptions.find((item) => item.value === node.code) : undefined
+      return {
+        key: base?.value ?? node.id,
+        category: (base?.value ?? 'otro') as DeviceCategory,
+        label: node.name,
+        equipmentType: base?.equipmentType ?? node.name,
+        hint: base?.hint ?? 'Tipo personalizado',
+        icon: base?.icon ?? Package
+      }
+    })
+    if (fromDictionary.length) return fromDictionary
+    return deviceOptions.map((item) => ({
+      key: item.value,
+      category: item.value,
+      label: item.label,
+      equipmentType: item.equipmentType,
+      hint: item.hint,
+      icon: item.icon
+    }))
+  }, [dictionaries])
+
   const selectedCustomer = customerList.find((item) => item.id === customerId) ?? null
   const selectedEquipment = equipmentList.find((item) => item.id === equipmentId) ?? null
-  const selectedDevice = deviceOptions.find((item) => item.value === category) ?? deviceOptions[0]
+  const selectedDevice =
+    deviceCards.find((item) => item.label === deviceLabel) ??
+    deviceCards.find((item) => item.category === category) ??
+    deviceCards[0]
   const SelectedDeviceIcon = selectedDevice.icon
 
   const customerMatches = useMemo(() => {
@@ -379,7 +401,9 @@ export function NewOrderPage() {
     setCustomerId('')
     setCustomerQuery('')
     setCustomerDropdown(false)
-    setCategory('laptop')
+    const laptopCard = deviceCards.find((item) => item.category === 'laptop') ?? deviceCards[0]
+    setCategory(laptopCard?.category ?? 'laptop')
+    setDeviceLabel(laptopCard?.label ?? 'Laptop')
     setBrand('')
     setModel('')
     setSerial('')
@@ -403,7 +427,7 @@ export function NewOrderPage() {
     setPromisedAt(defaultPromiseDate())
     setNotes('')
     setAdvancedOpen(false)
-    setTechnicalSheet(emptyTechnicalSheet)
+    setTechnicalSheet(emptyTechnicalSheet())
     setLegalAccepted(false)
     setEvidenceDrafts([])
     setEvidenceWarningOpen(false)
@@ -477,7 +501,7 @@ export function NewOrderPage() {
       customerWithheldCredentials: noCredentials,
       estimate: estimateValue,
       diagnosticFee: diagnosticValue,
-      technicalSheet,
+      technicalSheet: sanitizeTechnicalSheet(technicalSheet),
       receivedBy: displayUser.name,
       receivedAt: now,
       legal: {
@@ -739,14 +763,17 @@ export function NewOrderPage() {
             ) : null}
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              {deviceOptions.map((option) => {
+              {deviceCards.map((option) => {
                 const Icon = option.icon
-                const active = category === option.value
+                const active = selectedDevice.key === option.key
                 return (
                   <button
-                    key={option.value}
+                    key={option.key}
                     type="button"
-                    onClick={() => setCategory(option.value)}
+                    onClick={() => {
+                      setCategory(option.category)
+                      setDeviceLabel(option.label)
+                    }}
                     className={cn(
                       'focus-ring rounded-xl border p-3 text-left transition',
                       active
@@ -755,7 +782,7 @@ export function NewOrderPage() {
                     )}
                   >
                     <Icon className={cn('h-5 w-5', active ? 'text-brand-600' : 'text-slate-400')} />
-                    <p className="mt-2 text-[11px] font-semibold">{option.label}</p>
+                    <p className="mt-2 line-clamp-2 text-[11px] font-semibold">{option.label}</p>
                     <p className="mt-0.5 text-[8.5px] leading-snug text-slate-400">{option.hint}</p>
                   </button>
                 )
@@ -1170,31 +1197,19 @@ export function NewOrderPage() {
                 </span>
                 <div>
                   <p className="text-[13px] font-bold text-ink">Ficha técnica avanzada</p>
-                  <p className="mt-0.5 text-[10px] text-slate-400">Opcional. Conserva OS, CPU, GPU, RAM, almacenamiento y batería.</p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">Opcional. Componentes, módulos de RAM y discos con datos del diccionario.</p>
                 </div>
               </div>
               {advancedOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
             </button>
             {advancedOpen ? (
-              <div className="grid gap-3 border-t border-line px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 lg:px-6">
-                {[
-                  ['Sistema operativo', 'os', 'Windows 11, macOS Sonoma...'],
-                  ['Procesador', 'cpu', 'Intel Core i7, Ryzen 5...'],
-                  ['Tarjeta gráfica', 'gpu', 'RTX 3060, integrada...'],
-                  ['Memoria RAM', 'ram', '16 GB DDR4...'],
-                  ['Almacenamiento', 'storage', 'SSD NVMe 1 TB...'],
-                  ['Batería', 'battery', 'Estado o duración...']
-                ].map(([label, key, placeholder]) => (
-                  <label key={key} className="block">
-                    <span className="field-label">{label}</span>
-                    <input
-                      value={technicalSheet[key as keyof TechnicalSheet] ?? ''}
-                      onChange={(event) => setTechnicalSheet({ ...technicalSheet, [key]: event.target.value })}
-                      placeholder={placeholder}
-                      className="field"
-                    />
-                  </label>
-                ))}
+              <div className="border-t border-line px-5 py-4 lg:px-6">
+                <TechnicalSheetForm
+                  value={technicalSheet}
+                  onChange={setTechnicalSheet}
+                  nodes={dictionaries}
+                  disabled={saving}
+                />
               </div>
             ) : null}
           </section>
@@ -1274,7 +1289,7 @@ export function NewOrderPage() {
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
                   />
                   <span className="text-[10px] leading-relaxed text-slate-600">
-                    El cliente acepta los términos de recepción <span className="font-semibold">({legalConfig.version})</span>, incluido el abandono a los {legalConfig.abandonmentDays} días.
+                    El cliente acepta los términos de recepción, incluido el abandono a los {legalConfig.abandonmentDays} días.
                   </span>
                 </label>
                 <button
@@ -1390,7 +1405,7 @@ export function NewOrderPage() {
         open={legalOpen}
         onClose={() => setLegalOpen(false)}
         title="Términos de recepción"
-        description={`${legalConfig.businessName} · versión ${legalConfig.version} · abandono a los ${legalConfig.abandonmentDays} días`}
+        description={`${legalConfig.businessName} · abandono a los ${legalConfig.abandonmentDays} días`}
         size="lg"
         footer={
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.6.0 — 2026-10-26
+
+### Diccionarios
+- Nuevo módulo **Configuración → Diccionarios** con jerarquía, orden, activación y edición.
+- Valores del sistema protegidos contra eliminación; se pueden renombrar, reordenar o desactivar.
+- Diccionarios sembrados: tipos de equipo, sistemas operativos, marcas y familias de CPU, marcas de GPU, tipos de RAM, almacenamiento, categorías y ubicaciones de inventario, categorías de proveedor y tipos de servicio.
+- Los valores históricos de inventario, proveedores y equipos se agregan automáticamente al migrar.
+- Renombrar categorías de inventario, ubicaciones, categorías de proveedor o tipos de servicio actualiza las referencias existentes.
+- Permiso `manageDictionaries` para administradores y propietario.
+
+### Ficha técnica
+- Ficha estructurada en la recepción de OT:
+  - CPU con marca, familia y modelo.
+  - GPU con tipo, marca, modelo y VRAM.
+  - RAM con filas repetibles: tipo, capacidad, velocidad, marca y garantía.
+  - Almacenamiento con filas repetibles: tipo, capacidad, velocidad, modelo, salud y garantía.
+  - Batería, sistema operativo y observaciones.
+- Los campos desplegables se alimentan de diccionarios; los modelos y detalles siguen editables.
+- Las OT antiguas conservan su ficha plana como “ficha anterior” y se muestra completa.
+- La ficha estructurada se muestra en la OT y se imprime en A4.
+- Se eliminó la versión visible de los términos en la recepción.
+
+### Inventario y servicios
+- Se puede marcar un producto como servicio y asignarle un tipo de servicio del diccionario.
+- Las categorías y ubicaciones del inventario ahora salen del diccionario.
+- Las categorías de proveedor salen del diccionario.
+
+### Calidad
+- Aceptación 1.6.0: 14/14.
+- Migración sobre copia de la base real: OK, integridad y diccionarios idempotentes.
+- Regresión: 1.5.0 11/11, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Instalador `BitacoreTech-1.6.0-x64.exe`.
+
+### Pendiente para siguientes entregas
+- Credenciales cifradas del equipo y reportes de diagnóstico.
+- Identidad por teléfono y múltiples teléfonos.
+- IA de facturas de compra con Gemini, sin guardar imágenes.
+- Firma del instalador, migración Python, catálogo web y piloto.
+
 ## 1.5.0 — 2026-10-26
 
 ### POS y documentos

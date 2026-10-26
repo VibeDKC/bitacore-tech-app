@@ -24,6 +24,7 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { calculateNitDv } from '@/lib/nit'
 import { downloadCsv } from '@/lib/download'
 import { api, errorMessage } from '@/lib/backend'
+import { dictionaryValues } from '@/lib/dictionaries'
 import { useApi } from '@/lib/useApi'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -60,12 +61,20 @@ function parseMoney(value: string) {
 export function PurchasesPage() {
   const { role } = useAuth()
   const { data, loading, error, reload } = useApi(async () => {
-    const [result, products] = await Promise.all([api.purchases.list(), api.inventory.list()])
-    return { ...result, products }
+    const [result, products, dictionaries] = await Promise.all([
+      api.purchases.list(),
+      api.inventory.list(),
+      api.dictionaries.list()
+    ])
+    return { ...result, products, dictionaries }
   }, [])
   const purchases = useMemo(() => data?.purchases ?? [], [data?.purchases])
   const suppliers = useMemo(() => data?.suppliers ?? [], [data?.suppliers])
   const products = useMemo(() => data?.products ?? [], [data?.products])
+  const supplierCategoryOptions = useMemo(() => {
+    const names = dictionaryValues(data?.dictionaries ?? [], 'supplier_category')
+    return names.length ? names : ['Repuestos']
+  }, [data?.dictionaries])
 
   const [tab, setTab] = useState<'compras' | 'proveedores'>('compras')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -146,7 +155,14 @@ export function PurchasesPage() {
 
   function openNewSupplier() {
     setEditingSupplier(null)
-    setSupplierForm({ name: '', nit: '', isForeignNit: false, contact: '', phone: '', category: 'Repuestos' })
+    setSupplierForm({
+      name: '',
+      nit: '',
+      isForeignNit: false,
+      contact: '',
+      phone: '',
+      category: supplierCategoryOptions[0] ?? 'Repuestos'
+    })
     setSupplierOpen(true)
   }
 
@@ -759,12 +775,17 @@ export function PurchasesPage() {
           </label>
           <label className="block">
             <span className="field-label">Categoría</span>
-            <input
+            <select
               value={supplierForm.category}
               onChange={(event) => setSupplierForm({ ...supplierForm, category: event.target.value })}
               className="field"
-              placeholder="Repuestos"
-            />
+            >
+              {[...new Set([...supplierCategoryOptions, supplierForm.category].filter(Boolean))].map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block">
             <span className="field-label">Contacto</span>

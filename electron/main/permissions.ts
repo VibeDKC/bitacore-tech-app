@@ -11,6 +11,7 @@ export type BackendCapability =
   | 'purgeData'
   | 'configureLegal'
   | 'configureAI'
+  | 'manageDictionaries'
   | 'annulInvoice'
   | 'closeCash'
   | 'createPurchase'
@@ -42,6 +43,7 @@ export const ALL_CAPABILITIES: BackendCapability[] = [
   'purgeData',
   'configureLegal',
   'configureAI',
+  'manageDictionaries',
   'annulInvoice',
   'closeCash',
   'createPurchase',
@@ -97,6 +99,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'purgeData',
     'configureLegal',
     'configureAI',
+    'manageDictionaries',
     'annulInvoice',
     'closeCash',
     'createPurchase',
@@ -121,6 +124,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'viewCosts',
     'viewGrossMargin',
     'manageStaff',
+    'manageDictionaries',
     'createBackup',
     'annulInvoice',
     'closeCash',

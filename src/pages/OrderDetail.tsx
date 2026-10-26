@@ -41,6 +41,7 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig } from '@/lib/legalConfig'
+import { technicalSheetEntries } from '@/lib/technicalSheet'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Avatar } from '@/components/ui/Avatar'
@@ -200,16 +201,7 @@ export function OrderDetailPage() {
         .filter(([, active]) => active)
         .map(([key]) => conditionLabels[key] ?? key)
     : []
-  const technicalEntries = intake?.technicalSheet
-    ? [
-        ['Sistema operativo', intake.technicalSheet.os],
-        ['CPU', intake.technicalSheet.cpu],
-        ['GPU', intake.technicalSheet.gpu],
-        ['RAM', intake.technicalSheet.ram],
-        ['Almacenamiento', intake.technicalSheet.storage],
-        ['Batería', intake.technicalSheet.battery]
-      ].filter(([, value]) => Boolean(value))
-    : []
+  const technicalEntries = intake?.technicalSheet ? technicalSheetEntries(intake.technicalSheet) : []
   const sortedTimeline = useMemo(
     () =>
       [...(order?.timeline ?? [])].sort(

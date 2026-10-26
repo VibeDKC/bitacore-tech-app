@@ -21,12 +21,13 @@ import {
   Warehouse
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Product, ProductCategory, ProductRotation, StockMovement, StockStatus } from '@/types'
+import type { Product, ProductRotation, StockMovement, StockStatus } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/format'
 import { getStockStatus } from '@/lib/status'
 import { downloadCsv } from '@/lib/download'
+import { dictionaryValues } from '@/lib/dictionaries'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -40,8 +41,7 @@ import { ProgressBar } from '@/components/ui/EmptyState'
 import { SegmentedTabs } from '@/components/ui/Tabs'
 import { cn } from '@/lib/utils'
 
-const categoryOptions: Array<'Todas' | ProductCategory> = [
-  'Todas',
+const defaultCategories = [
   'Almacenamiento',
   'Memoria',
   'Periféricos',
@@ -51,6 +51,7 @@ const categoryOptions: Array<'Todas' | ProductCategory> = [
   'Insumos',
   'Servicios'
 ]
+const defaultLocations = ['Bodega A', 'Bodega B', 'Mostrador', 'Taller']
 
 const movementSeed = [
   { id: 'mv1', type: 'Venta', quantity: -1, detail: 'FV-000184 · Camila Ríos', date: '25 oct 2026 · 10:42' },
@@ -63,7 +64,7 @@ const emptyProductForm = {
   name: '',
   sku: '',
   barcode: '',
-  category: 'Repuestos' as ProductCategory,
+  category: 'Repuestos',
   location: 'Bodega A',
   stock: '0',
   minStock: '2',
@@ -71,16 +72,31 @@ const emptyProductForm = {
   price: '',
   warrantyDays: '90',
   rotation: 'rotativo' as ProductRotation,
-  alertEnabled: true
+  alertEnabled: true,
+  service: false,
+  serviceType: ''
 }
 
 export function InventoryPage() {
   const { role } = useAuth()
   const [searchParams] = useSearchParams()
-  const { data, loading, error, reload, setData } = useApi(() => api.inventory.list(), [])
-  const items = data ?? []
+  const { data, loading, error, reload, setData } = useApi(async () => {
+    const [products, dictionaries] = await Promise.all([api.inventory.list(), api.dictionaries.list()])
+    return { products, dictionaries }
+  }, [])
+  const items = data?.products ?? []
+  const dictionaries = data?.dictionaries ?? []
+  const categoryOptions = useMemo(() => {
+    const names = dictionaryValues(dictionaries, 'inventory_category')
+    return ['Todas', ...(names.length ? names : defaultCategories)]
+  }, [dictionaries])
+  const locationOptions = useMemo(() => {
+    const names = dictionaryValues(dictionaries, 'inventory_location')
+    return names.length ? names : defaultLocations
+  }, [dictionaries])
+  const serviceTypeOptions = useMemo(() => dictionaryValues(dictionaries, 'service_type'), [dictionaries])
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
-  const [category, setCategory] = useState<'Todas' | ProductCategory>('Todas')
+  const [category, setCategory] = useState('Todas')
   const [stockFilter, setStockFilter] = useState<'todos' | StockStatus>('todos')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [adjustOpen, setAdjustOpen] = useState(false)
@@ -152,7 +168,9 @@ export function InventoryPage() {
     setSaving(true)
     try {
       const updated = await api.inventory.adjust(selected.id, amount, adjustReason)
-      setData((current) => (current ? current.map((item) => (item.id === updated.id ? updated : item)) : current))
+      setData((current) =>
+        current ? { ...current, products: current.products.map((item) => (item.id === updated.id ? updated : item)) } : current
+      )
       const rows = await api.inventory.movements(selected.id)
       setMovements(rows)
       setAdjustOpen(false)
@@ -165,6 +183,12 @@ export function InventoryPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  function openCreate() {
+    const firstCategory = categoryOptions.find((item) => item !== 'Todas') ?? 'Repuestos'
+    setForm({ ...emptyProductForm, category: firstCategory, location: locationOptions[0] ?? 'Bodega A' })
+    setCreateOpen(true)
   }
 
   async function createProduct() {
@@ -186,11 +210,13 @@ export function InventoryPage() {
         price: Number(form.price),
         warrantyDays: Number(form.warrantyDays) || 0,
         rotation: form.rotation,
-        alertEnabled: form.alertEnabled
+        alertEnabled: form.alertEnabled,
+        service: form.service,
+        serviceType: form.service ? form.serviceType || undefined : undefined
       })
-      setData((current) => (current ? [product, ...current] : [product]))
+      setData((current) => (current ? { ...current, products: [product, ...current.products] } : current))
       setCreateOpen(false)
-      setForm(emptyProductForm)
+      setForm({ ...emptyProductForm, category: categoryOptions.find((item) => item !== 'Todas') ?? 'Repuestos', location: locationOptions[0] ?? 'Bodega A' })
       toast.success('Producto creado', { description: `${product.name} · ${product.sku}` })
     } catch (failure) {
       toast.error('No se pudo crear el producto', { description: errorMessage(failure) })
@@ -213,7 +239,9 @@ export function InventoryPage() {
       price: String(product.price),
       warrantyDays: String(product.warrantyDays),
       rotation: product.rotation,
-      alertEnabled: product.alertEnabled
+      alertEnabled: product.alertEnabled,
+      service: Boolean(product.service),
+      serviceType: product.serviceType ?? ''
     })
     setEditOpen(true)
   }
@@ -237,9 +265,13 @@ export function InventoryPage() {
         price: Number(editForm.price),
         warrantyDays: Number(editForm.warrantyDays) || 0,
         rotation: editForm.rotation,
-        alertEnabled: editForm.alertEnabled
+        alertEnabled: editForm.alertEnabled,
+        service: editForm.service,
+        serviceType: editForm.service ? editForm.serviceType || undefined : undefined
       })
-      setData((current) => (current ? current.map((item) => (item.id === updated.id ? updated : item)) : current))
+      setData((current) =>
+        current ? { ...current, products: current.products.map((item) => (item.id === updated.id ? updated : item)) } : current
+      )
       setEditOpen(false)
       toast.success('Referencia actualizada', { description: `${updated.name} · ${updated.sku}` })
     } catch (failure) {
@@ -314,7 +346,7 @@ export function InventoryPage() {
               Exportar
             </Button>
             {canEdit ? (
-              <Button onClick={() => setCreateOpen(true)} leftIcon={<PackagePlus className="h-4 w-4" />}>
+              <Button onClick={openCreate} leftIcon={<PackagePlus className="h-4 w-4" />}>
                 Nuevo producto
               </Button>
             ) : null}
@@ -362,7 +394,7 @@ export function InventoryPage() {
             <div className="relative">
               <Select
                 value={category}
-                onChange={(event) => setCategory(event.target.value as 'Todas' | ProductCategory)}
+                onChange={(event) => setCategory(event.target.value)}
                 className="h-10 w-full pl-3 pr-8 text-[11px] font-semibold sm:w-[170px]"
               >
                 {categoryOptions.map((item) => (
@@ -560,6 +592,7 @@ export function InventoryPage() {
                   ['Código de barras', selected.barcode],
                   ['Categoría', selected.category],
                   ['Ubicación', selected.location],
+                  ...(selected.service ? [['Tipo de servicio', selected.serviceType || 'No definido']] : []),
                   ['Garantía', `${selected.warrantyDays} días`]
                 ].map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
@@ -726,7 +759,7 @@ export function InventoryPage() {
             <span className="field-label">Categoría</span>
             <select
               value={form.category}
-              onChange={(event) => setForm({ ...form, category: event.target.value as ProductCategory })}
+              onChange={(event) => setForm({ ...form, category: event.target.value })}
               className="field"
             >
               {categoryOptions.filter((item) => item !== 'Todas').map((item) => (
@@ -739,13 +772,52 @@ export function InventoryPage() {
           <label className="block">
             <span className="field-label">Ubicación</span>
             <select value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} className="field">
-              {['Bodega A', 'Bodega B', 'Mostrador', 'Taller'].map((item) => (
+              {locationOptions.map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
               ))}
             </select>
           </label>
+          <label className="flex items-end">
+            <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={form.service}
+                onChange={(event) => {
+                  const service = event.target.checked
+                  setForm({
+                    ...form,
+                    service,
+                    serviceType: service ? form.serviceType : '',
+                    category: service && categoryOptions.includes('Servicios') ? 'Servicios' : form.category,
+                    stock: service ? '0' : form.stock,
+                    minStock: service ? '0' : form.minStock,
+                    alertEnabled: service ? false : form.alertEnabled
+                  })
+                }}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+              />
+              <span className="text-[11px] font-semibold text-ink">Es un servicio</span>
+            </span>
+          </label>
+          {form.service ? (
+            <label className="block">
+              <span className="field-label">Tipo de servicio</span>
+              <select
+                value={form.serviceType}
+                onChange={(event) => setForm({ ...form, serviceType: event.target.value })}
+                className="field"
+              >
+                <option value="">Sin especificar</option>
+                {[...new Set([...serviceTypeOptions, form.serviceType].filter(Boolean))].map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="block">
             <span className="field-label">Garantía (días)</span>
             <input
@@ -771,7 +843,8 @@ export function InventoryPage() {
                 const rotation = event.target.value as ProductRotation
                 setForm({ ...form, rotation, alertEnabled: rotation === 'rotativo' })
               }}
-              className="field"
+              disabled={form.service}
+              className="field disabled:bg-slate-50 disabled:text-slate-400"
             >
               <option value="rotativo">Rotativo</option>
               <option value="no_rotativo">No rotativo</option>
@@ -783,8 +856,9 @@ export function InventoryPage() {
               <input
                 type="checkbox"
                 checked={form.alertEnabled}
+                disabled={form.service}
                 onChange={(event) => setForm({ ...form, alertEnabled: event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
               />
               <span className="text-[11px] font-semibold text-ink">Generar alerta de stock</span>
             </span>
@@ -852,7 +926,7 @@ export function InventoryPage() {
             <span className="field-label">Categoría</span>
             <select
               value={editForm.category}
-              onChange={(event) => setEditForm({ ...editForm, category: event.target.value as ProductCategory })}
+              onChange={(event) => setEditForm({ ...editForm, category: event.target.value })}
               className="field"
             >
               {categoryOptions.filter((item) => item !== 'Todas').map((item) => (
@@ -864,8 +938,55 @@ export function InventoryPage() {
           </label>
           <label className="block">
             <span className="field-label">Ubicación</span>
-            <input value={editForm.location} onChange={(event) => setEditForm({ ...editForm, location: event.target.value })} className="field" />
+            <select
+              value={editForm.location}
+              onChange={(event) => setEditForm({ ...editForm, location: event.target.value })}
+              className="field"
+            >
+              {[...new Set([...locationOptions, editForm.location].filter(Boolean))].map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
           </label>
+          <label className="flex items-end">
+            <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={editForm.service}
+                onChange={(event) => {
+                  const service = event.target.checked
+                  setEditForm({
+                    ...editForm,
+                    service,
+                    serviceType: service ? editForm.serviceType : '',
+                    category: service && categoryOptions.includes('Servicios') ? 'Servicios' : editForm.category,
+                    alertEnabled: service ? false : editForm.alertEnabled
+                  })
+                }}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+              />
+              <span className="text-[11px] font-semibold text-ink">Es un servicio</span>
+            </span>
+          </label>
+          {editForm.service ? (
+            <label className="block">
+              <span className="field-label">Tipo de servicio</span>
+              <select
+                value={editForm.serviceType}
+                onChange={(event) => setEditForm({ ...editForm, serviceType: event.target.value })}
+                className="field"
+              >
+                <option value="">Sin especificar</option>
+                {[...new Set([...serviceTypeOptions, editForm.serviceType].filter(Boolean))].map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="block">
             <span className="field-label">Garantía (días)</span>
             <input
@@ -892,7 +1013,8 @@ export function InventoryPage() {
                 const rotation = event.target.value as ProductRotation
                 setEditForm({ ...editForm, rotation, alertEnabled: rotation === 'rotativo' })
               }}
-              className="field"
+              disabled={editForm.service}
+              className="field disabled:bg-slate-50 disabled:text-slate-400"
             >
               <option value="rotativo">Rotativo</option>
               <option value="no_rotativo">No rotativo</option>
@@ -904,8 +1026,9 @@ export function InventoryPage() {
               <input
                 type="checkbox"
                 checked={editForm.alertEnabled}
+                disabled={editForm.service}
                 onChange={(event) => setEditForm({ ...editForm, alertEnabled: event.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
               />
               <span className="text-[11px] font-semibold text-ink">Generar alerta de stock</span>
             </span>

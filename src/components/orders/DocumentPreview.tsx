@@ -11,6 +11,7 @@ import {
 import type { Customer, IntakeConditionKey, LegalConfig, LockType, PowerState, TechnicalSheet, WorkOrder } from '@/types'
 import { defaultLegalConfig, resolveLegalClause } from '@/lib/legalConfig'
 import { formatCurrency, formatDateTime } from '@/lib/format'
+import { technicalSheetEntries } from '@/lib/technicalSheet'
 import { cn } from '@/lib/utils'
 import { Barcode } from '@/components/orders/Barcode'
 import { Button } from '@/components/ui/Button'
@@ -294,6 +295,7 @@ function A4Copy({
   const measuredRef = useRef('')
   const [scale, setScale] = useState(1)
   const measureKey = `${order.id}|${copyLabel}|${data.legalVersion}`
+  const technicalEntries = technicalSheetEntries(data.technicalSheet)
 
   // Cada copia dispone de media hoja. Si una OT trae más texto (cláusulas
   // ampliadas, fallas extensas), se reduce uniformemente para conservar todo el
@@ -364,21 +366,11 @@ function A4Copy({
             <Block label="Bloqueo y autorización" value={data.lockSummary} />
           </div>
 
-          {data.technicalSheet && Object.values(data.technicalSheet).some(Boolean) ? (
+          {technicalEntries.length ? (
             <div className="mt-1.5 rounded border border-black/25 px-2 py-1">
               <p className="text-[6.5px] font-semibold uppercase tracking-[0.08em] opacity-60">Ficha técnica registrada</p>
               <p className="mt-0.5 text-[7px] leading-snug">
-                {[
-                  ['SO', data.technicalSheet.os],
-                  ['CPU', data.technicalSheet.cpu],
-                  ['GPU', data.technicalSheet.gpu],
-                  ['RAM', data.technicalSheet.ram],
-                  ['Almacenamiento', data.technicalSheet.storage],
-                  ['Batería', data.technicalSheet.battery]
-                ]
-                  .filter(([, value]) => value)
-                  .map(([label, value]) => `${label}: ${value}`)
-                  .join(' · ')}
+                {technicalEntries.map(([label, value]) => `${label}: ${value}`).join(' · ')}
               </p>
             </div>
           ) : null}

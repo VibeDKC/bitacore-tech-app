@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import {
   AlertTriangle,
+  BookOpen,
   Building2,
   Camera,
   Check,
@@ -46,14 +47,16 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Avatar } from '@/components/ui/Avatar'
 import { Modal } from '@/components/ui/Modal'
+import { DictionariesPanel } from '@/components/settings/DictionariesPanel'
 import { cn } from '@/lib/utils'
 
-type SettingsTab = 'negocio' | 'usuarios' | 'impresion' | 'respaldos' | 'ia' | 'seguridad'
+type SettingsTab = 'negocio' | 'usuarios' | 'diccionarios' | 'impresion' | 'respaldos' | 'ia' | 'seguridad'
 type PrintFormat = 'a4' | '80mm' | '58mm'
 
 const tabs: Array<{ value: SettingsTab; label: string; description: string; icon: typeof Store }> = [
   { value: 'negocio', label: 'Negocio', description: 'Identidad y sucursal', icon: Store },
   { value: 'usuarios', label: 'Usuarios y roles', description: 'Equipo y permisos', icon: Users },
+  { value: 'diccionarios', label: 'Diccionarios', description: 'Catálogos y desplegables', icon: BookOpen },
   { value: 'impresion', label: 'Impresión', description: 'Formatos y comprobantes', icon: Printer },
   { value: 'respaldos', label: 'Respaldos', description: 'Backup y restauración', icon: DatabaseBackup },
   { value: 'ia', label: 'IA y API', description: 'Claves y asistentes', icon: Sparkles },
@@ -222,6 +225,7 @@ export function SettingsPage() {
   const [rolePermissionsDraft, setRolePermissionsDraft] = useState<Record<string, boolean>>({})
 
   const canManageStaff = can(role, 'manageStaff')
+  const canDictionaries = can(role, 'manageDictionaries')
   const canManageAdmins = can(role, 'manageAdmins')
   const canCreateBackup = can(role, 'createBackup')
   const canRestore = can(role, 'restoreBackup')
@@ -1433,6 +1437,8 @@ export function SettingsPage() {
               </div>
             </>
           ) : null}
+
+          {tab === 'diccionarios' ? <DictionariesPanel canManage={canDictionaries} /> : null}
 
           {tab === 'impresion' ? (
             <>

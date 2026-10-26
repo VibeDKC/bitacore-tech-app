@@ -135,7 +135,9 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:f2f3` | Prueba aislada de proveedores, compra, comprobante, técnico, OT e historiales. |
 | `npm run test:acceptance:f4f5` | Prueba aislada de NIT/DV, permisos, equipos, QR, fidelidad, respaldos y sesión. |
 | `npm run test:acceptance:1.5.0` | Historial POS, notas de servicio, inventario editable, alertas, foto y sesión. |
+| `npm run test:acceptance:1.6.0` | Diccionarios, jerarquías, ficha estructurada, legado y permisos. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
+| `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 
 ## Pruebas de aceptación
 
@@ -147,10 +149,12 @@ npm run test:acceptance:f0f1
 npm run test:acceptance:f2f3
 npm run test:acceptance:f4f5
 npm run test:acceptance:1.5.0
+npm run test:acceptance:1.6.0
 npm run test:migration:1.5.0
+npm run test:migration:1.6.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK` y `11/11 OK`. La prueba de migración usa una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifica la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `11/11 OK` y `14/14 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -158,7 +162,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.5.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.6.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -173,5 +177,7 @@ El instalador queda en `release/` como `BitacoreTech-1.5.0-x64.exe`. La configur
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
 - El inventario permite editar referencias solo a administradores y propietario; el stock se mueve mediante ajustes auditados.
 - Las alertas de stock son opcionales por referencia y las referencias de prueba pueden quedar sin aviso.
+- Los diccionarios alimentan la ficha técnica, las categorías y ubicaciones de inventario, las categorías de proveedor y los tipos de servicio.
+- La ficha técnica estructurada se guarda como snapshot en cada OT; las OT anteriores conservan su texto original.
 - La IA es opcional y su integración real (facturas, diagnóstico y resúmenes) sigue pendiente. Hoy solo existe la configuración y la huella de la clave; no se guarda la clave en texto plano.
 - Las fotos de evidencia se conservan en la carpeta de datos y en cada respaldo completo; no se envían a servicios externos.
