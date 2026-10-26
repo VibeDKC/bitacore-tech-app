@@ -1,0 +1,169 @@
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/plus-jakarta-sans';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+    min-width: 320px;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    @apply bg-brand-200 text-brand-900;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd2e1 transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-[22px] border border-line bg-white shadow-card;
+  }
+
+  .card-flat {
+    @apply rounded-[18px] border border-line bg-white;
+  }
+
+  .field {
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-ink shadow-[0_1px_2px_rgba(16,24,40,0.03)] outline-none transition placeholder:text-slate-400 focus:border-brand-300 focus:ring-4 focus:ring-brand-100/70;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500;
+  }
+
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400;
+  }
+
+  .focus-ring {
+    @apply outline-none focus-visible:ring-4 focus-visible:ring-brand-100;
+  }
+
+  .table-th {
+    @apply whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400;
+  }
+
+  .table-td {
+    @apply whitespace-nowrap px-4 py-4 text-sm text-slate-600;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .bg-grid {
+    background-image: linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  /* La app queda fuera del flujo de impresión. El comprobante se monta en un
+     portal directo al body, por eso ocultamos el árbol de React y los overlays. */
+  #root,
+  .no-print,
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  .order-print-root {
+    display: block !important;
+    position: static !important;
+    visibility: visible !important;
+    inset: auto !important;
+    z-index: auto !important;
+    pointer-events: auto !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .order-print-root .order-print-sheet {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+  }
+
+  .order-print-ticket {
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  .order-print-a4 {
+    width: 210mm !important;
+    /* 1 mm de holgura evita la página en blanco por redondeo del navegador. */
+    height: 296mm !important;
+    overflow: hidden;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}

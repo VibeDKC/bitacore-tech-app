@@ -1,0 +1,2140 @@
+{
+  "products": [
+    {
+      "id": "p1",
+      "name": "SSD NVMe Kingston 1TB",
+      "sku": "SSD-KIN-1TB",
+      "barcode": "740617324567",
+      "category": "Almacenamiento",
+      "location": "Bodega A",
+      "stock": 24,
+      "minStock": 6,
+      "cost": 285000,
+      "price": 389000,
+      "warrantyDays": 365,
+      "serials": [
+        "KNG1TB-8841",
+        "KNG1TB-8842",
+        "KNG1TB-8843"
+      ],
+      "tone": "from-indigo-500/15 to-indigo-500/5 text-indigo-600"
+    },
+    {
+      "id": "p2",
+      "name": "Memoria RAM DDR4 16GB",
+      "sku": "RAM-DDR4-16",
+      "barcode": "740617998812",
+      "category": "Memoria",
+      "location": "Bodega A",
+      "stock": 18,
+      "minStock": 5,
+      "cost": 165000,
+      "price": 229000,
+      "warrantyDays": 365,
+      "serials": [
+        "RAM16-3321",
+        "RAM16-3322"
+      ],
+      "tone": "from-sky-500/15 to-sky-500/5 text-sky-600"
+    },
+    {
+      "id": "p3",
+      "name": "Teclado mecánico Redragon Kumara",
+      "sku": "TEC-RED-KUM",
+      "barcode": "6950376712345",
+      "category": "Periféricos",
+      "location": "Mostrador",
+      "stock": 12,
+      "minStock": 4,
+      "cost": 145000,
+      "price": 199000,
+      "warrantyDays": 180,
+      "serials": [],
+      "tone": "from-violet-500/15 to-violet-500/5 text-violet-600"
+    },
+    {
+      "id": "p4",
+      "name": "Mouse Logitech M170",
+      "sku": "MOU-LOG-M170",
+      "barcode": "097855123456",
+      "category": "Periféricos",
+      "location": "Mostrador",
+      "stock": 31,
+      "minStock": 8,
+      "cost": 38000,
+      "price": 59000,
+      "warrantyDays": 90,
+      "serials": [],
+      "tone": "from-emerald-500/15 to-emerald-500/5 text-emerald-600"
+    },
+    {
+      "id": "p5",
+      "name": "Pasta térmica Arctic MX-4",
+      "sku": "INS-ARC-MX4",
+      "barcode": "872767007123",
+      "category": "Insumos",
+      "location": "Taller",
+      "stock": 42,
+      "minStock": 10,
+      "cost": 22000,
+      "price": 35000,
+      "warrantyDays": 30,
+      "serials": [],
+      "tone": "from-amber-500/15 to-amber-500/5 text-amber-600"
+    },
+    {
+      "id": "p6",
+      "name": "Pantalla LCD 15.6\" Lenovo",
+      "sku": "PAN-LEN-156",
+      "barcode": "PANLEN156001",
+      "category": "Repuestos",
+      "location": "Bodega B",
+      "stock": 3,
+      "minStock": 2,
+      "cost": 420000,
+      "price": 560000,
+      "warrantyDays": 90,
+      "serials": [
+        "LCD-LEN-1102"
+      ],
+      "tone": "from-rose-500/15 to-rose-500/5 text-rose-600"
+    },
+    {
+      "id": "p7",
+      "name": "Batería HP 240 G7",
+      "sku": "BAT-HP-240",
+      "barcode": "BATHP240001",
+      "category": "Repuestos",
+      "location": "Bodega B",
+      "stock": 2,
+      "minStock": 3,
+      "cost": 210000,
+      "price": 289000,
+      "warrantyDays": 180,
+      "serials": [
+        "BAT-HP-5501",
+        "BAT-HP-5502"
+      ],
+      "tone": "from-orange-500/15 to-orange-500/5 text-orange-600"
+    },
+    {
+      "id": "p8",
+      "name": "Cable HDMI 2m",
+      "sku": "CAB-HDMI-2M",
+      "barcode": "CABHDMI2M001",
+      "category": "Accesorios",
+      "location": "Mostrador",
+      "stock": 0,
+      "minStock": 5,
+      "cost": 12000,
+      "price": 25000,
+      "warrantyDays": 30,
+      "serials": [],
+      "tone": "from-slate-500/15 to-slate-500/5 text-slate-600"
+    },
+    {
+      "id": "p9",
+      "name": "Fuente de poder 600W",
+      "sku": "FUE-600W",
+      "barcode": "FUE600W0001",
+      "category": "Componentes",
+      "location": "Bodega A",
+      "stock": 7,
+      "minStock": 3,
+      "cost": 155000,
+      "price": 215000,
+      "warrantyDays": 180,
+      "serials": [
+        "PSU600-771",
+        "PSU600-772"
+      ],
+      "tone": "from-yellow-500/15 to-yellow-500/5 text-yellow-600"
+    },
+    {
+      "id": "p10",
+      "name": "Disco duro externo 2TB",
+      "sku": "HDD-EXT-2TB",
+      "barcode": "HDDEXT2TB001",
+      "category": "Almacenamiento",
+      "location": "Mostrador",
+      "stock": 9,
+      "minStock": 4,
+      "cost": 245000,
+      "price": 329000,
+      "warrantyDays": 365,
+      "serials": [
+        "HDD2TB-2201"
+      ],
+      "tone": "from-blue-500/15 to-blue-500/5 text-blue-600"
+    },
+    {
+      "id": "p11",
+      "name": "Limpiador de pantallas",
+      "sku": "INS-LIM-PAN",
+      "barcode": "INSLIMPAN001",
+      "category": "Insumos",
+      "location": "Taller",
+      "stock": 26,
+      "minStock": 8,
+      "cost": 9000,
+      "price": 18000,
+      "warrantyDays": 0,
+      "serials": [],
+      "tone": "from-teal-500/15 to-teal-500/5 text-teal-600"
+    },
+    {
+      "id": "p12",
+      "name": "Mantenimiento preventivo",
+      "sku": "SRV-MANT-PREV",
+      "barcode": "SRVMANTPREV1",
+      "category": "Servicios",
+      "location": "Taller",
+      "stock": 999,
+      "minStock": 0,
+      "cost": 0,
+      "price": 85000,
+      "warrantyDays": 30,
+      "serials": [],
+      "tone": "from-brand-500/15 to-brand-500/5 text-brand-600",
+      "service": true
+    }
+  ],
+  "customers": [
+    {
+      "id": "c0",
+      "name": "Consumidor Final",
+      "documentType": "CC",
+      "document": "222222222222",
+      "phone": "—",
+      "email": "—",
+      "address": "Venta de mostrador",
+      "purchases": 128,
+      "orders": 0,
+      "lastVisit": "2026-10-25T10:42:00",
+      "isFinalConsumer": true
+    },
+    {
+      "id": "c1",
+      "name": "Carlos Mendoza",
+      "documentType": "CC",
+      "document": "1032456789",
+      "phone": "310 456 7890",
+      "email": "carlos.mendoza@gmail.com",
+      "address": "Cra. 43 # 25-18, Medellín",
+      "purchases": 7,
+      "orders": 3,
+      "lastVisit": "2026-10-22T09:15:00"
+    },
+    {
+      "id": "c2",
+      "name": "Laura Gómez",
+      "documentType": "CC",
+      "document": "1017894562",
+      "phone": "320 555 1234",
+      "email": "laura.gomez@hotmail.com",
+      "address": "Cll. 10 # 40-25, Envigado",
+      "purchases": 5,
+      "orders": 2,
+      "lastVisit": "2026-10-21T11:40:00"
+    },
+    {
+      "id": "c3",
+      "name": "Andrés Torres",
+      "documentType": "NIT",
+      "document": "900123456-7",
+      "phone": "301 222 3344",
+      "email": "andres@estudio3d.co",
+      "address": "Cra. 48 # 20-10, Medellín",
+      "purchases": 12,
+      "orders": 1,
+      "lastVisit": "2026-10-20T15:10:00"
+    },
+    {
+      "id": "c4",
+      "name": "María Fernanda Ruiz",
+      "documentType": "CC",
+      "document": "1122334455",
+      "phone": "315 678 9012",
+      "email": "mafe.ruiz@gmail.com",
+      "address": "Cll. 5 # 33-02, Itagüí",
+      "purchases": 3,
+      "orders": 2,
+      "lastVisit": "2026-10-20T10:05:00"
+    },
+    {
+      "id": "c5",
+      "name": "Juan Pablo Restrepo",
+      "documentType": "CC",
+      "document": "98765432",
+      "phone": "300 111 2233",
+      "email": "jp.restrepo@outlook.com",
+      "address": "Cra. 70 # 44-12, Medellín",
+      "purchases": 4,
+      "orders": 1,
+      "lastVisit": "2026-10-24T08:30:00"
+    },
+    {
+      "id": "c6",
+      "name": "Sofía Ramírez",
+      "documentType": "CC",
+      "document": "1020304050",
+      "phone": "312 987 6543",
+      "email": "sofia.ramirez@gmail.com",
+      "address": "Cll. 20 # 55-40, Bello",
+      "purchases": 2,
+      "orders": 1,
+      "lastVisit": "2026-10-25T09:05:00"
+    },
+    {
+      "id": "c7",
+      "name": "Diego Herrera",
+      "documentType": "CC",
+      "document": "79555123",
+      "phone": "318 444 5566",
+      "email": "diego.herrera@gmail.com",
+      "address": "Cra. 37 # 10-15, Medellín",
+      "purchases": 6,
+      "orders": 1,
+      "lastVisit": "2026-10-18T14:20:00"
+    },
+    {
+      "id": "c8",
+      "name": "Valentina López",
+      "documentType": "CC",
+      "document": "1010101010",
+      "phone": "313 777 8899",
+      "email": "valentina.lopez@gmail.com",
+      "address": "Cll. 30 # 45-50, Medellín",
+      "purchases": 9,
+      "orders": 1,
+      "lastVisit": "2026-10-19T12:00:00"
+    }
+  ],
+  "workOrders": [
+    {
+      "id": "o1",
+      "number": "OT-002341",
+      "customerId": "c1",
+      "customerName": "Carlos Mendoza",
+      "equipmentType": "Laptop",
+      "brand": "Apple",
+      "model": "MacBook Pro 13\" 2020",
+      "serial": "C02F8KXQMD6M",
+      "accessories": "Cargador USB-C 61W",
+      "physicalCondition": "Golpe leve en la esquina inferior. Bisagra sin juego.",
+      "reportedIssue": "No enciende desde ayer. El cargador no muestra luz al conectarlo.",
+      "diagnosis": "Corto en la línea de alimentación de la placa. Requiere reemplazo del circuito integrado de carga y limpieza de corrosión.",
+      "status": "reparacion",
+      "technician": "Julián Vélez",
+      "createdAt": "2026-10-22T09:15:00",
+      "promisedAt": "2026-10-26T17:00:00",
+      "items": [
+        {
+          "id": "i1",
+          "type": "servicio",
+          "description": "Diagnóstico y reparación de placa",
+          "quantity": 1,
+          "unitPrice": 280000
+        },
+        {
+          "id": "i2",
+          "type": "repuesto",
+          "description": "Circuito integrado de carga",
+          "quantity": 1,
+          "unitPrice": 135000
+        },
+        {
+          "id": "i3",
+          "type": "servicio",
+          "description": "Limpieza y cambio de pasta térmica",
+          "quantity": 1,
+          "unitPrice": 65000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-22T14:15:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-22T17:15:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-22T21:15:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Julián Vélez",
+          "date": "2026-10-23T16:15:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "laptop",
+        "categoryLabel": "Laptop",
+        "powerState": "no_enciende",
+        "conditions": {
+          "caseDamage": true
+        },
+        "conditionNotes": "Golpe leve en la esquina inferior. Bisagra sin juego.",
+        "accessories": [
+          "Cargador USB-C 61W"
+        ],
+        "lockType": "contrasena",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 480000,
+        "diagnosticFee": 50000,
+        "receivedBy": "Julián Vélez",
+        "receivedAt": "2026-10-22T09:15:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-22T09:15:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "screenCondition": "Sin rayones",
+        "technicalSheet": {
+          "os": "macOS Sonoma",
+          "cpu": "Intel Core i5-1038NG7",
+          "gpu": "Intel Iris Plus",
+          "ram": "8 GB LPDDR4X",
+          "storage": "SSD 512 GB",
+          "battery": "Original · 82% de salud"
+        }
+      },
+      "notes": "El cliente aprobó la cotización por WhatsApp el 22 de octubre."
+    },
+    {
+      "id": "o2",
+      "number": "OT-002340",
+      "customerId": "c2",
+      "customerName": "Laura Gómez",
+      "equipmentType": "PC de escritorio",
+      "brand": "Custom",
+      "model": "Ryzen 5 5600 / RTX 3060",
+      "serial": "PC-LG-001",
+      "accessories": "Cable de poder, control RGB",
+      "physicalCondition": "Sin daños externos. Limpieza interna pendiente.",
+      "reportedIssue": "Se reinicia solo cuando abre juegos o programas pesados.",
+      "diagnosis": "Fuente de poder inestable. Se recomendó cambio por fuente certificada de 600W.",
+      "status": "listo",
+      "technician": "Santiago Mejía",
+      "createdAt": "2026-10-21T11:40:00",
+      "promisedAt": "2026-10-25T17:00:00",
+      "items": [
+        {
+          "id": "i4",
+          "type": "servicio",
+          "description": "Diagnóstico y mantenimiento",
+          "quantity": 1,
+          "unitPrice": 120000
+        },
+        {
+          "id": "i5",
+          "type": "repuesto",
+          "description": "Fuente de poder 600W",
+          "quantity": 1,
+          "unitPrice": 215000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-21T16:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-21T19:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-21T23:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-22T18:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-23T17:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-23T23:40:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "pc_torre",
+        "categoryLabel": "PC Torre",
+        "powerState": "enciende_se_apaga",
+        "conditions": {
+          "previousRepair": true
+        },
+        "conditionNotes": "Sin daños externos. Limpieza interna pendiente.",
+        "accessories": [
+          "Cable de poder",
+          "Control RGB"
+        ],
+        "lockType": "pin",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 360000,
+        "diagnosticFee": 0,
+        "receivedBy": "Santiago Mejía",
+        "receivedAt": "2026-10-21T11:40:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-21T11:40:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "internalComponents": "Fuente genérica 550W, GPU RTX 3060, 2 discos SATA",
+        "includesExternalDrives": true,
+        "technicalSheet": {
+          "os": "Windows 11 Pro",
+          "cpu": "AMD Ryzen 5 5600",
+          "gpu": "NVIDIA RTX 3060 12 GB",
+          "ram": "16 GB DDR4 3200",
+          "storage": "SSD 1 TB + HDD 2 TB"
+        }
+      },
+      "notes": "Cliente avisada por WhatsApp. Pendiente de retiro y facturación."
+    },
+    {
+      "id": "o3",
+      "number": "OT-002339",
+      "customerId": "c3",
+      "customerName": "Andrés Torres",
+      "equipmentType": "Laptop",
+      "brand": "HP",
+      "model": "Pavilion 15",
+      "serial": "5CD1234ABC",
+      "accessories": "Cargador original",
+      "physicalCondition": "Bisagra derecha con juego. Pantalla con líneas horizontales.",
+      "reportedIssue": "La pantalla muestra líneas y parpadea al mover la tapa.",
+      "diagnosis": "Falla en panel LCD. Cambio de pantalla aprobado por el cliente.",
+      "status": "pruebas",
+      "technician": "Julián Vélez",
+      "createdAt": "2026-10-20T15:10:00",
+      "promisedAt": "2026-10-24T17:00:00",
+      "items": [
+        {
+          "id": "i6",
+          "type": "servicio",
+          "description": "Cambio de pantalla",
+          "quantity": 1,
+          "unitPrice": 180000
+        },
+        {
+          "id": "i7",
+          "type": "repuesto",
+          "description": "Pantalla LCD 15.6\" Lenovo compatible",
+          "quantity": 1,
+          "unitPrice": 560000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-20T20:10:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-20T23:10:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-21T03:10:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Julián Vélez",
+          "date": "2026-10-21T22:10:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Julián Vélez",
+          "date": "2026-10-22T21:10:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "laptop",
+        "categoryLabel": "Laptop",
+        "powerState": "enciende",
+        "conditions": {
+          "screenDamage": true,
+          "hingeDamage": true
+        },
+        "conditionNotes": "Bisagra derecha con juego. Pantalla con líneas horizontales.",
+        "accessories": [
+          "Cargador original"
+        ],
+        "lockType": "contrasena",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 820000,
+        "diagnosticFee": 0,
+        "receivedBy": "Julián Vélez",
+        "receivedAt": "2026-10-20T15:10:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-20T15:10:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "screenCondition": "Fisura visible",
+        "technicalSheet": {
+          "os": "Windows 11 Home",
+          "cpu": "Intel Core i5-1135G7",
+          "gpu": "Intel Iris Xe",
+          "ram": "8 GB DDR4",
+          "storage": "SSD 512 GB",
+          "battery": "Desgaste normal"
+        }
+      }
+    },
+    {
+      "id": "o4",
+      "number": "OT-002338",
+      "customerId": "c4",
+      "customerName": "María Fernanda Ruiz",
+      "equipmentType": "Laptop",
+      "brand": "Lenovo",
+      "model": "ThinkPad T14",
+      "serial": "PF2ABCDE",
+      "accessories": "Cargador USB-C",
+      "physicalCondition": "Teclado con desgaste. Sin golpes.",
+      "reportedIssue": "Varias teclas no responden, especialmente la barra espaciadora.",
+      "diagnosis": "Teclado con humedad. Requiere reemplazo completo.",
+      "status": "aprobacion",
+      "technician": "Santiago Mejía",
+      "createdAt": "2026-10-20T10:05:00",
+      "promisedAt": "2026-10-27T17:00:00",
+      "items": [
+        {
+          "id": "i8",
+          "type": "servicio",
+          "description": "Cambio de teclado",
+          "quantity": 1,
+          "unitPrice": 90000
+        },
+        {
+          "id": "i9",
+          "type": "repuesto",
+          "description": "Teclado Lenovo ThinkPad",
+          "quantity": 1,
+          "unitPrice": 190000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-20T15:05:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-20T18:05:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-20T22:05:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "laptop",
+        "categoryLabel": "Laptop",
+        "powerState": "enciende",
+        "conditions": {
+          "liquidDamage": true
+        },
+        "conditionNotes": "Teclado con desgaste. Sin golpes.",
+        "accessories": [
+          "Cargador USB-C"
+        ],
+        "lockType": "patron",
+        "customerAuthorizesAccess": false,
+        "customerWithheldCredentials": true,
+        "estimate": 320000,
+        "diagnosticFee": 0,
+        "receivedBy": "Santiago Mejía",
+        "receivedAt": "2026-10-20T10:05:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-20T10:05:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "screenCondition": "Sin rayones",
+        "technicalSheet": {
+          "os": "Windows 11 Pro",
+          "cpu": "Intel Core i5-10210U",
+          "gpu": "Intel UHD Graphics",
+          "ram": "16 GB DDR4",
+          "storage": "SSD 512 GB",
+          "battery": "Original · 74% de salud"
+        }
+      },
+      "notes": "Cotización enviada. Pendiente respuesta del cliente."
+    },
+    {
+      "id": "o5",
+      "number": "OT-002337",
+      "customerId": "c5",
+      "customerName": "Juan Pablo Restrepo",
+      "equipmentType": "All-in-One",
+      "brand": "Apple",
+      "model": "iMac 24\" M1",
+      "serial": "C02IMAC24",
+      "accessories": "Cable de poder, Magic Keyboard",
+      "physicalCondition": "Sin golpes. Pantalla limpia.",
+      "reportedIssue": "Está muy lento y se calienta en tareas básicas.",
+      "diagnosis": "",
+      "status": "diagnostico",
+      "technician": "Julián Vélez",
+      "createdAt": "2026-10-24T08:30:00",
+      "promisedAt": "2026-10-28T17:00:00",
+      "items": [],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-24T13:30:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-24T16:30:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Julián Vélez",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "pc_torre",
+        "categoryLabel": "PC Torre",
+        "powerState": "enciende",
+        "conditions": {},
+        "conditionNotes": "Sin golpes. Pantalla limpia.",
+        "accessories": [
+          "Cable de poder",
+          "Magic Keyboard"
+        ],
+        "lockType": "cuenta",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 180000,
+        "diagnosticFee": 0,
+        "receivedBy": "Julián Vélez",
+        "receivedAt": "2026-10-24T08:30:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-24T08:30:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "internalComponents": "Todo en uno, sin acceso a componentes internos",
+        "technicalSheet": {
+          "os": "macOS Sonoma",
+          "cpu": "Apple M1",
+          "gpu": "GPU integrada de 8 núcleos",
+          "ram": "8 GB unificada",
+          "storage": "SSD 256 GB"
+        }
+      }
+    },
+    {
+      "id": "o6",
+      "number": "OT-002336",
+      "customerId": "c6",
+      "customerName": "Sofía Ramírez",
+      "equipmentType": "Consola",
+      "brand": "Sony",
+      "model": "PlayStation 5",
+      "serial": "PS5-987654",
+      "accessories": "Control DualSense, cable HDMI",
+      "physicalCondition": "Rayones en la carcasa. Sin daño por líquido.",
+      "reportedIssue": "Se apaga a los 15 minutos y el ventilador suena fuerte.",
+      "diagnosis": "",
+      "status": "recibido",
+      "technician": "Santiago Mejía",
+      "createdAt": "2026-10-25T09:05:00",
+      "promisedAt": "2026-10-29T17:00:00",
+      "items": [],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-25T14:05:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "consola",
+        "categoryLabel": "Consola",
+        "powerState": "enciende_se_apaga",
+        "conditions": {
+          "caseDamage": true
+        },
+        "conditionNotes": "Rayones en la carcasa. Sin daño por líquido.",
+        "accessories": [
+          "Control DualSense",
+          "Cable HDMI"
+        ],
+        "lockType": "cuenta",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 250000,
+        "diagnosticFee": 40000,
+        "receivedBy": "Santiago Mejía",
+        "receivedAt": "2026-10-25T09:05:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-25T09:05:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "includesExternalDrives": false
+      }
+    },
+    {
+      "id": "o7",
+      "number": "OT-002335",
+      "customerId": "c7",
+      "customerName": "Diego Herrera",
+      "equipmentType": "Laptop",
+      "brand": "Dell",
+      "model": "Inspiron 15 3511",
+      "serial": "DL-3511-7788",
+      "accessories": "Cargador",
+      "physicalCondition": "Sin daños. Polvo acumulado en ventilación.",
+      "reportedIssue": "Mantenimiento preventivo y limpieza profunda.",
+      "diagnosis": "Limpieza profunda, cambio de pasta térmica y actualización de sistema.",
+      "status": "entregado",
+      "technician": "Julián Vélez",
+      "createdAt": "2026-10-18T14:20:00",
+      "promisedAt": "2026-10-20T17:00:00",
+      "deliveredAt": "2026-10-20T16:00:00",
+      "items": [
+        {
+          "id": "i10",
+          "type": "servicio",
+          "description": "Mantenimiento preventivo",
+          "quantity": 1,
+          "unitPrice": 120000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-18T19:20:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-18T22:20:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Julián Vélez",
+          "date": "2026-10-19T02:20:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Julián Vélez",
+          "date": "2026-10-19T21:20:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Julián Vélez",
+          "date": "2026-10-20T20:20:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Julián Vélez",
+          "date": "2026-10-21T02:20:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "2026-10-20T16:00:00",
+          "state": "done"
+        }
+      ],
+      "intake": {
+        "category": "laptop",
+        "categoryLabel": "Laptop",
+        "powerState": "enciende",
+        "conditions": {},
+        "conditionNotes": "Sin daños. Polvo acumulado en ventilación.",
+        "accessories": [
+          "Cargador"
+        ],
+        "lockType": "sin_bloqueo",
+        "customerAuthorizesAccess": false,
+        "customerWithheldCredentials": false,
+        "estimate": 120000,
+        "diagnosticFee": 0,
+        "receivedBy": "Julián Vélez",
+        "receivedAt": "2026-10-18T14:20:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-18T14:20:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "screenCondition": "Sin rayones",
+        "technicalSheet": {
+          "os": "Windows 11 Home",
+          "cpu": "Intel Core i5-1135G7",
+          "gpu": "Intel Iris Xe",
+          "ram": "8 GB DDR4",
+          "storage": "SSD 256 GB",
+          "battery": "Original · 88% de salud"
+        }
+      },
+      "settlement": {
+        "status": "pagado",
+        "amount": 120000,
+        "method": "Efectivo",
+        "paidAt": "2026-10-20T16:00:00",
+        "invoiceNumber": "FV-000181"
+      }
+    },
+    {
+      "id": "o8",
+      "number": "OT-002334",
+      "customerId": "c8",
+      "customerName": "Valentina López",
+      "equipmentType": "Laptop",
+      "brand": "ASUS",
+      "model": "ROG Strix G15",
+      "serial": "AS-ROG-4455",
+      "accessories": "Cargador 240W",
+      "physicalCondition": "Tapa con rasguños. Teclado funcional.",
+      "reportedIssue": "No da video. Enciende pero la pantalla queda negra.",
+      "diagnosis": "Falla de GPU. Reparación de circuito y reballing en proceso.",
+      "status": "reparacion",
+      "technician": "Santiago Mejía",
+      "createdAt": "2026-10-19T12:00:00",
+      "promisedAt": "2026-10-26T17:00:00",
+      "items": [
+        {
+          "id": "i11",
+          "type": "servicio",
+          "description": "Reparación de GPU",
+          "quantity": 1,
+          "unitPrice": 350000
+        },
+        {
+          "id": "i12",
+          "type": "repuesto",
+          "description": "Pasta térmica Arctic MX-4",
+          "quantity": 1,
+          "unitPrice": 35000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-19T17:00:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-19T20:00:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-20T00:00:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-20T19:00:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Santiago Mejía",
+          "date": "",
+          "state": "pending"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "laptop",
+        "categoryLabel": "Laptop",
+        "powerState": "enciende",
+        "conditions": {
+          "caseDamage": true
+        },
+        "conditionNotes": "Tapa con rasguños. Teclado funcional.",
+        "accessories": [
+          "Cargador 240W"
+        ],
+        "lockType": "pin",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 500000,
+        "diagnosticFee": 0,
+        "receivedBy": "Santiago Mejía",
+        "receivedAt": "2026-10-19T12:00:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-19T12:00:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "screenCondition": "Sin rayones",
+        "technicalSheet": {
+          "os": "Windows 11 Home",
+          "cpu": "AMD Ryzen 7 4800H",
+          "gpu": "NVIDIA RTX 3050",
+          "ram": "16 GB DDR4",
+          "storage": "SSD 512 GB",
+          "battery": "Original · 79% de salud"
+        }
+      }
+    },
+    {
+      "id": "o9",
+      "number": "OT-002333",
+      "customerId": "c1",
+      "customerName": "Carlos Mendoza",
+      "equipmentType": "Laptop",
+      "brand": "Apple",
+      "model": "MacBook Air M1",
+      "serial": "C02MBAIR01",
+      "accessories": "Cargador USB-C",
+      "physicalCondition": "Daño por líquido visible en teclado y carcasa.",
+      "reportedIssue": "Se apagó al derramar café y no volvió a encender.",
+      "diagnosis": "Corrosión extendida en placa. No es viable económicamente.",
+      "status": "no_reparado",
+      "technician": "Julián Vélez",
+      "createdAt": "2026-10-15T09:00:00",
+      "promisedAt": "2026-10-18T17:00:00",
+      "items": [],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-15T14:00:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "Diagnóstico completado",
+          "description": "Se identificó daño por líquido y corrosión en la placa.",
+          "user": "Julián Vélez",
+          "date": "2026-10-15T17:00:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-no-reparado",
+          "status": "no_reparado",
+          "title": "No reparado",
+          "description": "El equipo no pudo repararse o el cliente rechazó el trabajo.",
+          "user": "Julián Vélez",
+          "date": "2026-10-16T18:00:00.000Z",
+          "state": "current"
+        }
+      ],
+      "intake": {
+        "category": "laptop",
+        "categoryLabel": "Laptop",
+        "powerState": "no_enciende",
+        "conditions": {
+          "liquidDamage": true,
+          "caseDamage": true
+        },
+        "conditionNotes": "Daño por líquido visible en teclado y carcasa.",
+        "accessories": [
+          "Cargador USB-C"
+        ],
+        "lockType": "contrasena",
+        "customerAuthorizesAccess": false,
+        "customerWithheldCredentials": true,
+        "estimate": 650000,
+        "diagnosticFee": 50000,
+        "receivedBy": "Julián Vélez",
+        "receivedAt": "2026-10-15T09:00:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-15T09:00:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "screenCondition": "No aplica",
+        "technicalSheet": {
+          "os": "macOS Big Sur",
+          "cpu": "Apple M1",
+          "gpu": "GPU integrada de 7 núcleos",
+          "ram": "8 GB unificada",
+          "storage": "SSD 256 GB"
+        }
+      }
+    },
+    {
+      "id": "o10",
+      "number": "OT-002332",
+      "customerId": "c2",
+      "customerName": "Laura Gómez",
+      "equipmentType": "PC de escritorio",
+      "brand": "HP",
+      "model": "ProDesk 400 G6",
+      "serial": "HP-PD-3321",
+      "accessories": "Cable de poder",
+      "physicalCondition": "Sin daños.",
+      "reportedIssue": "Quiere cambiar el disco mecánico por un SSD.",
+      "diagnosis": "Compatible con SSD NVMe. Migración de datos realizada.",
+      "status": "listo",
+      "technician": "Santiago Mejía",
+      "createdAt": "2026-10-23T16:40:00",
+      "promisedAt": "2026-10-25T17:00:00",
+      "items": [
+        {
+          "id": "i13",
+          "type": "servicio",
+          "description": "Instalación y migración a SSD",
+          "quantity": 1,
+          "unitPrice": 60000
+        },
+        {
+          "id": "i14",
+          "type": "repuesto",
+          "description": "SSD NVMe Kingston 1TB",
+          "quantity": 1,
+          "unitPrice": 389000
+        }
+      ],
+      "timeline": [
+        {
+          "id": "tl-recibido",
+          "status": "recibido",
+          "title": "Equipo recibido",
+          "description": "Recepción, registro y comprobante de ingreso generado.",
+          "user": "Recepción",
+          "date": "2026-10-23T21:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-diagnostico",
+          "status": "diagnostico",
+          "title": "En diagnóstico",
+          "description": "Evaluación técnica de la falla reportada por el cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-24T00:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-aprobacion",
+          "status": "aprobacion",
+          "title": "Cotización enviada",
+          "description": "Presupuesto con mano de obra y repuestos enviado al cliente.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-24T04:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-reparacion",
+          "status": "reparacion",
+          "title": "En reparación",
+          "description": "Mano de obra y repuestos en ejecución.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-24T23:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-pruebas",
+          "status": "pruebas",
+          "title": "Pruebas de control",
+          "description": "Verificación de funcionamiento y control de calidad.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-25T22:40:00.000Z",
+          "state": "done"
+        },
+        {
+          "id": "tl-listo",
+          "status": "listo",
+          "title": "Listo para entrega",
+          "description": "Equipo reparado, disponible para retiro y facturación.",
+          "user": "Santiago Mejía",
+          "date": "2026-10-26T04:40:00.000Z",
+          "state": "current"
+        },
+        {
+          "id": "tl-entregado",
+          "status": "entregado",
+          "title": "Entregado y facturado",
+          "description": "Cierre de la OT y factura emitida al cliente.",
+          "user": "Caja",
+          "date": "",
+          "state": "pending"
+        }
+      ],
+      "intake": {
+        "category": "pc_torre",
+        "categoryLabel": "PC Torre",
+        "powerState": "enciende",
+        "conditions": {},
+        "conditionNotes": "Sin daños.",
+        "accessories": [
+          "Cable de poder"
+        ],
+        "lockType": "contrasena",
+        "customerAuthorizesAccess": true,
+        "customerWithheldCredentials": false,
+        "estimate": 449000,
+        "diagnosticFee": 0,
+        "receivedBy": "Santiago Mejía",
+        "receivedAt": "2026-10-23T16:40:00",
+        "legal": {
+          "version": "v1.0",
+          "acceptedAt": "2026-10-23T16:40:00",
+          "abandonmentDays": 45,
+          "warrantyDays": 90,
+          "shortClauses": [
+            "El diagnóstico no obliga a la reparación. El presupuesto se informa y aprueba antes de intervenir el equipo.",
+            "El taller no responde por información que el cliente no haya respaldado antes del ingreso.",
+            "Los equipos no reclamados después de 45 días se consideran en abandono conforme a la ley."
+          ],
+          "fullClauses": [
+            "El cliente autoriza la apertura del equipo y las pruebas necesarias para emitir el diagnóstico técnico. El desarmado se realiza con fines de revisión y reparación.",
+            "El taller no se hace responsable por la pérdida de información, programas o licencias que el cliente no haya respaldado antes de entregar el equipo. El respaldo es responsabilidad del cliente.",
+            "El diagnóstico y el presupuesto inicial no son vinculantes hasta que el cliente apruebe expresamente la reparación. Si el cliente rechaza la cotización, solo se cobrará el diagnóstico si fue informado previamente.",
+            "El cliente declara conocer el estado físico y los accesorios registrados en este comprobante. El taller no responde por daños estéticos o faltantes no consignados al momento del ingreso.",
+            "La garantía cubre exclusivamente la mano de obra y los repuestos suministrados por el taller durante 90 días, y no cubre daños por golpes, líquidos, mal uso, variaciones eléctricas o intervención de terceros.",
+            "Transcurridos 45 días calendario sin que el cliente reclame el equipo, este se considerará en abandono. El taller podrá cobrar almacenaje y disponer del equipo conforme a la normativa aplicable, dejando constancia del proceso.",
+            "El retiro del equipo debe realizarse con el comprobante de ingreso o documento de identidad del titular. Al entregar, el cliente verificará el estado y funcionamiento del equipo, dejando constancia de recibido."
+          ]
+        },
+        "internalComponents": "Disco mecánico original de 1 TB",
+        "includesExternalDrives": false,
+        "technicalSheet": {
+          "os": "Windows 11 Pro",
+          "cpu": "Intel Core i5-9500",
+          "gpu": "Intel UHD 630",
+          "ram": "8 GB DDR4",
+          "storage": "HDD 1 TB → SSD NVMe 1 TB",
+          "battery": "No aplica"
+        }
+      }
+    }
+  ],
+  "invoices": [
+    {
+      "id": "f1",
+      "number": "FV-000184",
+      "customerName": "Carlos Mendoza",
+      "date": "2026-10-25T10:42:00",
+      "total": 389000,
+      "method": "Efectivo",
+      "status": "activa",
+      "items": 1
+    },
+    {
+      "id": "f2",
+      "number": "FV-000183",
+      "customerName": "Laura Gómez",
+      "date": "2026-10-25T10:18:00",
+      "total": 229000,
+      "method": "Tarjeta",
+      "status": "activa",
+      "items": 1
+    },
+    {
+      "id": "f3",
+      "number": "FV-000182",
+      "customerName": "Consumidor Final",
+      "date": "2026-10-24T17:20:00",
+      "total": 59000,
+      "method": "Transferencia",
+      "status": "activa",
+      "items": 1
+    },
+    {
+      "id": "f4",
+      "number": "FV-000181",
+      "customerName": "Andrés Torres",
+      "date": "2026-10-24T15:05:00",
+      "total": 85000,
+      "method": "Efectivo",
+      "status": "activa",
+      "items": 1
+    },
+    {
+      "id": "f5",
+      "number": "FV-000180",
+      "customerName": "María Fernanda Ruiz",
+      "date": "2026-10-23T16:48:00",
+      "total": 199000,
+      "method": "Mixto",
+      "status": "activa",
+      "items": 2
+    },
+    {
+      "id": "f6",
+      "number": "FV-000179",
+      "customerName": "Diego Herrera",
+      "date": "2026-10-23T11:12:00",
+      "total": 120000,
+      "method": "Efectivo",
+      "status": "anulada",
+      "items": 1
+    }
+  ],
+  "cashMovements": [
+    {
+      "id": "m1",
+      "type": "venta",
+      "method": "Efectivo",
+      "amount": 389000,
+      "reason": "Venta FV-000184 · SSD NVMe Kingston 1TB",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T10:42:00"
+    },
+    {
+      "id": "m2",
+      "type": "venta",
+      "method": "Tarjeta",
+      "amount": 229000,
+      "reason": "Venta FV-000183 · Memoria RAM DDR4 16GB",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T10:18:00"
+    },
+    {
+      "id": "m3",
+      "type": "ingreso",
+      "method": "Efectivo",
+      "amount": 45000,
+      "reason": "Ingreso extraordinario · venta de accesorio",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T09:40:00"
+    },
+    {
+      "id": "m4",
+      "type": "egreso",
+      "method": "Efectivo",
+      "amount": 28000,
+      "reason": "Café y agua para el taller",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T09:15:00"
+    },
+    {
+      "id": "m5",
+      "type": "egreso",
+      "method": "Efectivo",
+      "amount": 15000,
+      "reason": "Mensajería a proveedor",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T08:50:00"
+    },
+    {
+      "id": "m6",
+      "type": "venta",
+      "method": "Transferencia",
+      "amount": 59000,
+      "reason": "Venta FV-000182 · Mouse Logitech M170",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T08:35:00"
+    },
+    {
+      "id": "m7",
+      "type": "venta",
+      "method": "Efectivo",
+      "amount": 85000,
+      "reason": "Venta FV-000181 · Mantenimiento preventivo",
+      "user": "Camila Ríos",
+      "time": "2026-10-25T08:20:00"
+    }
+  ],
+  "suppliers": [
+    {
+      "id": "s1",
+      "name": "TecnoPartes S.A.S.",
+      "nit": "901.245.678-1",
+      "contact": "Marcela Ospina",
+      "phone": "604 322 1188",
+      "category": "Repuestos y componentes",
+      "purchases": 14
+    },
+    {
+      "id": "s2",
+      "name": "Distribuidora Byte",
+      "nit": "900.887.112-4",
+      "contact": "Óscar Medina",
+      "phone": "310 555 9021",
+      "category": "Almacenamiento y memoria",
+      "purchases": 9
+    },
+    {
+      "id": "s3",
+      "name": "ImportPC Colombia",
+      "nit": "901.002.334-7",
+      "contact": "Liliana Castro",
+      "phone": "604 444 7788",
+      "category": "Periféricos y accesorios",
+      "purchases": 7
+    },
+    {
+      "id": "s4",
+      "name": "Accesorios del Norte",
+      "nit": "900.556.781-2",
+      "contact": "Jorge Restrepo",
+      "phone": "320 111 4488",
+      "category": "Insumos y accesorios",
+      "purchases": 5
+    }
+  ],
+  "purchases": [
+    {
+      "id": "p1",
+      "number": "FC-88214",
+      "supplier": "TecnoPartes S.A.S.",
+      "date": "2026-10-24T15:30:00",
+      "items": 8,
+      "subtotal": 2460000,
+      "iva": 467400,
+      "total": 2927400,
+      "status": "recibida"
+    },
+    {
+      "id": "p2",
+      "number": "FC-4419",
+      "supplier": "Distribuidora Byte",
+      "date": "2026-10-22T11:10:00",
+      "items": 4,
+      "subtotal": 1380000,
+      "iva": 262200,
+      "total": 1642200,
+      "status": "recibida"
+    },
+    {
+      "id": "p3",
+      "number": "FC-10982",
+      "supplier": "ImportPC Colombia",
+      "date": "2026-10-20T09:45:00",
+      "items": 6,
+      "subtotal": 980000,
+      "iva": 186200,
+      "total": 1166200,
+      "status": "recibida"
+    },
+    {
+      "id": "p4",
+      "number": "FC-2201",
+      "supplier": "Accesorios del Norte",
+      "date": "2026-10-18T16:20:00",
+      "items": 5,
+      "subtotal": 420000,
+      "iva": 79800,
+      "total": 499800,
+      "status": "pendiente"
+    }
+  ],
+  "stockSummary": {
+    "in": 9,
+    "low": 1,
+    "out": 1
+  },
+  "chartData": [
+    {
+      "month": "Nov",
+      "income": 6800000,
+      "expenses": 3100000
+    },
+    {
+      "month": "Dic",
+      "income": 8100000,
+      "expenses": 3600000
+    },
+    {
+      "month": "Ene",
+      "income": 7200000,
+      "expenses": 2900000
+    },
+    {
+      "month": "Feb",
+      "income": 8900000,
+      "expenses": 3400000
+    },
+    {
+      "month": "Mar",
+      "income": 9700000,
+      "expenses": 4100000
+    },
+    {
+      "month": "Abr",
+      "income": 8400000,
+      "expenses": 3200000
+    },
+    {
+      "month": "May",
+      "income": 10200000,
+      "expenses": 4500000
+    },
+    {
+      "month": "Jun",
+      "income": 9100000,
+      "expenses": 3800000
+    },
+    {
+      "month": "Jul",
+      "income": 11400000,
+      "expenses": 4900000
+    },
+    {
+      "month": "Ago",
+      "income": 10800000,
+      "expenses": 4200000
+    },
+    {
+      "month": "Sep",
+      "income": 12100000,
+      "expenses": 5100000
+    },
+    {
+      "month": "Oct",
+      "income": 12900000,
+      "expenses": 4600000
+    }
+  ],
+  "topProducts": [
+    {
+      "product": {
+        "id": "p1",
+        "name": "SSD NVMe Kingston 1TB",
+        "sku": "SSD-KIN-1TB",
+        "barcode": "740617324567",
+        "category": "Almacenamiento",
+        "location": "Bodega A",
+        "stock": 24,
+        "minStock": 6,
+        "cost": 285000,
+        "price": 389000,
+        "warrantyDays": 365,
+        "serials": [
+          "KNG1TB-8841",
+          "KNG1TB-8842",
+          "KNG1TB-8843"
+        ],
+        "icon": {},
+        "tone": "from-indigo-500/15 to-indigo-500/5 text-indigo-600"
+      },
+      "units": 24,
+      "revenue": 9336000,
+      "margin": 2496000
+    },
+    {
+      "product": {
+        "id": "p2",
+        "name": "Memoria RAM DDR4 16GB",
+        "sku": "RAM-DDR4-16",
+        "barcode": "740617998812",
+        "category": "Memoria",
+        "location": "Bodega A",
+        "stock": 18,
+        "minStock": 5,
+        "cost": 165000,
+        "price": 229000,
+        "warrantyDays": 365,
+        "serials": [
+          "RAM16-3321",
+          "RAM16-3322"
+        ],
+        "icon": {},
+        "tone": "from-sky-500/15 to-sky-500/5 text-sky-600"
+      },
+      "units": 18,
+      "revenue": 4122000,
+      "margin": 1152000
+    },
+    {
+      "product": {
+        "id": "p3",
+        "name": "Teclado mecánico Redragon Kumara",
+        "sku": "TEC-RED-KUM",
+        "barcode": "6950376712345",
+        "category": "Periféricos",
+        "location": "Mostrador",
+        "stock": 12,
+        "minStock": 4,
+        "cost": 145000,
+        "price": 199000,
+        "warrantyDays": 180,
+        "serials": [],
+        "icon": {},
+        "tone": "from-violet-500/15 to-violet-500/5 text-violet-600"
+      },
+      "units": 12,
+      "revenue": 2388000,
+      "margin": 648000
+    },
+    {
+      "product": {
+        "id": "p4",
+        "name": "Mouse Logitech M170",
+        "sku": "MOU-LOG-M170",
+        "barcode": "097855123456",
+        "category": "Periféricos",
+        "location": "Mostrador",
+        "stock": 31,
+        "minStock": 8,
+        "cost": 38000,
+        "price": 59000,
+        "warrantyDays": 90,
+        "serials": [],
+        "icon": {},
+        "tone": "from-emerald-500/15 to-emerald-500/5 text-emerald-600"
+      },
+      "units": 31,
+      "revenue": 1829000,
+      "margin": 651000
+    },
+    {
+      "product": {
+        "id": "p12",
+        "name": "Mantenimiento preventivo",
+        "sku": "SRV-MANT-PREV",
+        "barcode": "SRVMANTPREV1",
+        "category": "Servicios",
+        "location": "Taller",
+        "stock": 999,
+        "minStock": 0,
+        "cost": 0,
+        "price": 85000,
+        "warrantyDays": 30,
+        "serials": [],
+        "icon": {},
+        "tone": "from-brand-500/15 to-brand-500/5 text-brand-600",
+        "service": true
+      },
+      "units": 9,
+      "revenue": 765000,
+      "margin": 765000
+    }
+  ],
+  "dashboardStats": [
+    {
+      "label": "Ventas hoy",
+      "value": "$1.845.000",
+      "change": 8.4,
+      "hint": "vs. ayer",
+      "tone": "brand",
+      "icon": "wallet"
+    },
+    {
+      "label": "OTs abiertas",
+      "value": "12",
+      "change": -2.8,
+      "hint": "vs. semana anterior",
+      "tone": "warning",
+      "icon": "wrench"
+    },
+    {
+      "label": "Equipos listos",
+      "value": "5",
+      "change": 3.2,
+      "hint": "para entrega",
+      "tone": "success",
+      "icon": "check"
+    },
+    {
+      "label": "Stock bajo",
+      "value": "8",
+      "change": -1.6,
+      "hint": "productos por reponer",
+      "tone": "danger",
+      "icon": "alert"
+    }
+  ],
+  "currentCashTurn": {
+    "id": "184",
+    "user": "Camila Ríos",
+    "role": "Cajero",
+    "openedAt": "2026-10-25T08:02:00",
+    "initialAmount": 200000,
+    "status": "abierto"
+  }
+}

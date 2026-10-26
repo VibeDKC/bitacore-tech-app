@@ -1,0 +1,12 @@
+node_modules/
+out/
+release/
+dist/
+tmp-smoke*/
+.env
+.env.local
+*.log
+tsconfig.tsbuildinfo
+tsconfig.node.tsbuildinfo
+*.db
+*.sqlite
