@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Sparkles,
   Stethoscope,
+  Tag,
   UserRound,
   Wallet,
   Wrench
@@ -135,6 +136,8 @@ export function OrderDetailPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentReference, setPaymentReference] = useState('')
+  const [settleDiscountType, setSettleDiscountType] = useState<'percent' | 'amount'>('percent')
+  const [settleDiscountInput, setSettleDiscountInput] = useState('')
   const [depositMethod, setDepositMethod] = useState<PaymentMethod>('Efectivo')
   const [saving, setSaving] = useState(false)
   const [settling, setSettling] = useState(false)
@@ -167,6 +170,23 @@ export function OrderDetailPage() {
   const total = order?.total ?? labor + parts
   const paid = order?.paidAmount ?? payments.reduce((sum, payment) => sum + payment.amount, 0)
   const balance = order?.balance ?? Math.max(total - paid, 0)
+  const loyaltyActive = Boolean(
+    customer?.loyaltyActive &&
+      (!customer.loyaltyValidUntil || new Date(`${customer.loyaltyValidUntil}T23:59:59`).getTime() >= Date.now()) &&
+      Number(customer.loyaltyDiscountValue ?? 0) > 0
+  )
+  const loyaltyType = customer?.loyaltyDiscountType === 'amount' ? 'amount' : 'percent'
+  const loyaltyValue = Number(customer?.loyaltyDiscountValue ?? 0)
+  const settleDiscountValue = loyaltyActive
+    ? loyaltyType === 'percent'
+      ? Math.round((total * loyaltyValue) / 100)
+      : Math.min(loyaltyValue, total)
+    : settleDiscountType === 'percent'
+      ? Math.round((total * (Number(settleDiscountInput) || 0)) / 100)
+      : Math.min(Number(settleDiscountInput) || 0, total)
+  const settleTotal = Math.max(total - settleDiscountValue, 0)
+  const settleBalance = Math.max(settleTotal - paid, 0)
+  const canManualDiscount = can(role, 'applyDiscount')
   const next = nextWorkOrderStatus(status)
   const canAdvance = Boolean(next) && (next === 'entregado' ? can(role, 'settleOrder') : can(role, 'diagnoseOrder'))
   const canAddItem = can(role, 'diagnoseOrder') || can(role, 'createOrder')
@@ -248,7 +268,9 @@ export function OrderDetailPage() {
     setNoCharge(false)
     setExceptionReason('')
     setPaymentMethod('Efectivo')
-    setReceived(String(balance))
+    setSettleDiscountType('percent')
+    setSettleDiscountInput('')
+    setReceived(String(settleBalance))
     setInvoiceModal(true)
   }
 
@@ -385,11 +407,11 @@ export function OrderDetailPage() {
 
   async function confirmInvoice() {
     if (!order || settling) return
-    if (!noCharge && balance <= 0) {
+    if (!noCharge && settleBalance <= 0) {
       toast.error('No hay saldo pendiente por cobrar')
       return
     }
-    if (!noCharge && total <= 0) {
+    if (!noCharge && settleTotal <= 0) {
       toast.error('No hay valores por cobrar', {
         description: 'Agrega mano de obra o repuestos, registra un presupuesto, o autoriza la entrega sin cobro.'
       })
@@ -403,7 +425,7 @@ export function OrderDetailPage() {
       toast.error('La entrega sin cobro requiere un motivo autorizado')
       return
     }
-    if (!noCharge && paymentMethod === 'Efectivo' && receivedValue < balance) {
+    if (!noCharge && paymentMethod === 'Efectivo' && receivedValue < settleBalance) {
       toast.error('El efectivo recibido es menor al saldo por cobrar')
       return
     }
@@ -414,7 +436,9 @@ export function OrderDetailPage() {
         method: noCharge ? undefined : paymentMethod,
         received: noCharge || paymentMethod !== 'Efectivo' ? undefined : receivedValue,
         noCharge,
-        exceptionReason: noCharge ? exceptionReason.trim() : undefined
+        exceptionReason: noCharge ? exceptionReason.trim() : undefined,
+        discountType: noCharge ? undefined : loyaltyActive ? loyaltyType : settleDiscountType,
+        discountValue: noCharge ? 0 : loyaltyActive ? loyaltyValue : Number(settleDiscountInput) || 0
       })
       applyOrder(updated)
       setInvoiceModal(false)
@@ -1293,7 +1317,7 @@ export function OrderDetailPage() {
               <Button
                 onClick={() => void confirmInvoice()}
                 loading={settling}
-                disabled={(!noCharge && balance <= 0) || (noCharge && !canAuthorizeNoCharge)}
+                disabled={(!noCharge && settleBalance <= 0) || (noCharge && !canAuthorizeNoCharge)}
                 leftIcon={<CheckCircle2 className="h-4 w-4" />}
                 variant={noCharge ? 'danger' : 'primary'}
               >
@@ -1323,13 +1347,72 @@ export function OrderDetailPage() {
               <span className="text-[11px] text-slate-500">Total de la OT</span>
               <span className="tabular text-[12px] font-semibold text-ink">{formatCurrency(total)}</span>
             </div>
+
+            {!noCharge ? (
+              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <Tag className="h-3 w-3" /> Descuento
+                </span>
+                {loyaltyActive ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="warning">
+                      Fidelidad {loyaltyType === 'percent' ? `${loyaltyValue}%` : formatCurrency(loyaltyValue)}
+                    </Badge>
+                    <span className="tabular font-semibold text-ink">-{formatCurrency(settleDiscountValue)}</span>
+                  </div>
+                ) : canManualDiscount ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center rounded-lg border border-line bg-white">
+                      <button
+                        type="button"
+                        onClick={() => setSettleDiscountType('percent')}
+                        className={cn(
+                          'focus-ring h-7 px-2 text-[10px] font-semibold transition first:rounded-l-lg',
+                          settleDiscountType === 'percent' ? 'bg-brand-50 text-brand-700' : 'text-slate-400'
+                        )}
+                      >
+                        %
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSettleDiscountType('amount')}
+                        className={cn(
+                          'focus-ring h-7 px-2 text-[10px] font-semibold transition last:rounded-r-lg',
+                          settleDiscountType === 'amount' ? 'bg-brand-50 text-brand-700' : 'text-slate-400'
+                        )}
+                      >
+                        $
+                      </button>
+                    </div>
+                    <input
+                      value={settleDiscountInput}
+                      onChange={(event) => setSettleDiscountInput(event.target.value)}
+                      inputMode="decimal"
+                      placeholder="0"
+                      className="field h-7 w-20 text-right text-[10px] tabular"
+                    />
+                    <span className="tabular w-16 text-right font-semibold text-ink">-{formatCurrency(settleDiscountValue)}</span>
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-slate-400">Sin permiso</span>
+                )}
+              </div>
+            ) : null}
+
+            {settleDiscountValue > 0 ? (
+              <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                <span>Total con descuento</span>
+                <span className="tabular font-semibold text-ink">{formatCurrency(settleTotal)}</span>
+              </div>
+            ) : null}
+
             <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
               <span>Anticipos aplicados</span>
               <span className="tabular font-semibold text-success-600">- {formatCurrency(paid)}</span>
             </div>
             <div className="mt-2 flex items-center justify-between border-t border-line pt-2.5">
               <span className="text-[12px] font-semibold text-slate-600">Saldo a cobrar</span>
-              <span className="tabular font-display text-2xl font-bold text-ink">{formatCurrency(noCharge ? 0 : balance)}</span>
+              <span className="tabular font-display text-2xl font-bold text-ink">{formatCurrency(noCharge ? 0 : settleBalance)}</span>
             </div>
           </div>
 
@@ -1346,7 +1429,7 @@ export function OrderDetailPage() {
                       onClick={() => {
                         setPaymentMethod(item)
                         if (item !== 'Efectivo') setReceived('')
-                        else setReceived(String(balance))
+                        else setReceived(String(settleBalance))
                       }}
                       className={cn(
                         'focus-ring flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[11px] font-semibold transition',

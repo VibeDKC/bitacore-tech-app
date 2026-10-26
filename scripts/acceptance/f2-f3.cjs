@@ -97,7 +97,7 @@ async function rpc(page, command, payload = {}) {
     await page.getByRole('button', { name: /Proveedores/ }).click()
     await page.getByRole('button', { name: 'Agregar proveedor' }).click()
     await page.getByPlaceholder('Distribuidora Andina S.A.S.').fill('Proveedor UI')
-    await page.getByPlaceholder('900123456-1').fill('900123456-1')
+    await page.getByPlaceholder('900123456').fill('900123456')
     await page.getByPlaceholder('Nombre del vendedor').fill('Vendedor Uno')
     await page.getByPlaceholder('310 000 0000').fill('3101112233')
     await page.getByRole('button', { name: 'Crear proveedor' }).click()

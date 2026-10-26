@@ -58,6 +58,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'createOrder',
     'diagnoseOrder',
     'assignTechnician',
+    'manageLoyalty',
     'settleOrder',
     'authorizeNoCharge',
     'viewAudit',
@@ -82,6 +83,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'createOrder',
     'diagnoseOrder',
     'assignTechnician',
+    'manageLoyalty',
     'settleOrder',
     'authorizeNoCharge',
     'useAI',
@@ -99,7 +101,63 @@ export function canAccessModule(role: Role, module: ModuleKey) {
   return roleModules[role].includes(module)
 }
 
+let effectivePermissions: Set<Capability> | null = null
+
+export function setEffectivePermissions(permissions: Capability[] | null) {
+  effectivePermissions = permissions ? new Set(permissions) : null
+}
+
 export function can(role: Role, capability: Capability) {
+  if (effectivePermissions) return effectivePermissions.has(capability)
+  return roleCapabilities[role].includes(capability)
+}
+
+export const capabilityLabels: Record<Capability, string> = {
+  viewCosts: 'Ver costos',
+  viewGrossMargin: 'Ver margen bruto',
+  viewNetProfit: 'Ver utilidad neta',
+  manageAdmins: 'Gestionar administradores',
+  manageStaff: 'Gestionar personal',
+  createBackup: 'Crear respaldos',
+  restoreBackup: 'Restaurar respaldos',
+  purgeData: 'Purgar datos',
+  configureLegal: 'Configurar legal',
+  configureAI: 'Configurar IA',
+  annulInvoice: 'Anular facturas',
+  closeCash: 'Cerrar caja',
+  createPurchase: 'Crear compras',
+  editInventory: 'Editar inventario',
+  createOrder: 'Crear OT',
+  diagnoseOrder: 'Diagnosticar OT',
+  assignTechnician: 'Reasignar técnico',
+  manageLoyalty: 'Configurar fidelidad',
+  settleOrder: 'Cobrar y entregar',
+  viewAudit: 'Ver auditoría',
+  viewFullAudit: 'Ver auditoría completa',
+  exportAudit: 'Exportar auditoría',
+  useAI: 'Usar IA',
+  applyDiscount: 'Aplicar descuentos',
+  authorizeNoCharge: 'Autorizar entrega sin cobro',
+  manageEvidence: 'Gestionar evidencias',
+  voidEvidence: 'Anular evidencias',
+  verifyEvidence: 'Verificar evidencias',
+  exportEvidence: 'Exportar evidencias'
+}
+
+export const allCapabilities = Object.keys(capabilityLabels) as Capability[]
+
+export const rootOnlyCapabilities: Capability[] = [
+  'viewAudit',
+  'viewFullAudit',
+  'exportAudit',
+  'purgeData',
+  'restoreBackup',
+  'manageAdmins',
+  'configureLegal',
+  'configureAI'
+]
+
+export function roleCan(role: Role, capability: Capability) {
   return roleCapabilities[role].includes(capability)
 }
 
@@ -117,6 +175,7 @@ export const permissionMatrix: Array<{
       { label: 'Ventas y POS', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'full' } },
       { label: 'Órdenes de trabajo', roles: { superadmin: 'full', admin: 'full', tecnico: 'full', cajero: 'none' } },
       { label: 'Asignar y reasignar técnico', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
+      { label: 'Configurar fidelidad de clientes', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
       { label: 'Evidencias fotográficas', roles: { superadmin: 'full', admin: 'full', tecnico: 'partial', cajero: 'none' } },
       { label: 'Clientes', roles: { superadmin: 'full', admin: 'full', tecnico: 'full', cajero: 'full' } },
       { label: 'Inventario', roles: { superadmin: 'full', admin: 'partial', tecnico: 'readonly', cajero: 'readonly' } },

@@ -1,5 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
+import { dialog, safeStorage } from 'electron'
 import { z } from 'zod'
 import type { Database } from './database'
 import {
@@ -27,6 +29,7 @@ import {
   cashMovementDto,
   cashSessionDto,
   customerDto,
+  equipmentDto,
   invoiceDto,
   money,
   orderDto,
@@ -35,14 +38,18 @@ import {
   toCents
 } from './mappers'
 import {
+  ALL_CAPABILITIES,
+  ROOT_ONLY_CAPABILITIES,
   RpcError,
   can,
+  capabilitiesForRole,
   requireCapability,
   requireModule,
   roleLabel,
   type BackendCapability
 } from './permissions'
 import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './security'
+import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import { runDemoSeed, type SeedOwner } from './seed'
 
 type Payload = Record<string, any>
@@ -190,6 +197,13 @@ function displayUser(session: Session) {
 }
 
 function sessionResponse(session: Session) {
+  const db = currentSession()
+  const permissions = effectiveCapabilities(
+    db,
+    session.userId,
+    session.role,
+    session.role !== session.actualRole
+  )
   return {
     user: {
       id: session.userId,
@@ -203,7 +217,8 @@ function sessionResponse(session: Session) {
     actualRole: session.actualRole,
     canPreviewRoles: session.actualRole === 'superadmin',
     expiresAt: session.expiresAt,
-    roleLabel: roleLabels[session.role]
+    roleLabel: roleLabels[session.role],
+    permissions
   }
 }
 
@@ -229,8 +244,121 @@ function requireModuleAccess(session: Session, module: string) {
   requireModule(session.role as any, module)
 }
 
+function effectiveCapabilities(db: Database, userId: string, role: string, preview = false) {
+  const roleRows = db.all<{ capability: string; allowed: number }>(
+    'SELECT capability, allowed FROM role_permissions WHERE role = ?',
+    role
+  )
+  const granted = new Set(
+    roleRows.length
+      ? roleRows.filter((row) => row.allowed).map((row) => row.capability as BackendCapability)
+      : capabilitiesForRole(role as any)
+  )
+  if (!preview) {
+    for (const row of db.all<{ capability: string; allowed: number }>(
+      'SELECT capability, allowed FROM user_permission_overrides WHERE user_id = ?',
+      userId
+    )) {
+      if (row.allowed) granted.add(row.capability as BackendCapability)
+      else granted.delete(row.capability as BackendCapability)
+    }
+  }
+  return ALL_CAPABILITIES.filter((capability) => granted.has(capability))
+}
+
+function hasCapability(db: Database, session: Session, capability: BackendCapability) {
+  if (session.role !== session.actualRole) {
+    const previewRole = db.get<{ allowed: number }>(
+      'SELECT allowed FROM role_permissions WHERE role = ? AND capability = ?',
+      session.role,
+      capability
+    )
+    if (previewRole) return Boolean(previewRole.allowed)
+    return capabilitiesForRole(session.role as any).includes(capability)
+  }
+  const override = db.get<{ allowed: number }>(
+    'SELECT allowed FROM user_permission_overrides WHERE user_id = ? AND capability = ?',
+    session.userId,
+    capability
+  )
+  if (override) return Boolean(override.allowed)
+  const rolePermission = db.get<{ allowed: number }>(
+    'SELECT allowed FROM role_permissions WHERE role = ? AND capability = ?',
+    session.role,
+    capability
+  )
+  if (rolePermission) return Boolean(rolePermission.allowed)
+  return can(session.role as any, capability)
+}
+
 function requireCap(session: Session, capability: BackendCapability) {
-  requireCapability(session.role as any, capability)
+  if (!hasCapability(currentSession(), session, capability)) {
+    throw new RpcError(
+      `Tu rol (${roleLabel(session.role as any)}) no tiene permiso para esta acción.`,
+      'FORBIDDEN'
+    )
+  }
+}
+
+function canSession(session: Session, capability: BackendCapability) {
+  return hasCapability(currentSession(), session, capability)
+}
+
+function normalizeUserPhoto(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/i.test(value)) {
+    fail('La foto debe ser una imagen PNG, JPEG o WebP.')
+  }
+  if (value.length > 500_000) fail('La foto es demasiado grande; usa una imagen de máximo 350 KB.')
+  return value
+}
+
+function applyPermissionOverrides(
+  db: Database,
+  session: Session,
+  userId: string,
+  targetRole: string,
+  permissions: unknown
+) {
+  if (!Array.isArray(permissions)) return
+  if (targetRole === 'superadmin') fail('La cuenta raíz no admite permisos especiales.', 'FORBIDDEN')
+  const actorCapabilities = new Set(
+    effectiveCapabilities(db, session.userId, session.role, session.role !== session.actualRole)
+  )
+  const parsed = permissions.map((item: any) => {
+    const capability = schema(item?.capability, z.string().min(1).max(80)) as BackendCapability
+    if (!ALL_CAPABILITIES.includes(capability)) fail(`Permiso desconocido: ${capability}`)
+    if (typeof item?.allowed !== 'boolean') fail('Cada permiso debe indicar allow o deny.')
+    if (session.actualRole !== 'superadmin') {
+      if (ROOT_ONLY_CAPABILITIES.includes(capability)) {
+        fail(`El permiso ${capability} es exclusivo del propietario.`, 'FORBIDDEN')
+      }
+      if (item.allowed && !actorCapabilities.has(capability)) {
+        fail('No puedes conceder un permiso que tu propia cuenta no tiene.', 'FORBIDDEN')
+      }
+    }
+    return {
+      capability,
+      allowed: item.allowed ? 1 : 0,
+      reason: typeof item.reason === 'string' ? item.reason.slice(0, 300) : null
+    }
+  })
+  db.run('DELETE FROM user_permission_overrides WHERE user_id = ?', userId)
+  const now = new Date().toISOString()
+  for (const item of parsed) {
+    db.run(
+      `INSERT INTO user_permission_overrides
+        (user_id, capability, allowed, reason, granted_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      userId,
+      item.capability,
+      item.allowed,
+      item.reason,
+      session.userId,
+      now,
+      now
+    )
+  }
 }
 
 function currentCashSession(db: Database) {
@@ -327,29 +455,95 @@ function orderPaidTotal(db: Database, orderId: string) {
   return db.get<{ total: number }>('SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE order_id = ?', orderId)?.total ?? 0
 }
 
+function loyaltyDiscountFor(customer: any) {
+  if (!customer?.loyalty_active) return null
+  if (customer.loyalty_valid_until) {
+    const until = new Date(`${customer.loyalty_valid_until}T23:59:59`).getTime()
+    if (Number.isFinite(until) && until < Date.now()) return null
+  }
+  const type = customer.loyalty_discount_type === 'amount' ? 'amount' : 'percent'
+  const value = Number(customer.loyalty_discount_value ?? 0)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return { type: type as 'percent' | 'amount', value, source: 'loyalty' as const }
+}
+
+function resolveSaleDiscount(
+  customer: any,
+  payload: Payload,
+  session: Session,
+  subtotalCents: number
+) {
+  const loyalty = loyaltyDiscountFor(customer)
+  if (loyalty) return loyalty
+  const type = schema(payload?.discountType ?? 'percent', z.enum(['percent', 'amount']))
+  const rawValue =
+    payload?.discountValue !== undefined
+      ? numberValue(payload.discountValue, 'Descuento', { min: 0 })
+      : numberValue(payload?.discountPercent ?? 0, 'Descuento', { min: 0, max: 100 })
+  if (type === 'percent' && rawValue > 100) fail('El descuento no puede superar el 100 %.')
+  if (rawValue > 0) requireCap(session, 'applyDiscount')
+  return { type, value: rawValue, source: rawValue > 0 ? ('manual' as const) : ('none' as const) }
+}
+
+function discountCentsFor(type: 'percent' | 'amount', value: number, subtotalCents: number) {
+  const cents = type === 'percent' ? Math.round((subtotalCents * value) / 100) : toCents(value)
+  return Math.min(Math.max(cents, 0), subtotalCents)
+}
+
+function assertDiscountFloor(
+  lines: Array<{ name: string; quantity: number; unitPriceCents: number; unitCostCents: number; isService?: boolean }>,
+  subtotalCents: number,
+  discountCents: number
+) {
+  if (!discountCents || !subtotalCents) return
+  for (const line of lines) {
+    if (line.isService) continue
+    const lineTotal = line.unitPriceCents * line.quantity
+    const allocated = Math.round((discountCents * lineTotal) / subtotalCents)
+    const net = lineTotal - allocated
+    const cost = line.unitCostCents * line.quantity
+    if (net < cost) {
+      fail(
+        `El descuento deja ${line.name} por debajo del costo de compra. Ajusta el descuento o requiere autorización del propietario.`,
+        'DISCOUNT_BELOW_COST'
+      )
+    }
+  }
+}
+
 function createOrderInvoice(
   db: Database,
   session: Session,
   order: any,
+  subtotalCents: number,
   totalCents: number,
   method: string,
   isException = false,
-  exceptionReason = ''
+  exceptionReason = '',
+  discount: { type: 'percent' | 'amount'; value: number; cents: number } = {
+    type: 'percent',
+    value: 0,
+    cents: 0
+  }
 ) {
   const number = db.invoiceNumber()
   const id = `inv_${sha256(`${order.id}|${number}`).slice(0, 20)}`
   const name = displayUser(session).name
   db.run(
     `INSERT INTO invoices
-      (id, number, type, customer_id, customer_name, order_id, subtotal_cents, discount_percent, discount_cents,
-       total_cents, payment_method, status, notes, created_by, created_at)
-     VALUES (?, ?, 'ot', ?, ?, ?, ?, 0, 0, ?, ?, 'activa', ?, ?, ?)`,
+      (id, number, type, customer_id, customer_name, order_id, subtotal_cents, discount_percent, discount_type,
+       discount_value, discount_cents, total_cents, payment_method, status, notes, created_by, created_at)
+     VALUES (?, ?, 'ot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?, ?)`,
     id,
     number,
     order.customer_id,
     order.customer_name,
     order.id,
-    totalCents,
+    subtotalCents,
+    discount.type === 'percent' ? discount.value : 0,
+    discount.type,
+    discount.value,
+    discount.cents,
     totalCents,
     isException ? null : method,
     isException ? `Excepción: ${exceptionReason} · Autorizado por ${name}` : null,
@@ -403,6 +597,13 @@ function settingsData(db: Database) {
     ai: db.getSetting('ai_config', DEFAULT_SETTINGS.ai),
     security: db.getSetting('security_config', DEFAULT_SETTINGS.security),
     business: db.getSetting('business_config', DEFAULT_SETTINGS.business),
+    equipment: db.getSetting('equipment_config', DEFAULT_SETTINGS.equipment),
+    backup: { passwordConfigured: backupPasswordConfigured(db) },
+    rolePermissions: db
+      .all<{ role: string; capability: string; allowed: number }>(
+        'SELECT role, capability, allowed FROM role_permissions ORDER BY role ASC, capability ASC'
+      )
+      .map((row) => ({ role: row.role, capability: row.capability, allowed: Boolean(row.allowed) })),
     statuses: db.all<any>('SELECT * FROM order_status_config ORDER BY position ASC').map((row) => ({
       status: row.status,
       label: row.label,
@@ -429,7 +630,22 @@ function userDto(db: Database, row: any) {
     active: Boolean(row.active),
     lastAccess: row.last_login_at ?? 'Sin acceso',
     protected: Boolean(row.is_protected),
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    documentType: row.document_type ?? null,
+    document: row.document ?? null,
+    phone: row.phone ?? null,
+    address: row.address ?? null,
+    photoUrl: row.photo_path ?? null,
+    permissionOverrides: db
+      .all<{ capability: string; allowed: number; reason: string | null }>(
+        'SELECT capability, allowed, reason FROM user_permission_overrides WHERE user_id = ? ORDER BY capability ASC',
+        row.id
+      )
+      .map((item) => ({
+        capability: item.capability,
+        allowed: Boolean(item.allowed),
+        reason: item.reason ?? ''
+      }))
   }
 }
 
@@ -446,6 +662,8 @@ function supplierDto(db: Database, row: any) {
     id: row.id,
     name: row.name,
     nit: row.nit,
+    nitDv: !row.is_foreign_nit && row.nit && row.nit !== '—' ? calculateNitDv(row.nit) : undefined,
+    isForeignNit: Boolean(row.is_foreign_nit),
     contact: row.contact,
     phone: row.phone,
     category: row.category,
@@ -454,7 +672,14 @@ function supplierDto(db: Database, row: any) {
 }
 
 function purchaseDto(db: Database, row: any) {
-  const supplier = db.get<{ name: string; nit: string }>('SELECT name, nit FROM suppliers WHERE id = ?', row.supplier_id)
+  const supplier = db.get<{ name: string; nit: string; is_foreign_nit: number }>(
+    'SELECT name, nit, is_foreign_nit FROM suppliers WHERE id = ?',
+    row.supplier_id
+  )
+  const supplierNitDv =
+    supplier && !supplier.is_foreign_nit && supplier.nit && supplier.nit !== '—'
+      ? calculateNitDv(supplier.nit)
+      : undefined
   const lines = db
     .all<any>('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY rowid ASC', row.id)
     .map((line) => ({
@@ -471,6 +696,7 @@ function purchaseDto(db: Database, row: any) {
     supplierId: row.supplier_id,
     supplier: supplier?.name ?? 'Proveedor',
     supplierNit: supplier?.nit ?? '—',
+    supplierNitDv,
     date: row.purchase_date,
     items: row.item_count,
     subtotal: money(row.subtotal_cents),
@@ -492,6 +718,42 @@ function parsePeriod(value: string) {
   if (value === '7d') return new Date(now.getTime() - 7 * 86400000)
   if (value === 'ano') return new Date(now.getFullYear(), 0, 1)
   return new Date(now.getTime() - 30 * 86400000)
+}
+
+function monthlyChartData(db: Database) {
+  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+  const now = new Date()
+  const points: Array<{ month: string; income: number; expenses: number }> = []
+  for (let offset = 11; offset >= 0; offset -= 1) {
+    const start = new Date(now.getFullYear(), now.getMonth() - offset, 1)
+    const end = new Date(now.getFullYear(), now.getMonth() - offset + 1, 1)
+    const startIso = start.toISOString()
+    const endIso = end.toISOString()
+    const income =
+      db.get<{ total: number }>(
+        "SELECT COALESCE(SUM(total_cents), 0) AS total FROM invoices WHERE status = 'activa' AND datetime(created_at) >= datetime(?) AND datetime(created_at) < datetime(?)",
+        startIso,
+        endIso
+      )?.total ?? 0
+    const purchases =
+      db.get<{ total: number }>(
+        'SELECT COALESCE(SUM(total_cents), 0) AS total FROM purchases WHERE purchase_date >= ? AND purchase_date < ?',
+        startIso.slice(0, 10),
+        endIso.slice(0, 10)
+      )?.total ?? 0
+    const expenses =
+      db.get<{ total: number }>(
+        "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM cash_movements WHERE type = 'egreso' AND datetime(created_at) >= datetime(?) AND datetime(created_at) < datetime(?)",
+        startIso,
+        endIso
+      )?.total ?? 0
+    points.push({
+      month: months[start.getMonth()],
+      income: money(income),
+      expenses: money(purchases + expenses)
+    })
+  }
+  return points
 }
 
 function reportData(db: Database, session: Session, period: string) {
@@ -526,8 +788,8 @@ function reportData(db: Database, session: Session, period: string) {
   const netCents = grossCents - expenseCents
   const ivaCents = purchases.reduce((sum, purchase) => sum + Number(purchase.iva_cents), 0)
   const purchaseCents = purchases.reduce((sum, purchase) => sum + Number(purchase.total_cents), 0)
-  const canGross = requireCapabilitySoft(session.role, 'viewGrossMargin')
-  const canNet = requireCapabilitySoft(session.role, 'viewNetProfit')
+  const canGross = canSession(session, 'viewGrossMargin')
+  const canNet = canSession(session, 'viewNetProfit')
 
   const methods = ['Efectivo', 'Tarjeta', 'Transferencia', 'Mixto']
   const colors = ['#12B76A', '#6C5CE7', '#0EA5E9', '#F79009']
@@ -592,8 +854,7 @@ function reportData(db: Database, session: Session, period: string) {
     load: Math.round((stats.open / Math.max(stats.total, 1)) * 100)
   }))
 
-  const history = db.getSetting<any[]>('charts_history', [])
-  const chartData = history.map((point) => ({ month: point.month, income: Number(point.income), expenses: Number(point.expenses) }))
+  const chartData = monthlyChartData(db)
 
   return {
     period,
@@ -620,7 +881,6 @@ function reportData(db: Database, session: Session, period: string) {
 function requireCapabilitySoft(role: string, capability: BackendCapability) {
   return can(role as any, capability)
 }
-
 function notificationData(db: Database) {
   const low = db.get<{ count: number }>(
     'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND stock > 0 AND stock <= min_stock'
@@ -827,6 +1087,49 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
   }
 }
 
+function getBackupPassword(db: Database): string | null {
+  const stored = db.getSetting<{ encrypted?: string } | null>('backup_password', null)
+  if (!stored?.encrypted) return null
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.encrypted, 'base64'))
+  } catch {
+    return null
+  }
+}
+
+function backupPasswordConfigured(db: Database) {
+  const stored = db.getSetting<{ encrypted?: string } | null>('backup_password', null)
+  return Boolean(stored?.encrypted)
+}
+
+function encryptBackupPayload(data: Buffer, password: string) {
+  const salt = randomBytes(16)
+  const iv = randomBytes(12)
+  const key = scryptSync(password, salt, 32)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return Buffer.concat([Buffer.from('BTBK1', 'ascii'), salt, iv, tag, ciphertext])
+}
+
+function decryptBackupPayload(data: Buffer, password: string) {
+  if (data.subarray(0, 5).toString('ascii') !== 'BTBK1') {
+    fail('El archivo no es un respaldo BitacoreTech válido.')
+  }
+  const salt = data.subarray(5, 21)
+  const iv = data.subarray(21, 33)
+  const tag = data.subarray(33, 49)
+  const ciphertext = data.subarray(49)
+  const key = scryptSync(password, salt, 32)
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', key, iv)
+    decipher.setAuthTag(tag)
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()])
+  } catch {
+    fail('La contraseña del respaldo no es correcta o el archivo está dañado.', 'INVALID_PASSWORD')
+  }
+}
+
 function backupList(db: Database) {
   return db.all<any>('SELECT * FROM backups ORDER BY created_at DESC').map((row) => {
     const format = row.format === 'folder' ? 'folder' : 'db'
@@ -849,13 +1152,12 @@ function backupList(db: Database) {
   })
 }
 
-function issueSession(db: Database, user: any, remember: boolean) {
+function issueSession(db: Database, user: any) {
   const sessionToken = newToken()
   const tokenHash = sha256(sessionToken)
   const security = db.getSetting<any>('security_config', DEFAULT_SETTINGS.security)
   const hours = security.sessionHours ?? 12
-  const rememberDays = security.rememberDays ?? 30
-  const expires = new Date(Date.now() + (remember ? rememberDays : hours) * 3600_000).toISOString()
+  const expires = new Date(Date.now() + hours * 3600_000).toISOString()
   db.run(
     'INSERT INTO sessions (token_hash, user_id, effective_role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
     tokenHash,
@@ -868,7 +1170,7 @@ function issueSession(db: Database, user: any, remember: boolean) {
   return { token: sessionToken, expires }
 }
 
-function sessionPayload(user: any, token: string, expires: string) {
+function sessionPayload(db: Database, user: any, token: string, expires: string) {
   const profile = {
     id: user.id,
     username: user.username,
@@ -884,8 +1186,69 @@ function sessionPayload(user: any, token: string, expires: string) {
     actualRole: user.role,
     canPreviewRoles: user.role === 'superadmin',
     expiresAt: expires,
-    roleLabel: roleLabels[user.role]
+    roleLabel: roleLabels[user.role],
+    permissions: effectiveCapabilities(db, user.id, user.role)
   }
+}
+
+async function restoreBackupRecord(db: Database, runtime: Runtime, session: Session, backup: any) {
+  if (!fs.existsSync(backup.path)) fail('El archivo del respaldo no existe en este equipo.')
+  const format = backup.format === 'folder' ? 'folder' : 'db'
+  const sourceDatabase =
+    format === 'folder' ? path.join(String(backup.path), BACKUP_DATABASE_FILENAME) : String(backup.path)
+  if (!fs.existsSync(sourceDatabase)) fail('El respaldo no contiene una base de datos válida.')
+  const sourceEvidence = path.join(String(backup.path), EVIDENCE_FOLDER)
+  if (format === 'folder' && !fs.existsSync(sourceEvidence)) {
+    fail('El respaldo completo no contiene la carpeta de evidencias.')
+  }
+  const safety = await createBackup(db, runtime, session)
+  closeDatabase()
+  const wal = `${db.path}-wal`
+  const shm = `${db.path}-shm`
+  if (fs.existsSync(wal)) fs.rmSync(wal, { force: true })
+  if (fs.existsSync(shm)) fs.rmSync(shm, { force: true })
+  try {
+    fs.copyFileSync(sourceDatabase, db.path)
+    const currentEvidence = getEvidencePath(runtime.userDataPath)
+    if (fs.existsSync(currentEvidence)) fs.rmSync(currentEvidence, { recursive: true, force: true })
+    if (format === 'folder') {
+      fs.cpSync(sourceEvidence, currentEvidence, { recursive: true, force: true })
+    } else {
+      fs.mkdirSync(currentEvidence, { recursive: true })
+    }
+  } catch (error) {
+    try {
+      openDatabase(runtime.userDataPath)
+    } catch {
+      // El error original describe la restauración fallida.
+    }
+    throw error
+  }
+  const restored = openDatabase(runtime.userDataPath)
+  restored.run(
+    `INSERT OR REPLACE INTO backups
+      (id, filename, path, size_bytes, sha256, format, created_by, created_by_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    safety.id,
+    safety.name,
+    safety.path,
+    safety.size,
+    safety.hash,
+    safety.format ?? 'folder',
+    session.userId,
+    displayUser(session).name,
+    safety.createdAt
+  )
+  restored.appendAudit({
+    userId: session.userId,
+    userName: displayUser(session).name,
+    role: roleLabel(session.role as any),
+    action: 'Restauración de backup',
+    entity: 'Respaldo',
+    entityId: backup.id,
+    detail: `${format === 'folder' ? 'Respaldo completo (base + evidencias)' : 'Respaldo legado solo de base'} ${backup.filename} restaurado. Se generó copia previa ${safety.name}.`
+  })
+  return { restored: true, safetyBackup: safety.name, requiresReload: true, format }
 }
 
 export async function handleRpc(command: string, payload: Payload, token: string | undefined, runtime: Runtime): Promise<any> {
@@ -970,7 +1333,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     const created = db.get<any>('SELECT * FROM users WHERE id = ?', owner.id)
     if (!created) fail('No se pudo crear la cuenta del propietario.', 'INTERNAL_ERROR')
-    const issued = issueSession(db, created, false)
+    const issued = issueSession(db, created)
     const sessionLike = {
       token: issued.token,
       tokenHash: sha256(issued.token),
@@ -987,7 +1350,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
     } catch (error) {
       console.error('[BitacoreTech] No se pudo crear el respaldo inicial', error)
     }
-    return sessionPayload(created, issued.token, issued.expires)
+    return sessionPayload(db, created, issued.token, issued.expires)
   }
 
   if (command === 'auth.login') {
@@ -997,7 +1360,6 @@ export async function handleRpc(command: string, payload: Payload, token: string
     }
     const username = text(payload?.username, 'Usuario', 3, 80).toLowerCase()
     const password = typeof payload?.password === 'string' ? payload.password : ''
-    const remember = Boolean(payload?.remember)
     if (!password) fail('La contraseña es obligatoria')
 
     const attempts = loginAttempts.get(username)
@@ -1027,7 +1389,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
     }
 
     loginAttempts.delete(username)
-    const issued = issueSession(db, user, remember)
+    const issued = issueSession(db, user)
     db.appendAudit({
       userId: user.id,
       userName: user.name,
@@ -1036,7 +1398,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       entity: 'Sesión',
       detail: `Acceso correcto para ${user.username}.`
     })
-    return sessionPayload(user, issued.token, issued.expires)
+    return sessionPayload(db, user, issued.token, issued.expires)
   }
 
   if (command === 'auth.session') {
@@ -1098,7 +1460,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireModuleAccess(session, 'dashboard')
       const products = db
         .all<any>('SELECT * FROM products WHERE active = 1 ORDER BY name ASC')
-        .map((row) => productDto(db, row, requireCapabilitySoft(session.role, 'viewCosts')))
+        .map((row) => productDto(db, row, canSession(session, 'viewCosts')))
       const orders = db
         .all<any>(
           `SELECT w.*, c.name AS customer_name FROM work_orders w JOIN customers c ON c.id = w.customer_id
@@ -1155,16 +1517,27 @@ export async function handleRpc(command: string, payload: Payload, token: string
     case 'customers.create': {
       requireModuleAccess(session, 'customers')
       const name = text(payload?.name, 'Nombre', 2, 160)
-      const document = text(payload?.document, 'Documento', 3, 40)
       const documentType = schema(payload?.documentType ?? 'CC', z.enum(['CC', 'NIT', 'Pasaporte']))
+      const isForeignDocument = Boolean(payload?.isForeignDocument)
+      let document = text(payload?.document, 'Documento', 3, 40)
+      if (documentType === 'NIT' && !isForeignDocument) {
+        const digits = normalizeNit(document)
+        if (document !== digits) fail('El NIT debe contener solo números, sin puntos ni espacios.')
+        const dv = typeof payload?.documentDv === 'string' ? payload.documentDv.trim() : calculateNitDv(digits)
+        if (!isValidNit(digits, dv)) fail('El dígito de verificación del NIT no es válido.')
+        document = digits
+      }
       const existing = db.get<any>('SELECT id, name FROM customers WHERE document = ?', document)
       if (existing) fail(`Ya existe un cliente con ese documento: ${existing.name}`, 'DUPLICATE')
       const id = `cust_${sha256(`${document}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
-          `INSERT INTO customers (id, name, document_type, document, phone, email, address, is_final_consumer, created_at, updated_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+          `INSERT INTO customers
+            (id, name, document_type, document, phone, email, address, is_final_consumer, is_foreign_document,
+             loyalty_active, loyalty_discount_type, loyalty_discount_value, loyalty_valid_until, loyalty_notes,
+             created_at, updated_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?)`,
           id,
           name,
           documentType,
@@ -1172,13 +1545,245 @@ export async function handleRpc(command: string, payload: Payload, token: string
           text(payload?.phone ?? '—', 'Teléfono', 1, 80) || '—',
           text(payload?.email ?? '—', 'Correo', 1, 160) || '—',
           text(payload?.address ?? 'Sin dirección', 'Dirección', 1, 240) || 'Sin dirección',
+          isForeignDocument ? 1 : 0,
           nowIso,
           nowIso,
           session.userId
         )
-        audit(db, session, 'Creación de cliente', 'Cliente', `${name} · ${document}`, id)
+        audit(
+          db,
+          session,
+          'Creación de cliente',
+          'Cliente',
+          `${name} · ${documentType} ${document}${isForeignDocument ? ' · documento extranjero' : ''}`,
+          id
+        )
       })
       return customerDto(db, db.get<any>('SELECT * FROM customers WHERE id = ?', id))
+    }
+
+    case 'customers.update': {
+      requireModuleAccess(session, 'customers')
+      const id = text(payload?.id, 'Cliente', 1, 80)
+      const row = db.get<any>('SELECT * FROM customers WHERE id = ?', id)
+      if (!row) fail('Cliente no encontrado', 'NOT_FOUND')
+      const updates: string[] = []
+      const params: any[] = []
+      if (typeof payload?.name === 'string') {
+        updates.push('name = ?')
+        params.push(text(payload.name, 'Nombre', 2, 160))
+      }
+      if (typeof payload?.phone === 'string') {
+        updates.push('phone = ?')
+        params.push(payload.phone.trim() || '—')
+      }
+      if (typeof payload?.email === 'string') {
+        updates.push('email = ?')
+        params.push(payload.email.trim() || '—')
+      }
+      if (typeof payload?.address === 'string') {
+        updates.push('address = ?')
+        params.push(payload.address.trim() || 'Sin dirección')
+      }
+      const documentType = payload?.documentType
+        ? schema(payload.documentType, z.enum(['CC', 'NIT', 'Pasaporte']))
+        : row.document_type
+      const isForeignDocument =
+        payload?.isForeignDocument === undefined ? Boolean(row.is_foreign_document) : Boolean(payload.isForeignDocument)
+      if (payload?.documentType !== undefined || payload?.document !== undefined || payload?.isForeignDocument !== undefined) {
+        let document = typeof payload?.document === 'string' ? payload.document.trim() : row.document
+        if (documentType === 'NIT' && !isForeignDocument) {
+          const digits = normalizeNit(document)
+          if (document !== digits) fail('El NIT debe contener solo números, sin puntos ni espacios.')
+          const dv = typeof payload?.documentDv === 'string' ? payload.documentDv.trim() : calculateNitDv(digits)
+          if (!isValidNit(digits, dv)) fail('El dígito de verificación del NIT no es válido.')
+          document = digits
+        }
+        const duplicate = db.get<any>('SELECT id, name FROM customers WHERE document = ? AND id <> ?', document, id)
+        if (duplicate) fail(`Ya existe un cliente con ese documento: ${duplicate.name}`, 'DUPLICATE')
+        updates.push('document_type = ?', 'document = ?', 'is_foreign_document = ?')
+        params.push(documentType, document, isForeignDocument ? 1 : 0)
+      }
+      const loyaltyFields = [
+        'loyaltyActive',
+        'loyaltyDiscountType',
+        'loyaltyDiscountValue',
+        'loyaltyValidUntil',
+        'loyaltyNotes'
+      ]
+      const touchesLoyalty = loyaltyFields.some((key) => payload?.[key] !== undefined)
+      if (touchesLoyalty) {
+        requireCap(session, 'manageLoyalty')
+        if (payload?.loyaltyActive !== undefined) {
+          updates.push('loyalty_active = ?')
+          params.push(payload.loyaltyActive ? 1 : 0)
+        }
+        if (payload?.loyaltyDiscountType !== undefined) {
+          const type = schema(payload.loyaltyDiscountType, z.enum(['percent', 'amount']))
+          updates.push('loyalty_discount_type = ?')
+          params.push(type)
+        }
+        if (payload?.loyaltyDiscountValue !== undefined) {
+          const type =
+            payload?.loyaltyDiscountType ??
+            (updates.includes('loyalty_discount_type = ?') ? params[params.length - 1] : row.loyalty_discount_type)
+          const value = numberValue(
+            payload.loyaltyDiscountValue,
+            'Descuento de fidelidad',
+            type === 'percent' ? { min: 0, max: 100 } : { min: 0 }
+          )
+          updates.push('loyalty_discount_value = ?')
+          params.push(value)
+        }
+        if (payload?.loyaltyValidUntil !== undefined) {
+          updates.push('loyalty_valid_until = ?')
+          params.push(typeof payload.loyaltyValidUntil === 'string' && payload.loyaltyValidUntil.trim() ? payload.loyaltyValidUntil.trim() : null)
+        }
+        if (payload?.loyaltyNotes !== undefined) {
+          updates.push('loyalty_notes = ?')
+          params.push(typeof payload.loyaltyNotes === 'string' ? payload.loyaltyNotes.slice(0, 500) : null)
+        }
+      }
+      if (!updates.length) fail('No hay cambios para guardar')
+      updates.push('updated_at = ?')
+      params.push(new Date().toISOString(), id)
+      db.tx(() => {
+        db.run(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, ...params)
+        audit(
+          db,
+          session,
+          touchesLoyalty ? 'Actualización de fidelidad' : 'Actualización de cliente',
+          'Cliente',
+          touchesLoyalty
+            ? `${row.name} · fidelidad ${payload?.loyaltyActive === false ? 'desactivada' : 'actualizada'}`
+            : `${row.name} actualizado`,
+          id
+        )
+      })
+      return customerDto(db, db.get<any>('SELECT * FROM customers WHERE id = ?', id))
+    }
+
+    case 'equipment.list': {
+      requireModuleAccess(session, 'customers')
+      const customerId = text(payload?.customerId, 'Cliente', 1, 80)
+      return db
+        .all<any>('SELECT * FROM equipment WHERE customer_id = ? ORDER BY updated_at DESC', customerId)
+        .map(equipmentDto)
+    }
+
+    case 'equipment.qrEnabled': {
+      requireModuleAccess(session, 'customers')
+      return Boolean(db.getSetting<any>('equipment_config', DEFAULT_SETTINGS.equipment)?.qrEnabled)
+    }
+
+    case 'equipment.create': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'createOrder')
+      const customerId = text(payload?.customerId, 'Cliente', 1, 80)
+      const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', customerId)
+      if (!customer) fail('Cliente no encontrado', 'NOT_FOUND')
+      const brand = text(payload?.brand, 'Marca', 1, 80)
+      const model = text(payload?.model, 'Modelo', 1, 120)
+      const serial = text(payload?.serial ?? 'Sin serial', 'Serial', 1, 120)
+      const duplicate = db.get<any>(
+        `SELECT id FROM equipment
+         WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE`,
+        customerId,
+        serial,
+        brand,
+        model
+      )
+      if (duplicate) fail('Ya existe un equipo con ese serial para este cliente.', 'DUPLICATE')
+      const id = `eq_${sha256(`${customerId}|${serial}|${Date.now()}`).slice(0, 20)}`
+      const nowIso = new Date().toISOString()
+      const technicalSheet =
+        payload?.technicalSheet && typeof payload.technicalSheet === 'object'
+          ? JSON.stringify(payload.technicalSheet)
+          : null
+      db.tx(() => {
+        db.run(
+          `INSERT INTO equipment
+            (id, customer_id, category, category_label, equipment_type, brand, model, serial, accessories,
+             technical_sheet_json, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id,
+          customerId,
+          String(payload?.category ?? 'otro').slice(0, 40),
+          String(payload?.categoryLabel ?? 'Equipo').slice(0, 80),
+          String(payload?.equipmentType ?? payload?.categoryLabel ?? 'Equipo').slice(0, 80),
+          brand,
+          model,
+          serial,
+          typeof payload?.accessories === 'string' ? payload.accessories.slice(0, 1000) : 'Sin accesorios',
+          technicalSheet,
+          typeof payload?.notes === 'string' ? payload.notes.slice(0, 1000) : null,
+          nowIso,
+          nowIso
+        )
+        audit(db, session, 'Creación de equipo', 'Equipo', `${customer.name} · ${brand} ${model} · ${serial}`, id)
+      })
+      return equipmentDto(db.get<any>('SELECT * FROM equipment WHERE id = ?', id))
+    }
+
+    case 'equipment.update': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'createOrder')
+      const id = text(payload?.id, 'Equipo', 1, 80)
+      const row = db.get<any>('SELECT * FROM equipment WHERE id = ?', id)
+      if (!row) fail('Equipo no encontrado', 'NOT_FOUND')
+      const updates: string[] = []
+      const params: any[] = []
+      let ownershipChanged = false
+      let ownershipDetail = ''
+      if (payload?.customerId !== undefined && payload.customerId !== row.customer_id) {
+        requireCap(session, 'manageStaff')
+        const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', payload.customerId)
+        if (!customer) fail('Cliente destino no encontrado', 'NOT_FOUND')
+        const reason = text(payload?.reason, 'Motivo de la corrección', 3, 500)
+        updates.push('customer_id = ?')
+        params.push(payload.customerId)
+        ownershipChanged = true
+        ownershipDetail = `${row.brand} ${row.model} · ${row.serial} · ${reason}`
+      }
+      for (const [key, column, max] of [
+        ['category', 'category', 40],
+        ['categoryLabel', 'category_label', 80],
+        ['equipmentType', 'equipment_type', 80],
+        ['brand', 'brand', 80],
+        ['model', 'model', 120],
+        ['serial', 'serial', 120],
+        ['accessories', 'accessories', 1000],
+        ['notes', 'notes', 1000]
+      ] as const) {
+        if (payload?.[key] !== undefined) {
+          updates.push(`${column} = ?`)
+          params.push(String(payload[key]).slice(0, max))
+        }
+      }
+      if (payload?.technicalSheet !== undefined) {
+        updates.push('technical_sheet_json = ?')
+        params.push(payload.technicalSheet && typeof payload.technicalSheet === 'object' ? JSON.stringify(payload.technicalSheet) : null)
+      }
+      if (!updates.length) fail('No hay cambios para guardar')
+      updates.push('updated_at = ?')
+      params.push(new Date().toISOString(), id)
+      db.tx(() => {
+        db.run(`UPDATE equipment SET ${updates.join(', ')} WHERE id = ?`, ...params)
+        if (ownershipChanged) {
+          db.appendAudit({
+            userId: session.userId,
+            userName: displayUser(session).name,
+            role: roleLabel(session.role as any),
+            action: 'Corrección de propietario de equipo',
+            entity: 'Equipo',
+            entityId: id,
+            detail: ownershipDetail
+          })
+        } else {
+          audit(db, session, 'Actualización de equipo', 'Equipo', `${row.brand} ${row.model} · ${row.serial}`, id)
+        }
+      })
+      return equipmentDto(db.get<any>('SELECT * FROM equipment WHERE id = ?', id))
     }
 
     case 'customers.detail': {
@@ -1196,14 +1801,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const invoices = db
         .all<any>('SELECT * FROM invoices WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50', id)
         .map((row) => invoiceDto(db, row))
-      return { customer: customerDto(db, customer), orders, invoices }
+      const equipment = db
+        .all<any>('SELECT * FROM equipment WHERE customer_id = ? ORDER BY updated_at DESC', id)
+        .map(equipmentDto)
+      return { customer: customerDto(db, customer), orders, invoices, equipment }
     }
 
     case 'inventory.list': {
       requireModuleAccess(session, 'inventory')
       return db
         .all<any>('SELECT * FROM products WHERE active = 1 ORDER BY name ASC')
-        .map((row) => productDto(db, row, requireCapabilitySoft(session.role, 'viewCosts')))
+        .map((row) => productDto(db, row, canSession(session, 'viewCosts')))
     }
 
     case 'inventory.movements': {
@@ -1565,6 +2173,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (!technician && technicianOptions(db).length > 0) {
         fail('Selecciona un técnico para asignar la orden de trabajo.')
       }
+      const requestedEquipmentId = typeof payload?.equipmentId === 'string' ? payload.equipmentId : ''
+      if (requestedEquipmentId) {
+        const equipment = db.get<any>('SELECT * FROM equipment WHERE id = ? AND customer_id = ?', requestedEquipmentId, customerId)
+        if (!equipment) fail('El equipo seleccionado no pertenece al cliente.')
+      }
       const id = `wo_${sha256(`${customerId}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
       const number = db.orderNumber()
       const intake = {
@@ -1595,15 +2208,64 @@ export async function handleRpc(command: string, payload: Payload, token: string
         : []
       try {
         db.tx(() => {
+        let equipmentId = requestedEquipmentId
+        if (equipmentId) {
+          db.run('UPDATE equipment SET updated_at = ? WHERE id = ?', nowIso, equipmentId)
+        } else {
+          const existingEquipment = db.get<any>(
+            `SELECT * FROM equipment
+             WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE
+             LIMIT 1`,
+            customerId,
+            serial,
+            brand,
+            model
+          )
+          if (existingEquipment) {
+            equipmentId = existingEquipment.id
+            db.run('UPDATE equipment SET updated_at = ? WHERE id = ?', nowIso, equipmentId)
+          } else {
+            equipmentId = `eq_${sha256(`${customerId}|${serial}|${Date.now()}`).slice(0, 20)}`
+            db.run(
+              `INSERT INTO equipment
+                (id, customer_id, category, category_label, equipment_type, brand, model, serial, accessories,
+                 technical_sheet_json, notes, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+              equipmentId,
+              customerId,
+              category,
+              categoryLabel,
+              equipmentType,
+              brand,
+              model,
+              serial,
+              accessories,
+              intakeInput.technicalSheet && typeof intakeInput.technicalSheet === 'object'
+                ? JSON.stringify(intakeInput.technicalSheet)
+                : null,
+              nowIso,
+              nowIso
+            )
+            audit(
+              db,
+              session,
+              'Creación de equipo',
+              'Equipo',
+              `${customer.name} · ${brand} ${model} · ${serial} · creado desde la OT`,
+              equipmentId
+            )
+          }
+        }
         db.run(
           `INSERT INTO work_orders
-            (id, number, customer_id, device_category, category_label, equipment_type, brand, model, serial,
+            (id, number, customer_id, equipment_id, device_category, category_label, equipment_type, brand, model, serial,
              accessories, physical_condition, reported_issue, diagnosis, status, technician_id, created_at,
              promised_at, notes, intake_json, received_by, created_by, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'recibido', ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'recibido', ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           number,
           customerId,
+          equipmentId,
           category,
           categoryLabel,
           equipmentType,
@@ -1835,7 +2497,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'orders.addItem': {
       requireModuleAccess(session, 'orders')
-      if (!requireCapabilitySoft(session.role, 'diagnoseOrder') && !requireCapabilitySoft(session.role, 'createOrder')) {
+      if (!canSession(session, 'diagnoseOrder') && !canSession(session, 'createOrder')) {
         requireCap(session, 'diagnoseOrder')
       }
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
@@ -1963,15 +2625,35 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (row.status === 'entregado') fail('La OT ya fue entregada y cerrada.')
       if (row.status !== 'listo') fail('La OT debe estar en estado Listo para entrega antes de cobrar y entregar.')
       const intake = JSON.parse(row.intake_json ?? '{}')
-      const totalCents = orderItemsTotal(db, row.id) || toCents(intake.estimate ?? 0)
-      const paidCents = Number(orderPaidTotal(db, row.id))
+      const subtotalCents = orderItemsTotal(db, row.id) || toCents(intake.estimate ?? 0)
+      const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', row.customer_id)
       const noCharge = Boolean(payload?.noCharge)
       if (noCharge) {
         requireCap(session, 'authorizeNoCharge')
-        if (paidCents > 0) fail('No se puede entregar sin cobro una OT que ya tiene pagos registrados.')
-      } else if (totalCents <= 0) {
+        if (Number(orderPaidTotal(db, row.id)) > 0) fail('No se puede entregar sin cobro una OT que ya tiene pagos registrados.')
+      } else if (subtotalCents <= 0) {
         fail('No hay valores por cobrar. Agrega ítems, presupuesto o autoriza la entrega sin cobro.')
       }
+      const discount = noCharge
+        ? { type: 'percent' as const, value: 0, source: 'none' as const }
+        : resolveSaleDiscount(customer, payload, session, subtotalCents)
+      const discountCents = noCharge ? 0 : discountCentsFor(discount.type, discount.value, subtotalCents)
+      const orderItemRows = db.all<any>('SELECT * FROM work_order_items WHERE work_order_id = ?', row.id)
+      if (!noCharge) {
+        assertDiscountFloor(
+          orderItemRows.map((item) => ({
+            name: item.description,
+            quantity: Number(item.quantity),
+            unitPriceCents: Number(item.unit_price_cents),
+            unitCostCents: Number(item.unit_cost_cents),
+            isService: item.type === 'servicio'
+          })),
+          subtotalCents,
+          discountCents
+        )
+      }
+      const totalCents = subtotalCents - discountCents
+      const paidCents = Number(orderPaidTotal(db, row.id))
       const method = schema(payload?.method ?? 'Efectivo', z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
       const exceptionReason = noCharge ? text(payload?.exceptionReason, 'Motivo de la excepción', 5, 500) : ''
       const balanceCents = Math.max(totalCents - paidCents, 0)
@@ -1984,7 +2666,21 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireCashSession(db)
       let invoice: { id: string; number: string } | null = null
       db.tx(() => {
-        invoice = createOrderInvoice(db, session, row, totalCents, method, noCharge, exceptionReason)
+        invoice = createOrderInvoice(
+          db,
+          session,
+          row,
+          subtotalCents,
+          totalCents,
+          method,
+          noCharge,
+          exceptionReason,
+          {
+            type: discount.type as 'percent' | 'amount',
+            value: discount.value,
+            cents: discountCents
+          }
+        )
         if (!noCharge && chargeCents > 0) {
           const paymentNumber = db.paymentNumber()
           const paymentId = `pay_${sha256(`${row.id}|${paymentNumber}|${Date.now()}`).slice(0, 20)}`
@@ -2061,8 +2757,6 @@ export async function handleRpc(command: string, payload: Payload, token: string
         z.array(z.object({ productId: z.string().min(1), quantity: z.number().positive() })).min(1)
       )
       const method = schema(payload?.method, z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
-      const discountPercent = numberValue(payload?.discountPercent ?? 0, 'Descuento', { min: 0, max: 100 })
-      if (discountPercent > 0) requireCap(session, 'applyDiscount')
       const prepared = lines.map((line) => {
         const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', line.productId)
         if (!product) fail('Uno de los productos ya no existe')
@@ -2072,7 +2766,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
         return { ...line, product }
       })
       const subtotalCents = prepared.reduce((sum, line) => sum + Number(line.product.price_cents) * line.quantity, 0)
-      const discountCents = Math.round((subtotalCents * discountPercent) / 100)
+      const discount = resolveSaleDiscount(customer, payload, session, subtotalCents)
+      const discountCents = discountCentsFor(discount.type, discount.value, subtotalCents)
+      assertDiscountFloor(
+        prepared.map((line) => ({
+          name: line.product.name,
+          quantity: line.quantity,
+          unitPriceCents: Number(line.product.price_cents),
+          unitCostCents: Number(line.product.cost_cents),
+          isService: Boolean(line.product.is_service)
+        })),
+        subtotalCents,
+        discountCents
+      )
+      const discountPercent = discount.type === 'percent' ? discount.value : 0
       const totalCents = subtotalCents - discountCents
       if (totalCents <= 0) fail('El total de la venta debe ser mayor a cero')
       const received = toCents(numberValue(payload?.received ?? money(totalCents), 'Efectivo recibido', { min: 0 }))
@@ -2085,15 +2792,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
       db.tx(() => {
         db.run(
           `INSERT INTO invoices
-            (id, number, type, customer_id, customer_name, subtotal_cents, discount_percent, discount_cents,
-             total_cents, payment_method, status, created_by, created_at)
-           VALUES (?, ?, 'venta', ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?)`,
+            (id, number, type, customer_id, customer_name, subtotal_cents, discount_percent, discount_type, discount_value,
+             discount_cents, total_cents, payment_method, status, created_by, created_at)
+           VALUES (?, ?, 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?)`,
           invoiceId,
           number,
           customer.id,
           customer.name,
           subtotalCents,
           discountPercent,
+          discount.type,
+          discount.value,
           discountCents,
           totalCents,
           method,
@@ -2331,24 +3040,33 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (db.get<any>('SELECT id FROM suppliers WHERE name = ? COLLATE NOCASE', name)) {
         fail('Ya existe un proveedor con ese nombre.', 'DUPLICATE')
       }
-      const nit = typeof payload?.nit === 'string' && payload.nit.trim() ? payload.nit.trim().slice(0, 40) : '—'
+      const isForeignNit = Boolean(payload?.isForeignNit)
+      let nit = typeof payload?.nit === 'string' && payload.nit.trim() ? payload.nit.trim().slice(0, 40) : '—'
+      if (!isForeignNit && nit !== '—') {
+        const digits = normalizeNit(nit)
+        if (nit !== digits) fail('El NIT debe contener solo números, sin puntos ni espacios.')
+        const dv = typeof payload?.nitDv === 'string' ? payload.nitDv.trim() : calculateNitDv(digits)
+        if (!isValidNit(digits, dv)) fail('El dígito de verificación del NIT no es válido.')
+        nit = digits
+      }
       const contact = typeof payload?.contact === 'string' && payload.contact.trim() ? payload.contact.trim().slice(0, 120) : '—'
       const phone = typeof payload?.phone === 'string' && payload.phone.trim() ? payload.phone.trim().slice(0, 80) : '—'
       const category = typeof payload?.category === 'string' && payload.category.trim() ? payload.category.trim().slice(0, 80) : 'Repuestos'
       const id = `sup_${sha256(`${name}|${Date.now()}`).slice(0, 20)}`
       db.tx(() => {
         db.run(
-          `INSERT INTO suppliers (id, name, nit, contact, phone, category, active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+          `INSERT INTO suppliers (id, name, nit, is_foreign_nit, contact, phone, category, active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
           id,
           name,
           nit,
+          isForeignNit ? 1 : 0,
           contact,
           phone,
           category,
           new Date().toISOString()
         )
-        audit(db, session, 'Creación de proveedor', 'Proveedor', `${name} · NIT ${nit}`, id)
+        audit(db, session, 'Creación de proveedor', 'Proveedor', `${name} · NIT ${nit}${isForeignNit ? ' · extranjero' : ''}`, id)
       })
       return supplierDto(db, db.get<any>('SELECT * FROM suppliers WHERE id = ?', id))
     }
@@ -2368,9 +3086,23 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('name = ?')
         params.push(name)
       }
+      const nextForeignNit =
+        payload?.isForeignNit === undefined ? Boolean(row.is_foreign_nit) : Boolean(payload.isForeignNit)
+      if (payload?.isForeignNit !== undefined) {
+        updates.push('is_foreign_nit = ?')
+        params.push(nextForeignNit ? 1 : 0)
+      }
       if (payload?.nit !== undefined) {
+        let nit = typeof payload.nit === 'string' && payload.nit.trim() ? payload.nit.trim().slice(0, 40) : '—'
+        if (!nextForeignNit && nit !== '—') {
+          const digits = normalizeNit(nit)
+          if (nit !== digits) fail('El NIT debe contener solo números, sin puntos ni espacios.')
+          const dv = typeof payload?.nitDv === 'string' ? payload.nitDv.trim() : calculateNitDv(digits)
+          if (!isValidNit(digits, dv)) fail('El dígito de verificación del NIT no es válido.')
+          nit = digits
+        }
         updates.push('nit = ?')
-        params.push(typeof payload.nit === 'string' && payload.nit.trim() ? payload.nit.trim().slice(0, 40) : '—')
+        params.push(nit)
       }
       if (payload?.contact !== undefined) {
         updates.push('contact = ?')
@@ -2512,6 +3244,43 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return db.verifyAuditChain()
     }
 
+    case 'permissions.updateRole': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'configureLegal')
+      const role = schema(payload?.role, z.enum(['admin', 'tecnico', 'cajero']))
+      const items = schema(
+        payload?.permissions,
+        z.array(z.object({ capability: z.string().min(1), allowed: z.boolean() }))
+      )
+      const now = new Date().toISOString()
+      db.tx(() => {
+        for (const item of items) {
+          const capability = item.capability as BackendCapability
+          if (!ALL_CAPABILITIES.includes(capability)) fail(`Permiso desconocido: ${capability}`)
+          if (item.allowed && ROOT_ONLY_CAPABILITIES.includes(capability)) {
+            fail(`${capability} es exclusivo del propietario y no puede delegarse al rol ${role}.`, 'FORBIDDEN')
+          }
+          db.run(
+            `INSERT INTO role_permissions (role, capability, allowed, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(role, capability) DO UPDATE SET allowed = excluded.allowed, updated_at = excluded.updated_at`,
+            role,
+            capability,
+            item.allowed ? 1 : 0,
+            now
+          )
+        }
+        audit(
+          db,
+          session,
+          'Actualización de matriz de permisos',
+          'Configuración',
+          `Rol ${roleLabels[role]} · ${items.length} permisos revisados.`
+        )
+      })
+      return settingsData(db)
+    }
+
     case 'settings.get': {
       requireModuleAccess(session, 'settings')
       return settingsData(db)
@@ -2535,10 +3304,22 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const warrantyDays = Math.round(numberValue(payload?.warrantyDays ?? current.warrantyDays, 'Días de garantía', { min: 1, max: 3650 }))
       const match = String(current.version).match(/^v(\d+)\.(\d+)$/)
       const version = match ? `v${match[1]}.${Number(match[2]) + 1}` : 'v1.1'
+      const rawNit = payload?.nit !== undefined ? text(payload.nit, 'NIT', 3, 40) : String(current.nit ?? '')
+      const nit = normalizeNit(rawNit)
+      if (payload?.nit !== undefined && rawNit !== nit) {
+        fail('El NIT debe contener solo números, sin puntos ni espacios.')
+      }
+      const nitDv = String(payload?.nitDv ?? current.nitDv ?? calculateNitDv(nit)).trim()
+      if (!isValidNit(nit, nitDv)) fail('El dígito de verificación del NIT no es válido.')
       const next: LegalConfig = {
         ...current,
         businessName: text(payload?.businessName ?? current.businessName, 'Nombre del negocio', 2, 160),
-        nit: text(payload?.nit ?? current.nit, 'NIT', 3, 40),
+        nit,
+        nitDv,
+        foreignNit:
+          typeof payload?.foreignNit === 'string'
+            ? payload.foreignNit.trim().slice(0, 40)
+            : current.foreignNit ?? '',
         phone: text(payload?.phone ?? current.phone, 'Teléfono', 3, 80),
         address: text(payload?.address ?? current.address, 'Dirección', 3, 200),
         city: text(payload?.city ?? current.city, 'Ciudad', 2, 120),
@@ -2574,8 +3355,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'settings.updateSection': {
       requireModuleAccess(session, 'settings')
-      const section = schema(payload?.section, z.enum(['print', 'ai', 'security', 'business']))
+      const section = schema(payload?.section, z.enum(['print', 'ai', 'security', 'business', 'equipment']))
       if (section === 'ai') requireCap(session, 'configureAI')
+      if (section === 'equipment') requireCap(session, 'manageStaff')
       if (section === 'ai' && payload?.value && typeof payload.value === 'object' && 'apiKey' in payload.value) {
         // La clave nunca se devuelve al renderer ni se guarda en texto plano en la base.
         const value = { ...payload.value }
@@ -2613,20 +3395,33 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (db.get<any>('SELECT id FROM users WHERE username = ? COLLATE NOCASE', username)) fail('Ese usuario ya existe.', 'DUPLICATE')
       const password = text(payload?.password, 'Contraseña', 8, 200)
       const email = text(payload?.email ?? '—', 'Correo', 1, 200)
+      const documentType = typeof payload?.documentType === 'string' ? payload.documentType.slice(0, 20) : null
+      const document = typeof payload?.document === 'string' ? payload.document.trim().slice(0, 40) : null
+      const phone = typeof payload?.phone === 'string' ? payload.phone.trim().slice(0, 80) : null
+      const address = typeof payload?.address === 'string' ? payload.address.trim().slice(0, 200) : null
+      const photoPath = normalizeUserPhoto(payload?.photoDataUrl)
       const id = `user_${sha256(`${username}|${Date.now()}`).slice(0, 20)}`
       db.tx(() => {
         db.run(
-          `INSERT INTO users (id, username, name, email, role, password_hash, active, is_protected, created_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+          `INSERT INTO users
+            (id, username, name, email, document_type, document, phone, address, photo_path,
+             role, password_hash, active, is_protected, created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
           id,
           username,
           name,
           email,
+          documentType,
+          document,
+          phone,
+          address,
+          photoPath,
           role,
           hashPassword(password),
           new Date().toISOString(),
           session.userId
         )
+        applyPermissionOverrides(db, session, id, role, payload?.permissions)
         audit(db, session, 'Creación de usuario', 'Usuario', `${name} · usuario ${username} · rol ${roleLabels[role]}`, id)
       })
       return userDto(db, db.get<any>('SELECT * FROM users WHERE id = ?', id))
@@ -2651,6 +3446,26 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('email = ?')
         params.push(payload.email.slice(0, 200))
       }
+      if (payload?.documentType !== undefined) {
+        updates.push('document_type = ?')
+        params.push(typeof payload.documentType === 'string' ? payload.documentType.slice(0, 20) : null)
+      }
+      if (payload?.document !== undefined) {
+        updates.push('document = ?')
+        params.push(typeof payload.document === 'string' ? payload.document.trim().slice(0, 40) : null)
+      }
+      if (payload?.phone !== undefined) {
+        updates.push('phone = ?')
+        params.push(typeof payload.phone === 'string' ? payload.phone.trim().slice(0, 80) : null)
+      }
+      if (payload?.address !== undefined) {
+        updates.push('address = ?')
+        params.push(typeof payload.address === 'string' ? payload.address.trim().slice(0, 200) : null)
+      }
+      if (payload?.photoDataUrl !== undefined) {
+        updates.push('photo_path = ?')
+        params.push(normalizeUserPhoto(payload.photoDataUrl))
+      }
       if (payload?.role) {
         const role = schema(payload.role, z.enum(['admin', 'tecnico', 'cajero']))
         if (role === 'admin') requireCap(session, 'manageAdmins')
@@ -2667,9 +3482,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('password_hash = ?')
         params.push(hashPassword(password))
       }
-      if (!updates.length) fail('No hay cambios para guardar')
-      db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, ...params, id)
-      audit(db, session, 'Actualización de usuario', 'Usuario', `${row.name} · datos actualizados`, id)
+      const nextRole = payload?.role ? String(payload.role) : row.role
+      if (payload?.permissions !== undefined) {
+        if (nextRole === 'superadmin') fail('La cuenta raíz no admite permisos especiales.', 'FORBIDDEN')
+      }
+      if (!updates.length && payload?.permissions === undefined) fail('No hay cambios para guardar')
+      db.tx(() => {
+        if (updates.length) {
+          db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, ...params, id)
+        }
+        if (payload?.permissions !== undefined) {
+          applyPermissionOverrides(db, session, id, nextRole, payload.permissions)
+        }
+        audit(db, session, 'Actualización de usuario', 'Usuario', `${row.name} · datos actualizados`, id)
+      })
       return userDto(db, db.get<any>('SELECT * FROM users WHERE id = ?', id))
     }
 
@@ -2689,70 +3515,151 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return { backup, backups: backupList(db) }
     }
 
+    case 'backups.setPassword': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'createBackup')
+      const password = text(payload?.password, 'Contraseña de respaldo', 8, 200)
+      if (!safeStorage.isEncryptionAvailable()) {
+        fail('El cifrado del sistema no está disponible; no se puede guardar la contraseña.', 'UNSUPPORTED')
+      }
+      const encrypted = safeStorage.encryptString(password).toString('base64')
+      db.tx(() => {
+        db.setSetting('backup_password', { encrypted, updatedAt: new Date().toISOString() })
+        audit(db, session, 'Configuración de contraseña de respaldo', 'Respaldo', 'Contraseña de exportación/importación actualizada.')
+      })
+      return { configured: true }
+    }
+
+    case 'backups.revealPassword': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'createBackup')
+      const password = getBackupPassword(db)
+      if (!password) fail('Configura primero la contraseña de respaldo.')
+      db.tx(() => {
+        audit(db, session, 'Visualización de contraseña de respaldo', 'Respaldo', 'El administrador copió la contraseña de respaldo.')
+      })
+      return { password }
+    }
+
+    case 'backups.export': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'createBackup')
+      const password = getBackupPassword(db)
+      if (!password) fail('Configura la contraseña de respaldo antes de exportar.')
+      const backup = await createBackup(db, runtime, session)
+      const folder = backup.path
+      const databaseBytes = fs.readFileSync(path.join(folder, BACKUP_DATABASE_FILENAME))
+      const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8'))
+      const evidenceRoot = path.join(folder, EVIDENCE_FOLDER)
+      const evidence = fs.existsSync(evidenceRoot)
+        ? walkFiles(evidenceRoot).map((file) => ({
+            path: file.relative.replace(/\\/g, '/'),
+            data: fs.readFileSync(file.absolute).toString('base64')
+          }))
+        : []
+      const container = {
+        format: 'bitacoretech-backup',
+        version: 1,
+        createdAt: new Date().toISOString(),
+        appVersion: runtime.version,
+        manifest,
+        database: databaseBytes.toString('base64'),
+        evidence
+      }
+      const encrypted = encryptBackupPayload(Buffer.from(JSON.stringify(container), 'utf8'), password)
+      const testPath =
+        process.env.BITACORETECH_TEST_PATHS === '1' && typeof payload?.path === 'string' ? payload.path : ''
+      const chosen = testPath
+        ? { canceled: false, filePath: testPath }
+        : await dialog.showSaveDialog({
+            title: 'Exportar respaldo BitacoreTech',
+            defaultPath: `BitacoreTech-${new Date().toISOString().slice(0, 10)}.bctbackup`,
+            filters: [{ name: 'Respaldo BitacoreTech', extensions: ['bctbackup'] }]
+          })
+      if (chosen.canceled || !chosen.filePath) return { exported: false }
+      fs.writeFileSync(chosen.filePath, encrypted)
+      db.tx(() => {
+        audit(
+          db,
+          session,
+          'Exportación de respaldo',
+          'Respaldo',
+          `${path.basename(chosen.filePath)} · ${encrypted.length} bytes · ${backup.name}`,
+          backup.id
+        )
+      })
+      return { exported: true, path: chosen.filePath, size: encrypted.length, backupName: backup.name }
+    }
+
+    case 'backups.import': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'restoreBackup')
+      const stored = getBackupPassword(db)
+      const supplied = typeof payload?.password === 'string' && payload.password ? payload.password : stored
+      if (!supplied) fail('Configura la contraseña de respaldo o ingrésala para importar.')
+      const testPath =
+        process.env.BITACORETECH_TEST_PATHS === '1' && typeof payload?.path === 'string' ? payload.path : ''
+      const chosen = testPath
+        ? { canceled: false, filePaths: [testPath] }
+        : await dialog.showOpenDialog({
+            title: 'Importar respaldo BitacoreTech',
+            properties: ['openFile'],
+            filters: [{ name: 'Respaldo BitacoreTech', extensions: ['bctbackup'] }]
+          })
+      if (chosen.canceled || !chosen.filePaths[0]) return { imported: false }
+      const encrypted = fs.readFileSync(chosen.filePaths[0])
+      const plain = decryptBackupPayload(encrypted, supplied)
+      let container: any
+      try {
+        container = JSON.parse(plain.toString('utf8'))
+      } catch {
+        fail('El respaldo no contiene datos válidos.')
+      }
+      if (container?.format !== 'bitacoretech-backup' || !container?.database) {
+        fail('El archivo no es un respaldo BitacoreTech compatible.')
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const folderName = `import-${stamp}`
+      const folder = path.join(getBackupPath(runtime.userDataPath), folderName)
+      fs.mkdirSync(path.join(folder, EVIDENCE_FOLDER), { recursive: true })
+      const databaseBytes = Buffer.from(String(container.database), 'base64')
+      fs.writeFileSync(path.join(folder, BACKUP_DATABASE_FILENAME), databaseBytes)
+      for (const item of Array.isArray(container.evidence) ? container.evidence : []) {
+        const relative = String(item?.path ?? '').replace(/\\/g, '/')
+        if (!relative || relative.includes('..') || path.isAbsolute(relative)) continue
+        const target = path.join(folder, EVIDENCE_FOLDER, relative)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, Buffer.from(String(item?.data ?? ''), 'base64'))
+      }
+      const manifest = container.manifest ?? { app: 'BitacoreTech', createdAt: container.createdAt }
+      fs.writeFileSync(path.join(folder, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
+      const size = walkFiles(folder).reduce((sum, file) => sum + file.size, 0)
+      const id = `bk_${sha256(`${folderName}|${Date.now()}`).slice(0, 20)}`
+      db.run(
+        `INSERT INTO backups (id, filename, path, size_bytes, sha256, format, created_by, created_by_name, created_at)
+         VALUES (?, ?, ?, ?, ?, 'folder', ?, ?, ?)`,
+        id,
+        folderName,
+        folder,
+        size,
+        sha256Bytes(databaseBytes),
+        session.userId,
+        displayUser(session).name,
+        new Date().toISOString()
+      )
+      const imported = db.get<any>('SELECT * FROM backups WHERE id = ?', id)
+      audit(db, session, 'Importación de respaldo', 'Respaldo', `${path.basename(chosen.filePaths[0])} · ${folderName}`, id)
+      const result = await restoreBackupRecord(db, runtime, session, imported)
+      return { ...result, imported: true, fileName: path.basename(chosen.filePaths[0]) }
+    }
+
     case 'backups.restore': {
       requireModuleAccess(session, 'settings')
       requireCap(session, 'restoreBackup')
       const id = text(payload?.id, 'Respaldo', 1, 80)
       const backup = db.get<any>('SELECT * FROM backups WHERE id = ?', id)
       if (!backup) fail('Respaldo no encontrado', 'NOT_FOUND')
-      if (!fs.existsSync(backup.path)) fail('El archivo del respaldo no existe en este equipo.')
-      const format = backup.format === 'folder' ? 'folder' : 'db'
-      const sourceDatabase =
-        format === 'folder' ? path.join(String(backup.path), BACKUP_DATABASE_FILENAME) : String(backup.path)
-      if (!fs.existsSync(sourceDatabase)) fail('El respaldo no contiene una base de datos válida.')
-      const sourceEvidence = path.join(String(backup.path), EVIDENCE_FOLDER)
-      if (format === 'folder' && !fs.existsSync(sourceEvidence)) {
-        fail('El respaldo completo no contiene la carpeta de evidencias.')
-      }
-      // Copia de seguridad de la base actual antes de restaurar. createBackup ya registra su metadata.
-      const safety = await createBackup(db, runtime, session)
-      closeDatabase()
-      const wal = `${db.path}-wal`
-      const shm = `${db.path}-shm`
-      if (fs.existsSync(wal)) fs.rmSync(wal, { force: true })
-      if (fs.existsSync(shm)) fs.rmSync(shm, { force: true })
-      try {
-        fs.copyFileSync(sourceDatabase, db.path)
-        const currentEvidence = getEvidencePath(runtime.userDataPath)
-        if (fs.existsSync(currentEvidence)) fs.rmSync(currentEvidence, { recursive: true, force: true })
-        if (format === 'folder') {
-          fs.cpSync(sourceEvidence, currentEvidence, { recursive: true, force: true })
-        } else {
-          fs.mkdirSync(currentEvidence, { recursive: true })
-        }
-      } catch (error) {
-        try {
-          openDatabase(runtime.userDataPath)
-        } catch {
-          // El error original describe la restauración fallida.
-        }
-        throw error
-      }
-      const restored = openDatabase(runtime.userDataPath)
-      restored.run(
-        `INSERT OR REPLACE INTO backups
-          (id, filename, path, size_bytes, sha256, format, created_by, created_by_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        safety.id,
-        safety.name,
-        safety.path,
-        safety.size,
-        safety.hash,
-        safety.format ?? 'folder',
-        session.userId,
-        displayUser(session).name,
-        safety.createdAt
-      )
-      restored.appendAudit({
-        userId: session.userId,
-        userName: displayUser(session).name,
-        role: roleLabel(session.role as any),
-        action: 'Restauración de backup',
-        entity: 'Respaldo',
-        entityId: backup.id,
-        detail: `${format === 'folder' ? 'Respaldo completo (base + evidencias)' : 'Respaldo legado solo de base'} ${backup.filename} restaurado. Se generó copia previa ${safety.name}.`
-      })
-      return { restored: true, safetyBackup: safety.name, requiresReload: true, format }
+      return restoreBackupRecord(db, runtime, session, backup)
     }
 
     case 'backups.purge': {

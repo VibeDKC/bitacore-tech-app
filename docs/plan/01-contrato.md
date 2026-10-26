@@ -8,6 +8,8 @@
 | Alcance | F0 (contrato) y F1 (esqueleto/primer arranque) |
 | Estado | Aprobado técnicamente. Pendiente firma del usuario. |
 
+> Las reglas de T3 (permisos por usuario, fidelidad, equipos, NIT, respaldos y borde) están en `docs/plan/02-contrato-t3.md`.
+
 ## 1. Reglas generales
 
 ### Dinero

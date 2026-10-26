@@ -33,6 +33,7 @@ export type Capability =
   | 'diagnoseOrder'
   | 'assignTechnician'
   | 'settleOrder'
+  | 'manageLoyalty'
   | 'authorizeNoCharge'
   | 'viewAudit'
   | 'viewFullAudit'
@@ -81,6 +82,7 @@ export interface Customer {
   name: string
   documentType: 'CC' | 'NIT' | 'Pasaporte'
   document: string
+  documentDv?: string
   phone: string
   email: string
   address: string
@@ -89,6 +91,28 @@ export interface Customer {
   openOrders?: number
   lastVisit: string
   isFinalConsumer?: boolean
+  isForeignDocument?: boolean
+  loyaltyActive?: boolean
+  loyaltyDiscountType?: 'percent' | 'amount'
+  loyaltyDiscountValue?: number
+  loyaltyValidUntil?: string | null
+  loyaltyNotes?: string
+}
+
+export interface Equipment {
+  id: string
+  customerId: string
+  category: string
+  categoryLabel: string
+  equipmentType: string
+  brand: string
+  model: string
+  serial: string
+  accessories: string
+  technicalSheet?: Record<string, unknown> | null
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export type WorkOrderStatus =
@@ -276,6 +300,8 @@ export interface WorkOrder {
   status: WorkOrderStatus
   technician: string
   technicianId?: string | null
+  equipmentId?: string | null
+  equipment?: Equipment | null
   createdAt: string
   promisedAt: string
   deliveredAt?: string
@@ -310,6 +336,8 @@ export interface Invoice {
   date: string
   subtotal?: number
   discountPercent?: number
+  discountType?: 'percent' | 'amount'
+  discountValue?: number
   discount?: number
   total: number
   method: PaymentMethod
@@ -415,6 +443,8 @@ export interface Supplier {
   id: string
   name: string
   nit: string
+  nitDv?: string
+  isForeignNit?: boolean
   contact: string
   phone: string
   category: string
@@ -427,6 +457,7 @@ export interface Purchase {
   supplierId?: string
   supplier: string
   supplierNit?: string
+  supplierNitDv?: string
   date: string
   items: number
   subtotal: number
@@ -447,6 +478,8 @@ export interface Purchase {
 export interface LegalConfig {
   businessName: string
   nit: string
+  nitDv?: string
+  foreignNit?: string
   phone: string
   address: string
   city: string
@@ -476,6 +509,7 @@ export interface AuthSession {
   canPreviewRoles: boolean
   expiresAt: string
   roleLabel: string
+  permissions: Capability[]
 }
 
 export interface StockSummary {
@@ -568,11 +602,12 @@ export interface SettingsData {
     diagnosis: boolean
     summary: boolean
     anomalies: boolean
+    provider?: string
     model: string
     configured?: boolean
     keyFingerprint?: string
   }
-  security: { strictSessions: boolean; sessionHours: number; rememberDays: number }
+  security: { strictSessions: boolean; sessionHours: number }
   business: {
     timezone: string
     currency: string
@@ -580,6 +615,9 @@ export interface SettingsData {
     invoicePrefix: string
     orderPrefix: string
   }
+  equipment: { qrEnabled: boolean }
+  backup: { passwordConfigured: boolean }
+  rolePermissions: Array<{ role: Role; capability: Capability; allowed: boolean }>
   statuses: StatusSetting[]
 }
 
@@ -595,6 +633,12 @@ export interface AppUser {
   lastAccess: string
   protected: boolean
   createdAt: string
+  documentType?: string | null
+  document?: string | null
+  phone?: string | null
+  address?: string | null
+  photoUrl?: string | null
+  permissionOverrides?: Array<{ capability: Capability; allowed: boolean; reason?: string }>
 }
 
 export type BackupFormat = 'folder' | 'db'

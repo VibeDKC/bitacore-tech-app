@@ -38,7 +38,7 @@ function ReceiptBody({ purchase }: { purchase: Purchase }) {
         <div>
           <p className="text-[7px] font-semibold uppercase tracking-[0.12em] text-black/45">Proveedor</p>
           <p className="mt-0.5 font-semibold">{purchase.supplier}</p>
-          <p className="text-black/60">NIT {purchase.supplierNit ?? '—'}</p>
+          <p className="text-black/60">NIT {purchase.supplierNit ?? '—'}{purchase.supplierNitDv ? `-${purchase.supplierNitDv}` : ''}</p>
         </div>
         <div className="text-right">
           <p className="text-[7px] font-semibold uppercase tracking-[0.12em] text-black/45">Estado</p>

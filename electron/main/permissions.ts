@@ -19,6 +19,7 @@ export type BackendCapability =
   | 'diagnoseOrder'
   | 'assignTechnician'
   | 'settleOrder'
+  | 'manageLoyalty'
   | 'viewAudit'
   | 'viewFullAudit'
   | 'exportAudit'
@@ -29,6 +30,53 @@ export type BackendCapability =
   | 'voidEvidence'
   | 'verifyEvidence'
   | 'exportEvidence'
+
+export const ALL_CAPABILITIES: BackendCapability[] = [
+  'viewCosts',
+  'viewGrossMargin',
+  'viewNetProfit',
+  'manageAdmins',
+  'manageStaff',
+  'createBackup',
+  'restoreBackup',
+  'purgeData',
+  'configureLegal',
+  'configureAI',
+  'annulInvoice',
+  'closeCash',
+  'createPurchase',
+  'editInventory',
+  'createOrder',
+  'diagnoseOrder',
+  'assignTechnician',
+  'manageLoyalty',
+  'settleOrder',
+  'viewAudit',
+  'viewFullAudit',
+  'exportAudit',
+  'useAI',
+  'applyDiscount',
+  'authorizeNoCharge',
+  'manageEvidence',
+  'voidEvidence',
+  'verifyEvidence',
+  'exportEvidence'
+]
+
+export const ROOT_ONLY_CAPABILITIES: BackendCapability[] = [
+  'viewAudit',
+  'viewFullAudit',
+  'exportAudit',
+  'purgeData',
+  'restoreBackup',
+  'manageAdmins',
+  'configureLegal',
+  'configureAI'
+]
+
+export function capabilitiesForRole(role: Role) {
+  return roleCapabilities[role]
+}
 
 const roleModules: Record<Role, string[]> = {
   superadmin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'audit', 'settings'],
@@ -56,6 +104,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'createOrder',
     'diagnoseOrder',
     'assignTechnician',
+    'manageLoyalty',
     'settleOrder',
     'viewAudit',
     'viewFullAudit',
@@ -80,6 +129,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'createOrder',
     'diagnoseOrder',
     'assignTechnician',
+    'manageLoyalty',
     'settleOrder',
     'useAI',
     'applyDiscount',

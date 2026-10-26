@@ -78,7 +78,8 @@ export function POSPage() {
   const [category, setCategory] = useState<'Todos' | ProductCategory>('Todos')
   const [cart, setCart] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState('')
-  const [discount, setDiscount] = useState(0)
+  const [discountType, setDiscountType] = useState<'percent' | 'amount'>('percent')
+  const [discountInput, setDiscountInput] = useState('')
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [method, setMethod] = useState<PaymentMethod>('Efectivo')
   const [received, setReceived] = useState('')
@@ -88,6 +89,13 @@ export function POSPage() {
 
   const canDiscount = can(role, 'applyDiscount')
   const customer = customers.find((item) => item.id === customerId) ?? customers[0] ?? null
+  const loyaltyActive = Boolean(
+    customer?.loyaltyActive &&
+      (!customer.loyaltyValidUntil || new Date(`${customer.loyaltyValidUntil}T23:59:59`).getTime() >= Date.now()) &&
+      Number(customer.loyaltyDiscountValue ?? 0) > 0
+  )
+  const loyaltyType = customer?.loyaltyDiscountType === 'amount' ? 'amount' : 'percent'
+  const loyaltyValue = Number(customer?.loyaltyDiscountValue ?? 0)
 
   useEffect(() => {
     if (!customers.length) return
@@ -110,7 +118,13 @@ export function POSPage() {
   }, [products, query, category])
 
   const subtotal = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0)
-  const discountValue = Math.round((subtotal * discount) / 100)
+  const discountValue = loyaltyActive
+    ? loyaltyType === 'percent'
+      ? Math.round((subtotal * loyaltyValue) / 100)
+      : Math.min(loyaltyValue, subtotal)
+    : discountType === 'percent'
+      ? Math.round((subtotal * (Number(discountInput) || 0)) / 100)
+      : Math.min(Number(discountInput) || 0, subtotal)
   const total = subtotal - discountValue
   const itemCount = cart.reduce((sum, line) => sum + line.quantity, 0)
   const receivedValue = Number(received.replace(/[^0-9]/g, '')) || 0
@@ -187,14 +201,16 @@ export function POSPage() {
         customerId: customer.id,
         lines: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })),
         method,
-        discountPercent: canDiscount ? discount : 0,
+        discountType: loyaltyActive ? loyaltyType : discountType,
+        discountValue: loyaltyActive ? loyaltyValue : Number(discountInput) || 0,
         received: method === 'Efectivo' ? receivedValue : undefined,
         reference: reference.trim() || undefined
       })
       setSale({ ...result, customer })
       setPaymentOpen(false)
       setCart([])
-      setDiscount(0)
+      setDiscountInput('')
+      setDiscountType('percent')
       setReference('')
       toast.success(`Venta ${result.receipt.number} registrada`, {
         description: `${formatCurrency(result.receipt.total)} · ${method} · ${customer.name}`
@@ -482,23 +498,45 @@ export function POSPage() {
                 <span className="flex items-center gap-1.5">
                   <Tag className="h-3 w-3" /> Descuento
                 </span>
-                {canDiscount ? (
+                {loyaltyActive ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="warning">
+                      Fidelidad{' '}
+                      {loyaltyType === 'percent' ? `${loyaltyValue}%` : formatCurrency(loyaltyValue)}
+                    </Badge>
+                    <span className="tabular w-16 text-right font-semibold text-ink">-{formatCurrency(discountValue)}</span>
+                  </div>
+                ) : canDiscount ? (
                   <div className="flex items-center gap-2">
                     <div className="flex items-center rounded-lg border border-line bg-white">
-                      {[0, 5, 10].map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setDiscount(value)}
-                          className={cn(
-                            'focus-ring h-7 px-2 text-[10px] font-semibold transition first:rounded-l-lg last:rounded-r-lg',
-                            discount === value ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-slate-600'
-                          )}
-                        >
-                          {value}%
-                        </button>
-                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setDiscountType('percent')}
+                        className={cn(
+                          'focus-ring h-7 px-2 text-[10px] font-semibold transition first:rounded-l-lg',
+                          discountType === 'percent' ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-slate-600'
+                        )}
+                      >
+                        %
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDiscountType('amount')}
+                        className={cn(
+                          'focus-ring h-7 px-2 text-[10px] font-semibold transition last:rounded-r-lg',
+                          discountType === 'amount' ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-slate-600'
+                        )}
+                      >
+                        $
+                      </button>
                     </div>
+                    <input
+                      value={discountInput}
+                      onChange={(event) => setDiscountInput(event.target.value)}
+                      inputMode="decimal"
+                      placeholder="0"
+                      className="field h-7 w-20 text-right text-[10px] tabular"
+                    />
                     <span className="tabular w-16 text-right font-semibold text-ink">-{formatCurrency(discountValue)}</span>
                   </div>
                 ) : (

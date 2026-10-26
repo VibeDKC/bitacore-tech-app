@@ -19,6 +19,7 @@ import type {
   ChartPoint,
   Customer,
   DashboardData,
+  Equipment,
   EvidenceInput,
   EvidenceStage,
   Invoice,
@@ -28,6 +29,7 @@ import type {
   Product,
   Purchase,
   ReportData,
+  Role,
   SaleReceipt,
   SettingsData,
   StockMovement,
@@ -55,21 +57,11 @@ export class ApiError extends Error {
 }
 
 const TOKEN_KEY = 'bitacoretech.session.token'
-const REMEMBER_KEY = 'bitacoretech.session.remember'
-
-function storage(): Storage | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return localStorage.getItem(REMEMBER_KEY) === '0' ? window.sessionStorage : window.localStorage
-  } catch {
-    return null
-  }
-}
 
 function readStoredToken(): string | null {
   if (typeof window === 'undefined') return null
   try {
-    return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   } catch {
     return null
   }
@@ -81,20 +73,15 @@ export function getAuthToken() {
   return authToken
 }
 
-export function setAuthToken(token: string | null, remember = true) {
+export function setAuthToken(token: string | null, _remember = true) {
   authToken = token
   try {
+    localStorage.removeItem(TOKEN_KEY)
     if (!token) {
-      localStorage.removeItem(TOKEN_KEY)
       sessionStorage.removeItem(TOKEN_KEY)
-      localStorage.removeItem(REMEMBER_KEY)
       return
     }
-    const target = remember ? localStorage : sessionStorage
-    const other = remember ? sessionStorage : localStorage
-    other.removeItem(TOKEN_KEY)
-    target.setItem(TOKEN_KEY, token)
-    localStorage.setItem(REMEMBER_KEY, remember ? '1' : '0')
+    sessionStorage.setItem(TOKEN_KEY, token)
   } catch {
     // El token vive en memoria si el almacenamiento no está disponible.
   }
@@ -163,12 +150,14 @@ export interface SessionInfo {
   canPreviewRoles: boolean
   expiresAt: string
   roleLabel: string
+  permissions: AuthSession['permissions']
 }
 
 export interface CustomerDetail {
   customer: Customer
   orders: WorkOrder[]
   invoices: Invoice[]
+  equipment: Equipment[]
 }
 
 export interface OrderItemInput {
@@ -187,12 +176,16 @@ export interface SettleInput {
   noCharge?: boolean
   exceptionReason?: string
   reference?: string
+  discountType?: 'percent' | 'amount'
+  discountValue?: number
 }
 
 export interface PosSaleInput {
   customerId: string
   lines: Array<{ productId: string; quantity: number }>
   method: PaymentMethod
+  discountType?: 'percent' | 'amount'
+  discountValue?: number
   discountPercent?: number
   received?: number
   reference?: string
@@ -211,6 +204,7 @@ export interface NewOrderInput {
   reportedIssue: string
   technicianId?: string
   technician?: string
+  equipmentId?: string
   promisedAt: string
   notes?: string
   intake: Record<string, unknown>
@@ -225,8 +219,8 @@ export const api = {
     setup(input: SetupInput) {
       return rpc<LoginResult>('auth.setup', input as unknown as Record<string, unknown>)
     },
-    login(username: string, password: string, remember = true) {
-      return rpc<LoginResult>('auth.login', { username, password, remember })
+    login(username: string, password: string) {
+      return rpc<LoginResult>('auth.login', { username, password })
     },
     session() {
       return rpc<SessionInfo>('auth.session')
@@ -266,11 +260,30 @@ export const api = {
       phone?: string
       email?: string
       address?: string
+      isForeignDocument?: boolean
+      documentDv?: string
     }) {
       return rpc<Customer>('customers.create', input as unknown as Record<string, unknown>)
     },
+    update(id: string, input: Record<string, unknown>) {
+      return rpc<Customer>('customers.update', { id, ...input })
+    },
     detail(id: string) {
       return rpc<CustomerDetail>('customers.detail', { id })
+    }
+  },
+  equipment: {
+    list(customerId: string) {
+      return rpc<Equipment[]>('equipment.list', { customerId })
+    },
+    qrEnabled() {
+      return rpc<boolean>('equipment.qrEnabled')
+    },
+    create(input: Record<string, unknown>) {
+      return rpc<Equipment>('equipment.create', input)
+    },
+    update(id: string, input: Record<string, unknown>) {
+      return rpc<Equipment>('equipment.update', { id, ...input })
     }
   },
   inventory: {
@@ -379,10 +392,10 @@ export const api = {
     }
   },
   suppliers: {
-    create(input: { name: string; nit?: string; contact?: string; phone?: string; category?: string }) {
+    create(input: { name: string; nit?: string; isForeignNit?: boolean; contact?: string; phone?: string; category?: string }) {
       return rpc<Supplier>('suppliers.create', input as unknown as Record<string, unknown>)
     },
-    update(id: string, input: { name?: string; nit?: string; contact?: string; phone?: string; category?: string; active?: boolean }) {
+    update(id: string, input: { name?: string; nit?: string; isForeignNit?: boolean; contact?: string; phone?: string; category?: string; active?: boolean }) {
       return rpc<Supplier>('suppliers.update', { id, ...input })
     }
   },
@@ -403,8 +416,13 @@ export const api = {
     get() {
       return rpc<SettingsData>('settings.get')
     },
-    updateSection(section: 'print' | 'ai' | 'security' | 'business', value: Record<string, unknown>) {
+    updateSection(section: 'print' | 'ai' | 'security' | 'business' | 'equipment', value: Record<string, unknown>) {
       return rpc<SettingsData>('settings.updateSection', { section, value })
+    }
+  },
+  permissions: {
+    updateRole(role: Role, permissions: Array<{ capability: string; allowed: boolean }>) {
+      return rpc<SettingsData>('permissions.updateRole', { role, permissions })
     }
   },
   legal: {
@@ -438,6 +456,24 @@ export const api = {
     },
     purge(confirmation: string, password: string) {
       return rpc<{ purged: boolean; backup: BackupRecord; requiresReload: boolean }>('backups.purge', { confirmation, password })
+    },
+    setPassword(password: string) {
+      return rpc<{ configured: boolean }>('backups.setPassword', { password })
+    },
+    revealPassword() {
+      return rpc<{ password: string }>('backups.revealPassword')
+    },
+    exportBackup() {
+      return rpc<{ exported: boolean; path?: string; size?: number; backupName?: string }>('backups.export')
+    },
+    importBackup(password?: string) {
+      return rpc<{
+        imported: boolean
+        restored?: boolean
+        safetyBackup?: string
+        requiresReload?: boolean
+        fileName?: string
+      }>('backups.import', password ? { password } : {})
     }
   },
   appInfo() {

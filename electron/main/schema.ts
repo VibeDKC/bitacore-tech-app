@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE COLLATE NOCASE,
   name TEXT NOT NULL,
   email TEXT,
+  document_type TEXT,
+  document TEXT,
+  phone TEXT,
+  address TEXT,
+  photo_path TEXT,
+  photo_thumb_path TEXT,
   role TEXT NOT NULL CHECK (role IN ('superadmin', 'admin', 'tecnico', 'cajero')),
   password_hash TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 1,
@@ -31,6 +37,25 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL,
   created_by TEXT,
   last_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_permission_overrides (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  capability TEXT NOT NULL,
+  allowed INTEGER NOT NULL DEFAULT 1,
+  reason TEXT,
+  granted_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, capability)
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  allowed INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (role, capability)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -50,11 +75,36 @@ CREATE TABLE IF NOT EXISTS customers (
   email TEXT NOT NULL DEFAULT '—',
   address TEXT NOT NULL DEFAULT 'Sin dirección',
   is_final_consumer INTEGER NOT NULL DEFAULT 0,
+  is_foreign_document INTEGER NOT NULL DEFAULT 0,
+  loyalty_active INTEGER NOT NULL DEFAULT 0,
+  loyalty_discount_type TEXT NOT NULL DEFAULT 'percent',
+  loyalty_discount_value REAL NOT NULL DEFAULT 0,
+  loyalty_valid_until TEXT,
+  loyalty_notes TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   created_by TEXT,
   UNIQUE (document)
 );
+
+CREATE TABLE IF NOT EXISTS equipment (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  category TEXT NOT NULL DEFAULT 'otro',
+  category_label TEXT NOT NULL DEFAULT 'Equipo',
+  equipment_type TEXT NOT NULL DEFAULT 'Equipo',
+  brand TEXT NOT NULL,
+  model TEXT NOT NULL,
+  serial TEXT NOT NULL DEFAULT 'Sin serial',
+  accessories TEXT NOT NULL DEFAULT 'Sin accesorios',
+  technical_sheet_json TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_equipment_customer ON equipment(customer_id);
+CREATE INDEX IF NOT EXISTS idx_equipment_serial ON equipment(serial);
 
 CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,
@@ -111,6 +161,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   nit TEXT NOT NULL DEFAULT '—',
+  is_foreign_nit INTEGER NOT NULL DEFAULT 0,
   contact TEXT NOT NULL DEFAULT '—',
   phone TEXT NOT NULL DEFAULT '—',
   category TEXT NOT NULL DEFAULT 'Repuestos',
@@ -146,6 +197,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
   id TEXT PRIMARY KEY,
   number TEXT NOT NULL UNIQUE,
   customer_id TEXT NOT NULL REFERENCES customers(id),
+  equipment_id TEXT REFERENCES equipment(id),
   device_category TEXT NOT NULL,
   category_label TEXT NOT NULL,
   equipment_type TEXT NOT NULL,
@@ -250,6 +302,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   order_id TEXT REFERENCES work_orders(id),
   subtotal_cents INTEGER NOT NULL DEFAULT 0,
   discount_percent REAL NOT NULL DEFAULT 0,
+  discount_type TEXT NOT NULL DEFAULT 'percent',
+  discount_value REAL NOT NULL DEFAULT 0,
   discount_cents INTEGER NOT NULL DEFAULT 0,
   total_cents INTEGER NOT NULL DEFAULT 0,
   payment_method TEXT,

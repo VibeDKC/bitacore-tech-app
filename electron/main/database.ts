@@ -5,6 +5,7 @@ import { DEFAULT_LEGAL } from './defaults'
 import { sha256, newId } from './security'
 import { SCHEMA_V1 } from './schema'
 import { ensureReferenceData } from './seed'
+import { ALL_CAPABILITIES, capabilitiesForRole } from './permissions'
 
 export const APP_DATA_FOLDER = 'BitacoreTech'
 export const LEGACY_APP_DATA_FOLDER = 'octestr-taller'
@@ -62,10 +63,28 @@ export class Database {
     this.db.exec(SCHEMA_V1)
     this.ensureColumn('backups', 'format', "TEXT NOT NULL DEFAULT 'db'")
     this.ensureColumn('work_order_evidence', 'source', "TEXT NOT NULL DEFAULT 'archivo'")
+    this.ensureColumn('users', 'document_type', 'TEXT')
+    this.ensureColumn('users', 'document', 'TEXT')
+    this.ensureColumn('users', 'phone', 'TEXT')
+    this.ensureColumn('users', 'address', 'TEXT')
+    this.ensureColumn('users', 'photo_path', 'TEXT')
+    this.ensureColumn('users', 'photo_thumb_path', 'TEXT')
+    this.ensureColumn('customers', 'is_foreign_document', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('customers', 'loyalty_active', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('customers', 'loyalty_discount_type', "TEXT NOT NULL DEFAULT 'percent'")
+    this.ensureColumn('customers', 'loyalty_discount_value', 'REAL NOT NULL DEFAULT 0')
+    this.ensureColumn('customers', 'loyalty_valid_until', 'TEXT')
+    this.ensureColumn('customers', 'loyalty_notes', 'TEXT')
+    this.ensureColumn('suppliers', 'is_foreign_nit', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('work_orders', 'equipment_id', 'TEXT REFERENCES equipment(id)')
+    this.ensureColumn('invoices', 'discount_type', "TEXT NOT NULL DEFAULT 'percent'")
+    this.ensureColumn('invoices', 'discount_value', 'REAL NOT NULL DEFAULT 0')
+    this.ensureRolePermissions()
+    this.backfillEquipment()
     const now = new Date().toISOString()
-    this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', 1, now)
-    this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', 2, now)
-    this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', 3, now)
+    for (const version of [1, 2, 3, 4]) {
+      this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
+    }
   }
 
   private ensureColumn(table: string, column: string, definition: string) {
@@ -73,6 +92,87 @@ export class Database {
     if (!columns.some((item) => item.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
     }
+  }
+
+  private ensureRolePermissions() {
+    const done = this.get<{ value: string }>("SELECT value FROM meta WHERE key = 'role_permissions_seeded'")
+    if (done?.value === '1') return
+    const now = new Date().toISOString()
+    for (const role of ['superadmin', 'admin', 'tecnico', 'cajero'] as const) {
+      const granted = new Set(capabilitiesForRole(role))
+      for (const capability of ALL_CAPABILITIES) {
+        this.run(
+          'INSERT OR IGNORE INTO role_permissions (role, capability, allowed, updated_at) VALUES (?, ?, ?, ?)',
+          role,
+          capability,
+          granted.has(capability) ? 1 : 0,
+          now
+        )
+      }
+    }
+    this.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('role_permissions_seeded', '1')")
+  }
+
+  private backfillEquipment() {    const done = this.get<{ value: string }>("SELECT value FROM meta WHERE key = 'equipment_backfill'")
+    if (done?.value === '1') return
+    const orders = this.all<any>(
+      'SELECT * FROM work_orders WHERE equipment_id IS NULL ORDER BY created_at ASC'
+    )
+    let created = 0
+    for (const order of orders) {
+      const existing = this.get<any>(
+        `SELECT id FROM equipment
+         WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE
+         LIMIT 1`,
+        order.customer_id,
+        order.serial,
+        order.brand,
+        order.model
+      )
+      let equipmentId = existing?.id as string | undefined
+      if (!equipmentId) {
+        equipmentId = `eq_legacy_${sha256(`${order.customer_id}|${order.serial}|${order.brand}|${order.model}`).slice(0, 20)}`
+        let technicalSheet: string | null = null
+        try {
+          const intake = order.intake_json ? JSON.parse(order.intake_json) : null
+          if (intake?.technicalSheet && typeof intake.technicalSheet === 'object') {
+            technicalSheet = JSON.stringify(intake.technicalSheet)
+          }
+        } catch {
+          technicalSheet = null
+        }
+        this.run(
+          `INSERT OR IGNORE INTO equipment
+            (id, customer_id, category, category_label, equipment_type, brand, model, serial, accessories,
+             technical_sheet_json, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          equipmentId,
+          order.customer_id,
+          order.device_category,
+          order.category_label,
+          order.equipment_type,
+          order.brand,
+          order.model,
+          order.serial,
+          order.accessories,
+          technicalSheet,
+          order.created_at,
+          order.updated_at
+        )
+        created += 1
+      }
+      this.run('UPDATE work_orders SET equipment_id = ? WHERE id = ?', equipmentId, order.id)
+    }
+    if (created > 0) {
+      this.appendAudit({
+        userName: 'Sistema',
+        role: 'Sistema',
+        action: 'Migración de equipos',
+        entity: 'Sistema',
+        detail: `${created} equipos creados a partir de OT históricas y vinculados a su cliente.`
+      })
+    }
+    this.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('equipment_backfill', '1')")
   }
 
   raw() {
@@ -423,6 +523,11 @@ export function db() {
 
 export function closeDatabase() {
   if (database) {
+    try {
+      database.run('DELETE FROM sessions')
+    } catch {
+      // La limpieza de sesiones no debe impedir el cierre.
+    }
     database.close()
     database = null
   }

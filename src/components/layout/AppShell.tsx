@@ -12,8 +12,8 @@ export function AppShell() {
   }, [location.pathname])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#eef0f7] via-[#e7e9f3] to-[#dfe4f0] p-3 lg:p-5 xl:p-7">
-      <div className="mx-auto flex h-[calc(100vh-1.5rem)] max-w-[1680px] overflow-hidden rounded-[24px] border border-white/70 bg-white shadow-shell lg:h-[calc(100vh-2.5rem)] lg:rounded-[28px]">
+    <div className="min-h-screen bg-panel">
+      <div className="flex h-screen w-full overflow-hidden bg-panel">
         <div className="hidden lg:flex">
           <Sidebar />
         </div>

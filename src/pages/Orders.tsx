@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { workOrderTotal } from '@/lib/orders'
 import { formatCurrency, formatShortDate } from '@/lib/format'
+import { downloadCsv } from '@/lib/download'
 import { api } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -95,6 +96,26 @@ export function OrdersPage() {
     navigate('/ordenes/nueva')
   }
 
+  function exportOrders() {
+    const rows = filtered.map((order) => [
+      order.number,
+      order.customerName,
+      `${order.brand} ${order.model}`,
+      order.serial,
+      order.status,
+      order.technician,
+      formatShortDate(order.createdAt),
+      formatCurrency(workOrderTotal(order))
+    ])
+    downloadCsv('bitacoretech-ordenes.csv', [
+      ['OT', 'Cliente', 'Equipo', 'Serial', 'Estado', 'Técnico', 'Ingreso', 'Total'],
+      ...rows
+    ])
+    toast.success('Órdenes exportadas', {
+      description: `${filtered.length} OT en CSV con los filtros actuales.`
+    })
+  }
+
   const statCards = [
     { label: 'OTs abiertas', value: counts.open, icon: Wrench, tone: 'bg-brand-50 text-brand-600' },
     { label: 'En diagnóstico', value: counts.diagnostic, icon: ClipboardList, tone: 'bg-sky-50 text-sky-600' },
@@ -133,7 +154,7 @@ export function OrdersPage() {
             <Button
               variant="secondary"
               size="md"
-              onClick={() => toast('Lista de OTs', { description: 'En producción se exportaría a PDF o Excel.' })}
+              onClick={exportOrders}
             >
               Exportar
             </Button>

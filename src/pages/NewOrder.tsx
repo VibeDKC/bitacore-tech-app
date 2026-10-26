@@ -28,6 +28,7 @@ import { toast } from 'sonner'
 import type {
   Customer,
   DeviceCategory,
+  Equipment,
   IntakeConditionKey,
   LegalConfig,
   LockType,
@@ -40,7 +41,7 @@ import type {
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { workOrderStatusConfig } from '@/lib/status'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, formatDate } from '@/lib/format'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig, resolveLegalClause } from '@/lib/legalConfig'
@@ -153,6 +154,8 @@ export function NewOrderPage() {
   const [customerList, setCustomerList] = useState<Customer[]>([])
   const [legalConfig, setLegalConfig] = useState<LegalConfig>(defaultLegalConfig)
   const [technicians, setTechnicians] = useState<TechnicianOption[]>([])
+  const [equipmentList, setEquipmentList] = useState<Equipment[]>([])
+  const [equipmentId, setEquipmentId] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerDropdown, setCustomerDropdown] = useState(false)
@@ -167,6 +170,61 @@ export function NewOrderPage() {
     setTechnicians(bootstrap.technicians)
     setTechnicianId((current) => current || bootstrap.technicians[0]?.id || '')
   }, [bootstrap])
+
+  useEffect(() => {
+    let active = true
+    if (!customerId) {
+      setEquipmentList([])
+      setEquipmentId('')
+      return
+    }
+    api.equipment
+      .list(customerId)
+      .then((list) => {
+        if (!active) return
+        setEquipmentList(list)
+        setEquipmentId(list[0]?.id ?? '')
+        if (list[0]) applyEquipment(list[0])
+      })
+      .catch(() => {
+        if (active) setEquipmentList([])
+      })
+    return () => {
+      active = false
+    }
+  }, [customerId])
+
+  function applyEquipment(equipment: Equipment) {
+    setCategory((equipment.category as DeviceCategory) || 'otro')
+    setBrand(equipment.brand)
+    setModel(equipment.model)
+    setSerial(equipment.serial)
+    setSerialUnknown(equipment.serial === 'Sin serial' || equipment.serial === 'Serial no visible')
+    setAccessories(
+      equipment.accessories && equipment.accessories !== 'Sin accesorios'
+        ? equipment.accessories.split(',').map((item) => item.trim()).filter(Boolean)
+        : []
+    )
+    setTechnicalSheet(
+      equipment.technicalSheet
+        ? { ...emptyTechnicalSheet, ...(equipment.technicalSheet as Partial<TechnicalSheet>) }
+        : emptyTechnicalSheet
+    )
+  }
+
+  function selectEquipment(id: string) {
+    setEquipmentId(id)
+    if (!id) {
+      setBrand('')
+      setModel('')
+      setSerial('')
+      setAccessories([])
+      setTechnicalSheet(emptyTechnicalSheet)
+      return
+    }
+    const equipment = equipmentList.find((item) => item.id === id)
+    if (equipment) applyEquipment(equipment)
+  }
 
   const [category, setCategory] = useState<DeviceCategory>('laptop')
   const [brand, setBrand] = useState('')
@@ -204,6 +262,7 @@ export function NewOrderPage() {
   const [evidenceWarningOpen, setEvidenceWarningOpen] = useState(false)
 
   const selectedCustomer = customerList.find((item) => item.id === customerId) ?? null
+  const selectedEquipment = equipmentList.find((item) => item.id === equipmentId) ?? null
   const selectedDevice = deviceOptions.find((item) => item.value === category) ?? deviceOptions[0]
   const SelectedDeviceIcon = selectedDevice.icon
 
@@ -444,6 +503,7 @@ export function NewOrderPage() {
         physicalCondition,
         reportedIssue: reportedIssue.trim(),
         technicianId,
+        equipmentId: equipmentId || undefined,
         promisedAt: new Date(`${promisedAt}T17:00:00`).toISOString(),
         notes: notes.trim(),
         intake: intake as unknown as Record<string, unknown>,
@@ -646,6 +706,37 @@ export function NewOrderPage() {
               title="Equipo"
               description="El formulario cambia según el tipo de dispositivo seleccionado."
             />
+
+            {selectedCustomer ? (
+              <div className="mt-4 rounded-xl border border-line bg-slate-50/60 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="field-label mb-0" htmlFor="equipment-select">
+                    Equipo registrado
+                  </label>
+                  <span className="text-[9px] text-slate-400">
+                    {equipmentList.length} equipo{equipmentList.length === 1 ? '' : 's'} en el historial del cliente
+                  </span>
+                </div>
+                <select
+                  id="equipment-select"
+                  value={equipmentId}
+                  onChange={(event) => selectEquipment(event.target.value)}
+                  className="field mt-1.5"
+                >
+                  <option value="">Nuevo equipo / no registrado</option>
+                  {equipmentList.map((equipment) => (
+                    <option key={equipment.id} value={equipment.id}>
+                      {equipment.brand} {equipment.model} · {equipment.serial}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">
+                  {selectedEquipment
+                    ? `Equipo registrado el ${formatDate(selectedEquipment.createdAt)}. Se reutiliza su ficha y se conserva el historial.`
+                    : 'Se creará un equipo nuevo al guardar la OT. Si el serial ya existe para este cliente, se reutilizará.'}
+                </p>
+              </div>
+            ) : null}
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
               {deviceOptions.map((option) => {

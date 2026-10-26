@@ -1,6 +1,8 @@
 export interface LegalConfig {
   businessName: string
   nit: string
+  nitDv?: string
+  foreignNit?: string
   phone: string
   address: string
   city: string
@@ -15,7 +17,9 @@ export interface LegalConfig {
 
 export const DEFAULT_LEGAL: LegalConfig = {
   businessName: 'BitacoreTech Taller & POS',
-  nit: '901.245.678-9',
+  nit: '901245678',
+  nitDv: '3',
+  foreignNit: '',
   phone: '+57 604 322 1188',
   address: 'Cra. 43 # 25-18',
   city: 'Medellín, Antioquia',
@@ -53,12 +57,12 @@ export const DEFAULT_SETTINGS = {
     diagnosis: false,
     summary: false,
     anomalies: false,
-    model: 'Sin configurar'
+    provider: 'gemini',
+    model: 'gemini-3.5-flash'
   },
   security: {
     strictSessions: true,
-    sessionHours: 12,
-    rememberDays: 30
+    sessionHours: 12
   },
   business: {
     timezone: 'America/Bogota',
@@ -66,6 +70,9 @@ export const DEFAULT_SETTINGS = {
     locale: 'es-CO',
     invoicePrefix: 'FV',
     orderPrefix: 'OT'
+  },
+  equipment: {
+    qrEnabled: false
   }
 }
 

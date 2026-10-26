@@ -89,7 +89,12 @@ function ReceiptCopy({
         </div>
         {discount > 0 ? (
           <div className="flex justify-between">
-            <span>Descuento {invoice.discountPercent ?? 0}%</span>
+            <span>
+              Descuento{' '}
+              {invoice.discountType === 'amount'
+                ? formatCurrency(discount)
+                : `${invoice.discountPercent ?? 0}%`}
+            </span>
             <span className="tabular">- {formatCurrency(discount)}</span>
           </div>
         ) : null}

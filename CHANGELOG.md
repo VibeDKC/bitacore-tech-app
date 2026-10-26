@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.4.0 — 2026-10-26
+
+### Operación y clientes
+- Catálogo ligero de equipos por cliente, con historial de OT y evidencias.
+- Backfill automático de equipos desde OT históricas.
+- QR interno opcional, inactivo por defecto y activable en Configuración → Negocio.
+- Fidelidad por cliente con descuento porcentual o fijo y vigencia.
+- Descuento manual por porcentaje o valor en POS y OT.
+- Bloqueo de venta cuando el descuento deja un producto por debajo del costo.
+- Historial de cliente con factura y OT clicables (ya iniciado en 1.3.0).
+
+### Seguridad y configuración
+- Permisos por rol editables y excepciones por usuario.
+- Guardrails: el propietario no delega auditoría, purga, restauración ni gestión de admins.
+- NIT colombiano con DV automático y solo dígitos.
+- Campo opcional de NIT extranjero.
+- Legal y fiscal integrado dentro de Negocio.
+- Campos opcionales de usuario: documento, teléfono, dirección y foto.
+- Sesión sin “recordar”; el token vive en `sessionStorage` y se borra al cerrar.
+- Contraseña de respaldo cifrada con `safeStorage`, con copia auditada.
+- Exportación e importación `.bctbackup` cifrada con AES-256-GCM y restauración probada.
+- Layout edge-to-edge, sin margen ni borde flotante.
+
+### Reportes
+- Gráficos de flujo de caja calculados con ventas, compras y egresos reales.
+- Exportación CSV de órdenes de trabajo.
+
+### Calidad
+- Aceptación T3: 14/14.
+- Regresión: T1 8/8 y T2 15/15.
+- Typecheck y build en verde.
+- Instalador `BitacoreTech-1.4.0-x64.exe`.
+
+### Pendiente para 1.5.0
+- Promociones avanzadas, CxP/abonos y reportes ejecutivos.
+- IA de facturas con Gemini, sin guardar imágenes.
+- Migración Python, catálogo web y plantillas WhatsApp.
+- Firma del instalador, rendimiento y piloto.
+
 ## 1.3.0 — 2026-10-26
 
 ### Primer arranque y seguridad

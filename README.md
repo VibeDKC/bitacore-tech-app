@@ -94,7 +94,14 @@ Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. La c
 - Evidencias fotográficas del estado del equipo al ingreso y durante la reparación, con verificación de integridad y exportación ZIP.
 - Órdenes de trabajo con repuestos, servicios, anticipos, descuentos, garantía, notas, estados e historial.
 - Cobro al pasar a `entregado`, con libro de pagos y saldo separado del total. La entrega sin cobro requiere autorización y motivo auditado.
-- POS con carrito, descuentos según rol, efectivo/tarjeta/mixto y factura interna sin IVA.
+- POS con carrito, descuento por porcentaje o valor, fidelidad automática, efectivo/tarjeta/mixto y factura interna sin IVA. El precio final nunca queda por debajo del costo de compra.
+- Catálogo ligero de equipos por cliente, con historial de OT y evidencias; QR interno opcional e inactivo por defecto.
+- Fidelidad configurable por cliente (porcentaje o valor, vigencia) y bloqueo de venta bajo costo.
+- Permisos por rol y excepciones por usuario, con auditoría y guardrails del propietario.
+- NIT colombiano con DV automático y NIT extranjero opcional.
+- Respaldos exportables/importables en `.bctbackup` cifrado con contraseña; la contraseña se guarda cifrada con el almacén del sistema.
+- Sesión sin “recordar”: se cierra al cerrar la aplicación; duración máxima configurable por horas.
+- Layout integrado al borde de la ventana.
 - Compras a proveedores con IVA del 19 % y actualización de inventario.
 - Proveedores con alta y edición desde la interfaz, filtro de historial y comprobante de compra imprimible.
 - Asignación y reasignación de técnico con historial, motivo y auditoría; bloqueo en OT cerradas.
@@ -126,6 +133,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run dist` | Genera el instalador NSIS x64 en `release/`. |
 | `npm run test:acceptance:f0f1` | Prueba aislada de primer arranque, login, auditoría y respaldo inicial. |
 | `npm run test:acceptance:f2f3` | Prueba aislada de proveedores, compra, comprobante, técnico, OT e historiales. |
+| `npm run test:acceptance:f4f5` | Prueba aislada de NIT/DV, permisos, equipos, QR, fidelidad, respaldos y sesión. |
 
 ## Pruebas de aceptación
 
@@ -135,9 +143,10 @@ Las pruebas usan una carpeta temporal y **no tocan los datos reales** del negoci
 npm run build
 npm run test:acceptance:f0f1
 npm run test:acceptance:f2f3
+npm run test:acceptance:f4f5
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK` y `15/15 OK`.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK` y `14/14 OK`.
 
 ## Empaquetado
 
@@ -145,7 +154,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.3.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.4.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`

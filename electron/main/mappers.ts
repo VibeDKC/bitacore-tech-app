@@ -1,5 +1,6 @@
 import type { Database } from './database'
 import { evidenceDto, evidenceSetHash } from './evidence'
+import { calculateNitDv } from './nit'
 
 export const money = (cents: number | null | undefined) => Math.round(Number(cents ?? 0)) / 100
 export const toCents = (value: number | null | undefined) => Math.round(Number(value ?? 0) * 100)
@@ -34,6 +35,7 @@ export function customerDto(db: Database, row: any) {
     name: row.name,
     documentType: row.document_type,
     document: row.document,
+    documentDv: row.document_type === 'NIT' && !bool(row.is_foreign_document) ? calculateNitDv(row.document) : undefined,
     phone: row.phone,
     email: row.email,
     address: row.address,
@@ -41,12 +43,41 @@ export function customerDto(db: Database, row: any) {
     orders: Number(orders),
     openOrders: Number(openOrders),
     lastVisit,
-    isFinalConsumer: bool(row.is_final_consumer)
+    isFinalConsumer: bool(row.is_final_consumer),
+    isForeignDocument: bool(row.is_foreign_document),
+    loyaltyActive: bool(row.loyalty_active),
+    loyaltyDiscountType: row.loyalty_discount_type ?? 'percent',
+    loyaltyDiscountValue: Number(row.loyalty_discount_value ?? 0),
+    loyaltyValidUntil: row.loyalty_valid_until ?? null,
+    loyaltyNotes: row.loyalty_notes ?? ''
   }
 }
 
-export function productDto(db: Database, row: any, includeCost = true) {
-  const serials = db
+export function equipmentDto(row: any) {
+  let technicalSheet: Record<string, unknown> | null = null
+  try {
+    technicalSheet = row.technical_sheet_json ? JSON.parse(row.technical_sheet_json) : null
+  } catch {
+    technicalSheet = null
+  }
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    category: row.category,
+    categoryLabel: row.category_label,
+    equipmentType: row.equipment_type,
+    brand: row.brand,
+    model: row.model,
+    serial: row.serial,
+    accessories: row.accessories,
+    technicalSheet,
+    notes: row.notes ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+export function productDto(db: Database, row: any, includeCost = true) {  const serials = db
     .all<{ serial: string }>('SELECT serial FROM product_serials WHERE product_id = ? ORDER BY created_at ASC', row.id)
     .map((item) => item.serial)
 
@@ -135,6 +166,8 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
     date: row.created_at,
     subtotal: money(row.subtotal_cents),
     discountPercent: Number(row.discount_percent),
+    discountType: row.discount_type ?? 'percent',
+    discountValue: Number(row.discount_value ?? 0),
     discount: money(row.discount_cents),
     total: money(row.total_cents),
     method: row.payment_method ?? 'Efectivo',
@@ -172,6 +205,9 @@ export function orderDto(db: Database, row: any) {
   const evidenceBytes = activeEvidence.reduce((sum, item) => sum + Number(item.size_bytes ?? 0), 0)
   const technician = row.technician_id
     ? db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', row.technician_id)?.name
+    : null
+  const equipmentRow = row.equipment_id
+    ? db.get<any>('SELECT * FROM equipment WHERE id = ?', row.equipment_id)
     : null
   let intake: any = null
   try {
@@ -232,6 +268,8 @@ export function orderDto(db: Database, row: any) {
     status: row.status,
     technician: technician ?? 'Sin asignar',
     technicianId: row.technician_id,
+    equipmentId: row.equipment_id ?? null,
+    equipment: equipmentRow ? equipmentDto(equipmentRow) : null,
     createdAt: row.created_at,
     promisedAt: row.promised_at,
     deliveredAt: row.delivered_at ?? undefined,

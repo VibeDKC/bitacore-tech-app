@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { AuthSession, AuthUser, Role } from '@/types'
 import { api, getAuthToken, setAuthToken, type SetupInput } from '@/lib/backend'
+import { setEffectivePermissions } from '@/lib/permissions'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -13,7 +14,7 @@ interface AuthContextValue {
   restoring: boolean
   setupRequired: boolean
   setup: (input: SetupInput) => Promise<AuthSession>
-  login: (username: string, password: string, remember?: boolean) => Promise<AuthSession>
+  login: (username: string, password: string) => Promise<AuthSession>
   logout: () => Promise<void>
   setPreviewRole: (role: Role) => Promise<void>
 }
@@ -63,8 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           actualRole: info.actualRole,
           canPreviewRoles: info.canPreviewRoles,
           expiresAt: info.expiresAt,
-          roleLabel: info.roleLabel
+          roleLabel: info.roleLabel,
+          permissions: info.permissions
         })
+        setEffectivePermissions(info.permissions)
       } catch {
         setAuthToken(null)
         if (active) setSession(null)
@@ -82,14 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await api.auth.setup(input)
     setAuthToken(result.token, false)
     setSession(result)
+    setEffectivePermissions(result.permissions)
     setSetupRequired(false)
     return result
   }, [])
 
-  const login = useCallback(async (username: string, password: string, remember = true) => {
-    const result = await api.auth.login(username, password, remember)
-    setAuthToken(result.token, remember)
+  const login = useCallback(async (username: string, password: string) => {
+    const result = await api.auth.login(username, password)
+    setAuthToken(result.token)
     setSession(result)
+    setEffectivePermissions(result.permissions)
     setSetupRequired(false)
     return result
   }, [])
@@ -102,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setAuthToken(null)
       setSession(null)
+      setEffectivePermissions(null)
     }
   }, [])
 
@@ -119,10 +125,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               actualRole: info.actualRole,
               canPreviewRoles: info.canPreviewRoles,
               expiresAt: info.expiresAt,
-              roleLabel: info.roleLabel
+              roleLabel: info.roleLabel,
+              permissions: info.permissions
             }
           : current
       )
+      setEffectivePermissions(info.permissions)
     },
     [session?.canPreviewRoles]
   )

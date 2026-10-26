@@ -57,6 +57,7 @@ export function ensureReferenceData(db: Database) {
     db.setSetting('ai_config', DEFAULT_SETTINGS.ai)
     db.setSetting('security_config', DEFAULT_SETTINGS.security)
     db.setSetting('business_config', DEFAULT_SETTINGS.business)
+    db.setSetting('equipment_config', DEFAULT_SETTINGS.equipment)
     db.setSetting('charts_history', [])
 
     db.run(
@@ -505,6 +506,7 @@ function seedAll(db: Database, owner: SeedOwner) {
   db.setSetting('ai_config', DEFAULT_SETTINGS.ai)
   db.setSetting('security_config', DEFAULT_SETTINGS.security)
   db.setSetting('business_config', DEFAULT_SETTINGS.business)
+  db.setSetting('equipment_config', DEFAULT_SETTINGS.equipment)
   db.setSetting('charts_history', seed.chartData ?? [])
 
   db.run(

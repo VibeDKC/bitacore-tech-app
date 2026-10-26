@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Building2,
+  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -34,9 +35,10 @@ import {
 import { toast } from 'sonner'
 import type { AppUser, BackupRecord, LegalConfig, Role } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
-import { can, permissionMatrix, roleDescriptions, roleLabels } from '@/lib/permissions'
+import { can, capabilityLabels, allCapabilities, permissionMatrix, roleCan, roleDescriptions, roleLabels, rootOnlyCapabilities } from '@/lib/permissions'
 import { defaultLegalConfig } from '@/lib/legalConfig'
 import { formatDateTime } from '@/lib/format'
+import { calculateNitDv, normalizeNit } from '@/lib/nit'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -46,7 +48,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Modal } from '@/components/ui/Modal'
 import { cn } from '@/lib/utils'
 
-type SettingsTab = 'negocio' | 'usuarios' | 'impresion' | 'respaldos' | 'legal' | 'ia' | 'seguridad'
+type SettingsTab = 'negocio' | 'usuarios' | 'impresion' | 'respaldos' | 'ia' | 'seguridad'
 type PrintFormat = 'a4' | '80mm' | '58mm'
 
 const tabs: Array<{ value: SettingsTab; label: string; description: string; icon: typeof Store }> = [
@@ -54,7 +56,6 @@ const tabs: Array<{ value: SettingsTab; label: string; description: string; icon
   { value: 'usuarios', label: 'Usuarios y roles', description: 'Equipo y permisos', icon: Users },
   { value: 'impresion', label: 'Impresión', description: 'Formatos y comprobantes', icon: Printer },
   { value: 'respaldos', label: 'Respaldos', description: 'Backup y restauración', icon: DatabaseBackup },
-  { value: 'legal', label: 'Legal y fiscal', description: 'IVA y facturación', icon: FileText },
   { value: 'ia', label: 'IA y API', description: 'Claves y asistentes', icon: Sparkles },
   { value: 'seguridad', label: 'Seguridad', description: 'Acceso y protección', icon: ShieldCheck }
 ]
@@ -71,6 +72,8 @@ type LegalDraft = LegalConfig & { shortText: string; fullText: string }
 interface BusinessDraft {
   businessName: string
   nit: string
+  nitDv: string
+  foreignNit: string
   phone: string
   email: string
   address: string
@@ -91,13 +94,13 @@ interface AiDraft {
   diagnosis: boolean
   summary: boolean
   anomalies: boolean
+  provider: string
   model: string
   apiKey: string
 }
 
 interface SecurityDraft {
   sessionHours: number
-  rememberDays: number
 }
 
 function toLegalDraft(config: LegalConfig): LegalDraft {
@@ -144,7 +147,7 @@ const accessMeta = {
 } as const
 
 export function SettingsPage() {
-  const { role, displayUser } = useAuth()
+  const { role, actualRole, displayUser } = useAuth()
   const { data, loading, error, reload, setData } = useApi(async () => {
     const settings = await api.settings.get()
     const [users, backups] = await Promise.all([
@@ -164,15 +167,32 @@ export function SettingsPage() {
   const [saving, setSaving] = useState<string | null>(null)
   const [userSaving, setUserSaving] = useState(false)
   const [backupSaving, setBackupSaving] = useState(false)
+  const [backupPasswordOpen, setBackupPasswordOpen] = useState(false)
+  const [backupPasswordForm, setBackupPasswordForm] = useState({ password: '', confirm: '' })
+  const [backupPasswordSaving, setBackupPasswordSaving] = useState(false)
+  const [backupTransferSaving, setBackupTransferSaving] = useState<'export' | 'import' | null>(null)
   const [showKey, setShowKey] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
-  const [invite, setInvite] = useState({ name: '', username: '', email: '', role: 'tecnico' as Role, password: '' })
-  const [userForm, setUserForm] = useState({ name: '', email: '', role: 'tecnico' as Role, active: true, password: '' })
+  const [invite, setInvite] = useState({ name: '', username: '', email: '', role: 'tecnico' as Role, password: '', document: '', phone: '', address: '' })
+  const [userForm, setUserForm] = useState({
+    name: '',
+    email: '',
+    role: 'tecnico' as Role,
+    active: true,
+    password: '',
+    document: '',
+    phone: '',
+    address: '',
+    photoDataUrl: null as string | null,
+    permissions: [] as Array<{ capability: (typeof allCapabilities)[number]; allowed: boolean }>
+  })
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
   const [legalDraft, setLegalDraft] = useState<LegalDraft>(() => toLegalDraft(defaultLegalConfig))
   const [businessDraft, setBusinessDraft] = useState<BusinessDraft>({
     businessName: defaultLegalConfig.businessName,
     nit: defaultLegalConfig.nit,
+    nitDv: defaultLegalConfig.nitDv ?? '',
+    foreignNit: defaultLegalConfig.foreignNit ?? '',
     phone: defaultLegalConfig.phone,
     email: defaultLegalConfig.email,
     address: defaultLegalConfig.address,
@@ -191,10 +211,12 @@ export function SettingsPage() {
     diagnosis: false,
     summary: false,
     anomalies: false,
-    model: 'Sin configurar',
+    provider: 'gemini',
+    model: 'gemini-3.5-flash',
     apiKey: ''
   })
-  const [securityDraft, setSecurityDraft] = useState<SecurityDraft>({ sessionHours: 12, rememberDays: 30 })
+  const [securityDraft, setSecurityDraft] = useState<SecurityDraft>({ sessionHours: 12 })
+  const [rolePermissionsDraft, setRolePermissionsDraft] = useState<Record<string, boolean>>({})
 
   const canManageStaff = can(role, 'manageStaff')
   const canManageAdmins = can(role, 'manageAdmins')
@@ -216,6 +238,8 @@ export function SettingsPage() {
     setBusinessDraft({
       businessName: current.legal.businessName,
       nit: current.legal.nit,
+      nitDv: current.legal.nitDv ?? calculateNitDv(current.legal.nit),
+      foreignNit: current.legal.foreignNit ?? '',
       phone: current.legal.phone,
       email: current.legal.email,
       address: current.legal.address,
@@ -235,12 +259,22 @@ export function SettingsPage() {
       summary: current.ai.summary,
       anomalies: current.ai.anomalies,
       model: current.ai.model,
+      provider: current.ai.provider ?? 'gemini',
       apiKey: ''
     })
     setSecurityDraft({
-      sessionHours: current.security.sessionHours,
-      rememberDays: current.security.rememberDays
+      sessionHours: current.security.sessionHours
     })
+    const permissions: Record<string, boolean> = {}
+    for (const role of ['admin', 'tecnico', 'cajero'] as const) {
+      for (const capability of allCapabilities) {
+        const row = current.rolePermissions?.find(
+          (item) => item.role === role && item.capability === capability
+        )
+        permissions[`${role}:${capability}`] = row ? row.allowed : roleCan(role, capability)
+      }
+    }
+    setRolePermissionsDraft(permissions)
   }, [data])
 
   const visibleStaff = isSuperadmin ? staff : staff.filter((member) => member.role !== 'superadmin')
@@ -260,15 +294,16 @@ export function SettingsPage() {
     setData((current) => (current ? { ...current, settings: updated } : current))
   }
 
-  async function saveBusiness() {
-    if (saving) return
+  async function saveBusiness() {    if (saving) return
     setSaving('negocio')
     try {
       let legalConfig = settings?.legal ?? defaultLegalConfig
       if (canLegal) {
         legalConfig = await api.legal.update({
           businessName: businessDraft.businessName.trim(),
-          nit: businessDraft.nit.trim(),
+          nit: normalizeNit(businessDraft.nit),
+          nitDv: businessDraft.nitDv,
+          foreignNit: businessDraft.foreignNit.trim(),
           phone: businessDraft.phone.trim(),
           email: businessDraft.email.trim(),
           address: businessDraft.address.trim(),
@@ -288,6 +323,24 @@ export function SettingsPage() {
       })
     } catch (failure) {
       toast.error('No se pudieron guardar los datos del negocio', { description: errorMessage(failure) })
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  async function saveEquipmentSettings(enabled: boolean) {
+    if (saving) return
+    setSaving('equipment')
+    try {
+      const updated = await api.settings.updateSection('equipment', { qrEnabled: enabled })
+      applySettings(updated)
+      toast.success(enabled ? 'Etiquetas QR habilitadas' : 'Etiquetas QR deshabilitadas', {
+        description: enabled
+          ? 'Puedes generar una etiqueta desde la ficha del equipo del cliente.'
+          : 'El catálogo de equipos sigue activo, solo se ocultan las etiquetas QR.'
+      })
+    } catch (failure) {
+      toast.error('No se pudo actualizar la configuración de equipos', { description: errorMessage(failure) })
     } finally {
       setSaving(null)
     }
@@ -325,6 +378,7 @@ export function SettingsPage() {
         diagnosis: aiDraft.diagnosis,
         summary: aiDraft.summary,
         anomalies: aiDraft.anomalies,
+        provider: aiDraft.provider,
         model: aiDraft.model.trim() || 'Sin configurar'
       }
       if (aiDraft.apiKey.trim()) payload.apiKey = aiDraft.apiKey.trim()
@@ -335,6 +389,7 @@ export function SettingsPage() {
         diagnosis: updated.ai.diagnosis,
         summary: updated.ai.summary,
         anomalies: updated.ai.anomalies,
+        provider: updated.ai.provider ?? 'gemini',
         model: updated.ai.model,
         apiKey: ''
       })
@@ -348,18 +403,41 @@ export function SettingsPage() {
     }
   }
 
-  async function saveSecurity() {
-    if (saving) return
+  async function saveRolePermissions() {
+    if (actualRole !== 'superadmin' || saving) return
+    setSaving('permisos')
+    try {
+      let updated = null as Awaited<ReturnType<typeof api.permissions.updateRole>> | null
+      for (const role of ['admin', 'tecnico', 'cajero'] as const) {
+        const items = allCapabilities.map((capability) => ({
+          capability,
+          allowed: rootOnlyCapabilities.includes(capability)
+            ? false
+            : Boolean(rolePermissionsDraft[`${role}:${capability}`])
+        }))
+        updated = await api.permissions.updateRole(role, items)
+      }
+      if (updated) applySettings(updated)
+      toast.success('Matriz de permisos actualizada', {
+        description: 'Los cambios aplican a las sesiones nuevas y a las acciones del proceso principal.'
+      })
+    } catch (failure) {
+      toast.error('No se pudo guardar la matriz', { description: errorMessage(failure) })
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  async function saveSecurity() {    if (saving) return
     setSaving('seguridad')
     try {
       const updated = await api.settings.updateSection('security', {
         strictSessions: settings?.security.strictSessions ?? true,
-        sessionHours: Math.min(Math.max(Math.round(securityDraft.sessionHours) || 12, 1), 168),
-        rememberDays: Math.min(Math.max(Math.round(securityDraft.rememberDays) || 30, 1), 365)
+        sessionHours: Math.min(Math.max(Math.round(securityDraft.sessionHours) || 12, 1), 168)
       })
       applySettings(updated)
       toast.success('Política de sesión actualizada', {
-        description: `Sesión normal de ${updated.security.sessionHours} h y sesión recordada de ${updated.security.rememberDays} días.`
+        description: `La sesión dura ${updated.security.sessionHours} h y se cierra al cerrar la aplicación.`
       })
     } catch (failure) {
       toast.error('No se pudo guardar la política de sesión', { description: errorMessage(failure) })
@@ -389,7 +467,9 @@ export function SettingsPage() {
     try {
       const saved = await api.legal.update({
         businessName: legalDraft.businessName,
-        nit: legalDraft.nit,
+        nit: normalizeNit(legalDraft.nit),
+        nitDv: legalDraft.nitDv,
+        foreignNit: legalDraft.foreignNit ?? '',
         phone: legalDraft.phone,
         address: legalDraft.address,
         city: legalDraft.city,
@@ -404,6 +484,8 @@ export function SettingsPage() {
         ...current,
         businessName: saved.businessName,
         nit: saved.nit,
+        nitDv: saved.nitDv ?? calculateNitDv(saved.nit),
+        foreignNit: saved.foreignNit ?? '',
         phone: saved.phone,
         email: saved.email,
         address: saved.address,
@@ -469,6 +551,78 @@ export function SettingsPage() {
       ?.writeText(backup.path)
       .then(() => toast.success('Ruta copiada', { description: backup.path }))
       .catch(() => toast.error('No se pudo copiar la ruta'))
+  }
+
+  async function saveBackupPassword() {
+    if (backupPasswordSaving) return
+    if (backupPasswordForm.password.length < 8) {
+      toast.error('La contraseña debe tener al menos 8 caracteres')
+      return
+    }
+    if (backupPasswordForm.password !== backupPasswordForm.confirm) {
+      toast.error('Las contraseñas no coinciden')
+      return
+    }
+    setBackupPasswordSaving(true)
+    try {
+      await api.backups.setPassword(backupPasswordForm.password)
+      setBackupPasswordOpen(false)
+      setBackupPasswordForm({ password: '', confirm: '' })
+      setData((current) =>
+        current ? { ...current, settings: { ...current.settings, backup: { passwordConfigured: true } } } : current
+      )
+      toast.success('Contraseña de respaldo configurada', {
+        description: 'Los respaldos nuevos se exportarán cifrados con esta contraseña.'
+      })
+    } catch (failure) {
+      toast.error('No se pudo guardar la contraseña', { description: errorMessage(failure) })
+    } finally {
+      setBackupPasswordSaving(false)
+    }
+  }
+
+  async function copyBackupPassword() {
+    try {
+      const result = await api.backups.revealPassword()
+      await navigator.clipboard.writeText(result.password)
+      toast.success('Contraseña copiada', { description: 'Compártela solo con el administrador autorizado.' })
+    } catch (failure) {
+      toast.error('No se pudo copiar la contraseña', { description: errorMessage(failure) })
+    }
+  }
+
+  async function exportBackup() {
+    if (backupTransferSaving) return
+    setBackupTransferSaving('export')
+    try {
+      const result = await api.backups.exportBackup()
+      if (!result.exported) return
+      toast.success('Respaldo exportado', {
+        description: `${result.path} · ${formatBytes(result.size ?? 0)}`
+      })
+      reload()
+    } catch (failure) {
+      toast.error('No se pudo exportar el respaldo', { description: errorMessage(failure) })
+    } finally {
+      setBackupTransferSaving(null)
+    }
+  }
+
+  async function importBackup() {
+    if (backupTransferSaving) return
+    setBackupTransferSaving('import')
+    try {
+      const result = await api.backups.importBackup()
+      if (!result.imported) return
+      toast.success('Respaldo importado y restaurado', {
+        description: `Copia previa: ${result.safetyBackup}. La aplicación se recargará.`
+      })
+      window.setTimeout(() => window.location.reload(), 1200)
+    } catch (failure) {
+      toast.error('No se pudo importar el respaldo', { description: errorMessage(failure) })
+    } finally {
+      setBackupTransferSaving(null)
+    }
   }
 
   async function restoreBackup() {
@@ -540,11 +694,14 @@ export function SettingsPage() {
         username: invite.username.trim().toLowerCase(),
         email: invite.email.trim(),
         role: invite.role,
-        password: invite.password
+        password: invite.password,
+        document: invite.document.trim(),
+        phone: invite.phone.trim(),
+        address: invite.address.trim()
       })
       setData((current) => (current ? { ...current, users: [...current.users, created] } : current))
       setInviteOpen(false)
-      setInvite({ name: '', username: '', email: '', role: 'tecnico', password: '' })
+      setInvite({ name: '', username: '', email: '', role: 'tecnico', password: '', document: '', phone: '', address: '' })
       toast.success('Usuario creado', { description: `${created.name} · ${roleLabels[created.role]}` })
     } catch (failure) {
       toast.error('No se pudo crear el usuario', { description: errorMessage(failure) })
@@ -555,7 +712,21 @@ export function SettingsPage() {
 
   function openUserEditor(member: AppUser) {
     setEditUser(member)
-    setUserForm({ name: member.name, email: member.email, role: member.role, active: member.active, password: '' })
+    setUserForm({
+      name: member.name,
+      email: member.email,
+      role: member.role,
+      active: member.active,
+      password: '',
+      document: member.document ?? '',
+      phone: member.phone ?? '',
+      address: member.address ?? '',
+      photoDataUrl: member.photoUrl ?? null,
+      permissions: (member.permissionOverrides ?? []).map((item) => ({
+        capability: item.capability,
+        allowed: item.allowed
+      }))
+    })
   }
 
   async function saveUser() {
@@ -575,6 +746,11 @@ export function SettingsPage() {
         email: userForm.email.trim(),
         role: userForm.role,
         active: userForm.active,
+        document: userForm.document.trim(),
+        phone: userForm.phone.trim(),
+        address: userForm.address.trim(),
+        photoDataUrl: userForm.photoDataUrl,
+        permissions: userForm.permissions,
         ...(userForm.password ? { password: userForm.password } : {})
       })
       setData((current) =>
@@ -587,6 +763,51 @@ export function SettingsPage() {
     } finally {
       setUserSaving(false)
     }
+  }
+
+  function updateUserPermission(capability: (typeof allCapabilities)[number], value: 'inherit' | 'allow' | 'deny') {
+    setUserForm((current) => {
+      const rest = current.permissions.filter((item) => item.capability !== capability)
+      if (value === 'inherit') return { ...current, permissions: rest }
+      return { ...current, permissions: [...rest, { capability, allowed: value === 'allow' }] }
+    })
+  }
+
+  function permissionValue(capability: (typeof allCapabilities)[number]) {
+    const override = userForm.permissions.find((item) => item.capability === capability)
+    if (override) return override.allowed ? 'allow' : 'deny'
+    return 'inherit'
+  }
+
+  function handleUserPhoto(file: File | null) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Selecciona una imagen PNG, JPEG o WebP')
+      return
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      toast.error('La imagen es demasiado grande; usa una de máximo 3 MB')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const image = new Image()
+      image.onload = () => {
+        const size = 256
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const context = canvas.getContext('2d')
+        if (!context) return
+        const scale = Math.max(size / image.width, size / image.height)
+        const width = image.width * scale
+        const height = image.height * scale
+        context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height)
+        setUserForm((current) => ({ ...current, photoDataUrl: canvas.toDataURL('image/jpeg', 0.82) }))
+      }
+      image.src = String(reader.result ?? '')
+    }
+    reader.readAsDataURL(file)
   }
 
   const switchClass = (active: boolean) =>
@@ -729,12 +950,40 @@ export function SettingsPage() {
                       <span className="field-label">{field.label}</span>
                       <input
                         value={businessDraft[field.key]}
-                        onChange={(event) => setBusinessDraft({ ...businessDraft, [field.key]: event.target.value })}
+                        onChange={(event) => {
+                          if (field.key === 'nit') {
+                            const digits = normalizeNit(event.target.value)
+                            setBusinessDraft({
+                              ...businessDraft,
+                              nit: digits,
+                              nitDv: calculateNitDv(digits)
+                            })
+                          } else {
+                            setBusinessDraft({ ...businessDraft, [field.key]: event.target.value })
+                          }
+                        }}
                         disabled={!canLegal}
                         className="field disabled:bg-slate-50 disabled:text-slate-500"
                       />
                     </label>
                   ))}
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="field-label">Dígito de verificación (DV)</span>
+                    <input value={businessDraft.nitDv} readOnly className="field bg-slate-50 text-slate-500" />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">NIT extranjero (opcional)</span>
+                    <input
+                      value={businessDraft.foreignNit}
+                      onChange={(event) => setBusinessDraft({ ...businessDraft, foreignNit: event.target.value })}
+                      disabled={!canLegal}
+                      className="field disabled:bg-slate-50 disabled:text-slate-500"
+                      placeholder="Solo si el negocio factura con NIT extranjero"
+                    />
+                  </label>
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -793,6 +1042,136 @@ export function SettingsPage() {
                     </p>
                   </div>
                 </div>
+              </div>
+
+              <div className="card p-5 lg:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Cláusulas de recepción y abandono</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Se guardan en un snapshot inmutable en cada OT nueva. Los cambios no alteran comprobantes anteriores.
+                    </p>
+                  </div>
+                  <Badge variant="brand">{legalDraft.version}</Badge>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="field-label">Días para declarar abandono *</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={legalDraft.abandonmentDays}
+                      onChange={(event) => setLegalDraft({ ...legalDraft, abandonmentDays: Number(event.target.value) })}
+                      disabled={!canLegal}
+                      className="field text-right tabular"
+                    />
+                    <span className="mt-1 block text-[9px] text-slate-400">
+                      Se usa en el ticket, el A4 y la cláusula con {'{{dias}}'}.
+                    </span>
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Días de garantía *</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={legalDraft.warrantyDays}
+                      onChange={(event) => setLegalDraft({ ...legalDraft, warrantyDays: Number(event.target.value) })}
+                      disabled={!canLegal}
+                      className="field text-right tabular"
+                    />
+                    <span className="mt-1 block text-[9px] text-slate-400">
+                      Mano de obra y repuestos suministrados por el taller.
+                    </span>
+                  </label>
+                </div>
+
+                <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                  <label className="block">
+                    <span className="field-label">Cláusulas cortas del ticket · una por línea</span>
+                    <textarea
+                      value={legalDraft.shortText}
+                      onChange={(event) => setLegalDraft({ ...legalDraft, shortText: event.target.value })}
+                      disabled={!canLegal}
+                      rows={5}
+                      className="field resize-y font-mono text-[10px] leading-relaxed"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Cláusulas completas del A4 · una por línea</span>
+                    <textarea
+                      value={legalDraft.fullText}
+                      onChange={(event) => setLegalDraft({ ...legalDraft, fullText: event.target.value })}
+                      disabled={!canLegal}
+                      rows={9}
+                      className="field resize-y font-mono text-[10px] leading-relaxed"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3 flex flex-col gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-[10px] leading-relaxed text-brand-800">
+                    Usa <span className="font-mono font-semibold">{'{{dias}}'}</span> para los días de abandono y{' '}
+                    <span className="font-mono font-semibold">{'{{garantia}}'}</span> para los días de garantía. Se resuelven al imprimir.
+                  </p>
+                  <span className="text-[9px] text-brand-700/70">Actualizado {formatDateTime(legalDraft.updatedAt)}</span>
+                </div>
+
+                {canLegal ? (
+                  <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button variant="secondary" onClick={() => setLegalDraft(toLegalDraft(settings?.legal ?? defaultLegalConfig))}>
+                      Descartar cambios
+                    </Button>
+                    <Button onClick={() => void saveLegal()} loading={saving === 'legal'} leftIcon={<Save className="h-4 w-4" />}>
+                      Guardar y versionar
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-4 flex items-start gap-2 rounded-xl border border-line bg-slate-50 px-3.5 py-2.5">
+                    <LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <p className="text-[10px] leading-relaxed text-slate-500">
+                      La configuración legal es administrada por el propietario. Este rol puede consultarla en modo lectura.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
+                <div className="flex items-start gap-2.5">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                  <p className="text-[10px] leading-relaxed text-brand-800">
+                    Estado fiscal: <span className="font-semibold">factura interna, sin IVA en ventas</span>. El IVA del 19 % se registra únicamente en compras a proveedores. La facturación electrónica DIAN queda para una fase posterior.
+                  </p>
+                </div>
+              </div>
+
+              <div className="card p-5 lg:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Catálogo de equipos</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Ficha por cliente, historial de OT y etiquetas QR opcionales.
+                    </p>
+                  </div>
+                  <Badge variant={settings?.equipment.qrEnabled ? 'success' : 'neutral'}>
+                    QR {settings?.equipment.qrEnabled ? 'activo' : 'inactivo'}
+                  </Badge>
+                </div>
+                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-slate-50/60 p-3.5">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings?.equipment.qrEnabled)}
+                    disabled={!canManageStaff || saving === 'equipment'}
+                    onChange={(event) => void saveEquipmentSettings(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                  />
+                  <span>
+                    <span className="block text-[11px] font-semibold text-ink">Habilitar etiquetas QR</span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-slate-500">
+                      Inactivo por defecto. Al activarlo aparece el botón de etiqueta en la ficha del equipo; el QR se imprime con el serial y no se envía a ningún servicio externo.
+                    </span>
+                  </span>
+                </label>
               </div>
             </>
           ) : null}
@@ -867,6 +1246,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
+              {false ? (
               <div className="card p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -932,6 +1312,81 @@ export function SettingsPage() {
                 <p className="mt-3 text-[9px] text-slate-400">
                   La cuenta raíz nunca puede ser creada, restaurada, purgada ni administrada por otro rol. La auditoría es exclusiva del propietario.
                 </p>
+              </div>
+              ) : null}
+
+              <div className="card p-5 lg:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Matriz configurable por rol</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Estos son los permisos base de cada rol. Luego puedes permitir o denegar acciones a un usuario específico desde su ficha.
+                    </p>
+                  </div>
+                  <Badge variant={actualRole === 'superadmin' ? 'warning' : 'neutral'}>
+                    {actualRole === 'superadmin' ? 'Editable' : 'Solo propietario'}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[620px]">
+                    <thead>
+                      <tr className="border-b border-line">
+                        <th className="table-th pl-3">Permiso</th>
+                        {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => (
+                          <th key={roleItem} className="table-th text-center">
+                            {roleLabels[roleItem]}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allCapabilities.map((capability) => {
+                        const rootOnly = rootOnlyCapabilities.includes(capability)
+                        return (
+                          <tr key={capability} className="border-b border-line/70 last:border-0">
+                            <td className="table-td pl-3">
+                              <p className="text-[11px] text-slate-600">{capabilityLabels[capability]}</p>
+                              {rootOnly ? <p className="text-[8px] text-slate-400">Exclusivo del propietario</p> : null}
+                            </td>
+                            {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => (
+                              <td key={roleItem} className="table-td text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(rolePermissionsDraft[`${roleItem}:${capability}`])}
+                                  disabled={actualRole !== 'superadmin' || rootOnly || saving === 'permisos'}
+                                  onChange={(event) =>
+                                    setRolePermissionsDraft((current) => ({
+                                      ...current,
+                                      [`${roleItem}:${capability}`]: event.target.checked
+                                    }))
+                                  }
+                                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-[9px] leading-relaxed text-slate-400">
+                    Los permisos exclusivos del propietario no se pueden delegar. Los cambios quedan auditados.
+                  </p>
+                  {actualRole === 'superadmin' ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => void saveRolePermissions()}
+                      loading={saving === 'permisos'}
+                      leftIcon={<Save className="h-4 w-4" />}
+                    >
+                      Guardar matriz
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </>
           ) : null}
@@ -1027,6 +1482,78 @@ export function SettingsPage() {
 
           {tab === 'respaldos' ? (
             <>
+              <div className="card p-5 lg:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Contraseña y transferencia</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Protege la exportación e importación del respaldo. Solo el propietario y el administrador pueden verla o copiarla.
+                    </p>
+                  </div>
+                  <Badge variant={settings?.backup.passwordConfigured ? 'success' : 'warning'}>
+                    {settings?.backup.passwordConfigured ? 'Configurada' : 'Sin configurar'}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                  <label className="block">
+                    <span className="field-label">Contraseña de respaldo</span>
+                    <input
+                      type="password"
+                      readOnly
+                      value={settings?.backup.passwordConfigured ? '••••••••••••' : ''}
+                      placeholder="Sin configurar"
+                      className="field bg-slate-50 text-slate-500"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => void copyBackupPassword()}
+                      disabled={!settings?.backup.passwordConfigured}
+                      leftIcon={<Copy className="h-4 w-4" />}
+                    >
+                      Copiar
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setBackupPasswordForm({ password: '', confirm: '' })
+                        setBackupPasswordOpen(true)
+                      }}
+                      leftIcon={<KeyRound className="h-4 w-4" />}
+                    >
+                      {settings?.backup.passwordConfigured ? 'Cambiar' : 'Configurar'}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+                  <Button
+                    onClick={() => void exportBackup()}
+                    loading={backupTransferSaving === 'export'}
+                    disabled={!settings?.backup.passwordConfigured || !canCreateBackup}
+                    leftIcon={<CloudUpload className="h-4 w-4" />}
+                  >
+                    Exportar respaldo
+                  </Button>
+                  {canRestore ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => void importBackup()}
+                      loading={backupTransferSaving === 'import'}
+                      disabled={!settings?.backup.passwordConfigured}
+                      leftIcon={<RefreshCcw className="h-4 w-4" />}
+                    >
+                      Importar respaldo
+                    </Button>
+                  ) : null}
+                  <span className="text-[9px] text-slate-400">
+                    El archivo .bctbackup se cifra con AES-256-GCM. Si cambias la contraseña, los respaldos anteriores requieren la anterior.
+                  </span>
+                </div>
+              </div>
+
               <div className="card overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
                   <div>
@@ -1140,7 +1667,7 @@ export function SettingsPage() {
             </>
           ) : null}
 
-          {tab === 'legal' ? (
+          {false ? (
             <>
               <div className="card p-5 lg:p-6">
                 <div className="flex items-start justify-between gap-3">
@@ -1267,7 +1794,7 @@ export function SettingsPage() {
 
                 {canLegal ? (
                   <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <Button variant="secondary" onClick={() => setLegalDraft(toLegalDraft(settings.legal))}>
+                    <Button variant="secondary" onClick={() => setLegalDraft(toLegalDraft(settings?.legal ?? defaultLegalConfig))}>
                       Descartar cambios
                     </Button>
                     <Button onClick={() => void saveLegal()} loading={saving === 'legal'} leftIcon={<Save className="h-4 w-4" />}>
@@ -1477,20 +2004,8 @@ export function SettingsPage() {
                           className="field text-right tabular"
                         />
                       </label>
-                      <label className="block">
-                        <span className="field-label">Días de sesión recordada</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={365}
-                          value={securityDraft.rememberDays}
-                          onChange={(event) => setSecurityDraft({ ...securityDraft, rememberDays: Number(event.target.value) })}
-                          className="field text-right tabular"
-                        />
-                      </label>
                       <p className="text-[9px] leading-relaxed text-slate-400">
-                        La duración normal aplica cuando no se marca “Recordarme” al iniciar sesión. El valor recordado se usa
-                        cuando la casilla está activa.
+                        La sesión se cierra al cerrar la aplicación. La duración en horas es el máximo de la sesión activa.
                       </p>
                       <Button variant="secondary" className="w-full" onClick={() => void saveSecurity()} loading={saving === 'seguridad'} leftIcon={<Save className="h-4 w-4" />}>
                         Guardar política
@@ -1545,6 +2060,18 @@ export function SettingsPage() {
           <label className="block">
             <span className="field-label">Correo</span>
             <input value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} className="field" placeholder="correo@bitacoretech.co" type="email" />
+          </label>
+          <label className="block">
+            <span className="field-label">Documento (opcional)</span>
+            <input value={invite.document} onChange={(event) => setInvite({ ...invite, document: event.target.value })} className="field" placeholder="CC o NIT" />
+          </label>
+          <label className="block">
+            <span className="field-label">Teléfono (opcional)</span>
+            <input value={invite.phone} onChange={(event) => setInvite({ ...invite, phone: event.target.value })} className="field" placeholder="310 000 0000" />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="field-label">Dirección (opcional)</span>
+            <input value={invite.address} onChange={(event) => setInvite({ ...invite, address: event.target.value })} className="field" placeholder="Dirección de contacto" />
           </label>
           <label className="block">
             <span className="field-label">Rol</span>
@@ -1631,6 +2158,84 @@ export function SettingsPage() {
               autoComplete="new-password"
             />
           </label>
+          <label className="block">
+            <span className="field-label">Documento</span>
+            <input value={userForm.document} onChange={(event) => setUserForm({ ...userForm, document: event.target.value })} className="field" placeholder="CC o NIT" />
+          </label>
+          <label className="block">
+            <span className="field-label">Teléfono</span>
+            <input value={userForm.phone} onChange={(event) => setUserForm({ ...userForm, phone: event.target.value })} className="field" placeholder="310 000 0000" />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="field-label">Dirección</span>
+            <input value={userForm.address} onChange={(event) => setUserForm({ ...userForm, address: event.target.value })} className="field" placeholder="Dirección de contacto" />
+          </label>
+          <div className="sm:col-span-2">
+            <span className="field-label">Foto de perfil</span>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-slate-50/60 p-3">
+              {userForm.photoDataUrl ? (
+                <img src={userForm.photoDataUrl} alt="Foto de perfil" className="h-14 w-14 rounded-2xl object-cover" />
+              ) : (
+                <Avatar name={userForm.name || 'Usuario'} size="md" />
+              )}
+              <label className="focus-ring inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300">
+                <Camera className="h-3.5 w-3.5" />
+                Cambiar foto
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(event) => handleUserPhoto(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              {userForm.photoDataUrl ? (
+                <Button variant="ghost" size="sm" onClick={() => setUserForm({ ...userForm, photoDataUrl: null })}>
+                  Quitar
+                </Button>
+              ) : null}
+              <p className="text-[9px] leading-relaxed text-slate-400 sm:max-w-[240px]">
+                Opcional. Se recorta a 256 px y se guarda dentro de la base local.
+              </p>
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="field-label mb-0">Permisos especiales</span>
+              <span className="text-[9px] text-slate-400">Heredar usa el rol seleccionado</span>
+            </div>
+            <div className="mt-1.5 max-h-72 overflow-y-auto rounded-xl border border-line">
+              {allCapabilities.map((capability) => {
+                const rootOnly = rootOnlyCapabilities.includes(capability)
+                const disabled = rootOnly && actualRole !== 'superadmin'
+                return (
+                  <div
+                    key={capability}
+                    className="flex items-center justify-between gap-3 border-b border-line/70 px-3.5 py-2 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-[11px] text-slate-600">{capabilityLabels[capability]}</p>
+                      <p className="text-[9px] text-slate-400">
+                        Rol: {roleCan(userForm.role, capability) ? 'sí' : 'no'}
+                        {rootOnly ? ' · exclusivo del propietario' : ''}
+                      </p>
+                    </div>
+                    <select
+                      value={permissionValue(capability)}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        updateUserPermission(capability, event.target.value as 'inherit' | 'allow' | 'deny')
+                      }
+                      className="field h-8 w-28 text-[10px] disabled:bg-slate-50 disabled:text-slate-400"
+                    >
+                      <option value="inherit">Heredar</option>
+                      <option value="allow">Permitir</option>
+                      <option value="deny">Denegar</option>
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
           <div className="flex items-end">
             <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
               <input
@@ -1641,6 +2246,52 @@ export function SettingsPage() {
               />
               <span className="text-[11px] font-semibold text-ink">Cuenta activa</span>
             </label>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={backupPasswordOpen}
+        onClose={() => setBackupPasswordOpen(false)}
+        title={settings?.backup.passwordConfigured ? 'Cambiar contraseña de respaldo' : 'Configurar contraseña de respaldo'}
+        description="Se guarda cifrada con el almacén seguro de Windows y se usa para exportar e importar."
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setBackupPasswordOpen(false)} disabled={backupPasswordSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void saveBackupPassword()} loading={backupPasswordSaving} leftIcon={<Save className="h-4 w-4" />}>
+              Guardar contraseña
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="field-label">Nueva contraseña</span>
+            <input
+              type="password"
+              value={backupPasswordForm.password}
+              onChange={(event) => setBackupPasswordForm({ ...backupPasswordForm, password: event.target.value })}
+              className="field"
+              placeholder="Mínimo 8 caracteres"
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Confirmar contraseña</span>
+            <input
+              type="password"
+              value={backupPasswordForm.confirm}
+              onChange={(event) => setBackupPasswordForm({ ...backupPasswordForm, confirm: event.target.value })}
+              className="field"
+              placeholder="Repite la contraseña"
+              autoComplete="new-password"
+            />
+          </label>
+          <div className="rounded-xl border border-warning-100 bg-warning-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-warning-800">
+            Si cambias la contraseña, los respaldos exportados antes seguirán necesitando la contraseña anterior. Consérvala en un lugar seguro.
           </div>
         </div>
       </Modal>

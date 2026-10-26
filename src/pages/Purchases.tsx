@@ -21,6 +21,7 @@ import type { Purchase, Supplier } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate } from '@/lib/format'
+import { calculateNitDv } from '@/lib/nit'
 import { downloadCsv } from '@/lib/download'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
@@ -78,6 +79,7 @@ export function PurchasesPage() {
   const [supplierForm, setSupplierForm] = useState({
     name: '',
     nit: '',
+    isForeignNit: false,
     contact: '',
     phone: '',
     category: 'Repuestos'
@@ -144,7 +146,7 @@ export function PurchasesPage() {
 
   function openNewSupplier() {
     setEditingSupplier(null)
-    setSupplierForm({ name: '', nit: '', contact: '', phone: '', category: 'Repuestos' })
+    setSupplierForm({ name: '', nit: '', isForeignNit: false, contact: '', phone: '', category: 'Repuestos' })
     setSupplierOpen(true)
   }
 
@@ -153,6 +155,7 @@ export function PurchasesPage() {
     setSupplierForm({
       name: supplier.name,
       nit: supplier.nit === '—' ? '' : supplier.nit,
+      isForeignNit: Boolean(supplier.isForeignNit),
       contact: supplier.contact === '—' ? '' : supplier.contact,
       phone: supplier.phone === '—' ? '' : supplier.phone,
       category: supplier.category
@@ -435,7 +438,9 @@ export function PurchasesPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-[13px] font-bold text-ink">{supplier.name}</p>
-                      <p className="mt-0.5 text-[10px] text-slate-400">NIT {supplier.nit}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-400">
+                        NIT {supplier.nit}{supplier.nitDv ? `-${supplier.nitDv}` : ''}
+                      </p>
                     </div>
                     <Badge variant="neutral">{supplier.purchases} compras</Badge>
                   </div>
@@ -737,8 +742,20 @@ export function PurchasesPage() {
               value={supplierForm.nit}
               onChange={(event) => setSupplierForm({ ...supplierForm, nit: event.target.value })}
               className="field"
-              placeholder="900123456-1"
+              placeholder="900123456"
             />
+            {!supplierForm.isForeignNit && /^\d+$/.test(supplierForm.nit) && supplierForm.nit ? (
+              <span className="mt-1 block text-[9px] text-slate-400">DV calculado: {calculateNitDv(supplierForm.nit)}</span>
+            ) : null}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+            <input
+              type="checkbox"
+              checked={supplierForm.isForeignNit}
+              onChange={(event) => setSupplierForm({ ...supplierForm, isForeignNit: event.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+            />
+            <span className="text-[11px] text-slate-600">NIT extranjero</span>
           </label>
           <label className="block">
             <span className="field-label">Categoría</span>

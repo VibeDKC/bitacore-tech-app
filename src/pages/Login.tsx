@@ -48,7 +48,6 @@ export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [remember, setRemember] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [setupForm, setSetupForm] = useState({
@@ -119,7 +118,7 @@ export function LoginPage() {
     setLoading(true)
 
     try {
-      const session = await login(username, password, remember)
+      const session = await login(username, password)
       toast.success('Bienvenido a BitacoreTech', {
         description: `Sesión iniciada como ${session.roleLabel}.`
       })
@@ -204,7 +203,7 @@ export function LoginPage() {
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Logo />
               <span className="rounded-full border border-line bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                v1.3.0
+                v1.4.0
               </span>
             </div>
 
@@ -371,15 +370,9 @@ export function LoginPage() {
                   </label>
 
                   <div className="flex items-center justify-between gap-3">
-                    <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-500">
-                      <input
-                        type="checkbox"
-                        checked={remember}
-                        onChange={(event) => setRemember(event.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                      />
-                      Mantener sesión en este equipo
-                    </label>
+                    <span className="text-[10px] leading-relaxed text-slate-400">
+                      La sesión se cierra al cerrar la aplicación.
+                    </span>
                     <button
                       type="button"
                       onClick={() =>
