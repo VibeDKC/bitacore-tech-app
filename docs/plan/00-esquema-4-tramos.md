@@ -7,7 +7,18 @@
 | Baseline | Versión 1.1.0 · commit `38159be` |
 | Proyecto de referencia | https://github.com/VibeDKC/bitacore-tech · commit `6a29c5c` |
 | Fecha del esquema | 2026-10-26 |
-| Estado | Paso 0 completado. Tramo 1 pendiente de inicio. |
+| Estado | Tramos 1 y 2 cerrados técnicamente. Tramo 3 pendiente. |
+
+## Estado de ejecución
+
+| Tramo | Fases | Estado | Evidencia |
+| --- | --- | --- | --- |
+| 1 | F0 + F1 | Cerrado técnicamente; pendiente firma | `docs/actas/f0-f1.md` · 8/8 |
+| 2 | F2 + F3 | Cerrado técnicamente; pendiente firma | `docs/actas/f2-f3.md` · 15/15 |
+| 3 | F4 + F5 | Pendiente | — |
+| 4 | F6 + F7 | Pendiente | — |
+
+> Los Tramos 1 y 2 se ejecutaron en una misma sesión. El release 1.3.0 incluye ambos; no se generó un instalador 1.2.0 intermedio.
 
 ## 1. Objetivo
 
@@ -216,7 +227,7 @@ Si falta uno de estos puntos, el módulo es **parcial** y no puede cerrar el tra
 
 ## 9. Próximo paso
 
-Iniciar el **Tramo 1 (F0 + F1)**: congelar el contrato, auditar F0/F1 e implementar el primer arranque sin credenciales por defecto. Antes de ejecutar se deben confirmar las decisiones de la sección 7 que afectan el contrato.
+Iniciar el **Tramo 3 (F4 + F5)**: promociones, fidelidad, descuento libre, CxP/abonos, gráficos reales, sesión sin recordar, matriz de permisos configurable, foto/campos de usuario, exportar/importar respaldos, NIT/DV, fusión de Legal en Negocio y borde de la aplicación.
 
 ---
 
