@@ -200,7 +200,11 @@ function registerIpc() {
       } catch (error) {
         const failure =
           error instanceof RpcError
-            ? { code: error.code, message: error.message }
+            ? {
+                code: error.code,
+                message: error.message,
+                ...(error.details ? { details: error.details } : {})
+              }
             : {
                 code: 'INTERNAL_ERROR',
                 message:

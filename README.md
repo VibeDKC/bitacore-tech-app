@@ -68,7 +68,11 @@ La purga crea primero un respaldo completo, elimina las fotografías de las OT p
 - Escaneo de facturas con Gemini desde **Compras → Escanear factura**.
 - Se puede cargar una imagen o PDF, arrastrarlo o pegar una imagen con **Ctrl+V**.
 - La clave se cifra con el almacén seguro de Windows y nunca vuelve al renderer.
-- El propietario configura la IA y prueba la conexión; el administrador puede escanear si tiene `useAI` y `createPurchase`.
+- El propietario configura la clave, el catálogo y el respaldo; el administrador puede escanear y cambiar el modelo activo si tiene `useAI` y `createPurchase`.
+- Selector de modelo con catálogo actualizado desde Gemini y opción de escribir un identificador personalizado.
+- Respaldo automático configurable con hasta dos modelos alternativos.
+- Si Gemini responde 429, la app muestra si el límite es por minuto o diario y el tiempo de espera.
+- La factura cargada se conserva para reintentar o cambiar de modelo sin volver a subirla.
 - La revisión es humana y obligatoria.
 - La IA extrae proveedor, NIT, número, fecha, líneas, costos, IVA y totales.
 - Se permite IVA por línea, descuento global y **total real** de la factura.
@@ -76,8 +80,9 @@ La purga crea primero un respaldo completo, elimina las fotografías de las OT p
 - Se pueden crear productos nuevos dentro de la revisión.
 - Se advierte si el costo sube más del 10 %.
 - Se advierte y pide confirmación para facturas duplicadas del mismo proveedor y número.
-- No se guardan imágenes ni PDFs; solo la extracción, el modelo y un hash.
+- No se guardan imágenes ni PDFs; solo la extracción, el modelo, el respaldo usado y un hash.
 - Las pruebas automatizadas usan un Gemini simulado, sin consumir API real.
+- Cambiar de modelo solo ayuda si la cuota es independiente por modelo; si el límite es del proyecto, hay que esperar o ampliar el plan.
 
 ### Evidencias fotográficas
 
@@ -160,6 +165,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.8.0` | Permisos de admin, negocio, salud %, garantía de inventario y falla/mantenimiento. |
 | `npm run test:acceptance:1.9.0` | Teléfonos múltiples, documento opcional, condición/origen y ficha “Otro”. |
 | `npm run test:acceptance:1.10.0` | IA de facturas, Ctrl+V, revisión, AliExpress, duplicados y ajuste. |
+| `npm run test:acceptance:1.10.1` | Catálogo, cambio de modelo, respaldo automático, cuota 429 y reintento. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
@@ -183,6 +189,7 @@ npm run test:acceptance:1.7.0
 npm run test:acceptance:1.8.0
 npm run test:acceptance:1.9.0
 npm run test:acceptance:1.10.0
+npm run test:acceptance:1.10.1
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
 npm run test:migration:1.7.0
@@ -191,7 +198,7 @@ npm run test:migration:1.9.0
 npm run test:migration:1.10.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK`, `13/13 OK`, `9/9 OK` y `7/7 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK`, `13/13 OK`, `9/9 OK`, `7/7 OK` y `15/15 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -199,7 +206,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.10.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.10.1-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -226,5 +233,6 @@ El instalador queda en `release/` como `BitacoreTech-1.10.0-x64.exe`. La configu
 - Las credenciales del equipo son temporales, cifradas y se eliminan al entregar o cerrar la OT.
 - Los reportes de diagnóstico se generan en PDF A4 y usan las plantillas de Configuración → Mensajes; WhatsApp se abre con el mensaje, pero el PDF se adjunta manualmente.
 - La IA de facturas de compra es opcional; el diagnóstico técnico, los resúmenes y las anomalías de caja siguen pendientes.
+- La cuota de Gemini depende del plan y del proyecto. El respaldo automático no evade límites: solo intenta otro modelo configurado cuando el principal falla.
 - Al restaurar un respaldo en otro equipo se descarta la clave de IA y se debe volver a configurar.
 - Las fotos de evidencia se conservan en la carpeta de datos y en cada respaldo completo; no se envían a servicios externos.

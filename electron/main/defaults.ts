@@ -60,7 +60,17 @@ export const DEFAULT_SETTINGS = {
     summary: false,
     anomalies: false,
     provider: 'gemini',
-    model: 'gemini-3.5-flash'
+    model: 'gemini-3.5-flash',
+    fallbackModels: [] as string[],
+    autoFallback: false,
+    modelCatalog: [] as Array<{
+      id: string
+      displayName: string
+      description?: string
+      inputTokenLimit?: number
+      outputTokenLimit?: number
+    }>,
+    catalogUpdatedAt: null as string | null
   },
   security: {
     strictSessions: true,

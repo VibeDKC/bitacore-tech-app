@@ -609,6 +609,21 @@ export interface AiInvoiceLineDraft {
   costChange: AiInvoiceCostChange | null
 }
 
+export interface AiModelOption {
+  id: string
+  displayName: string
+  description?: string
+  inputTokenLimit?: number
+  outputTokenLimit?: number
+}
+
+export interface AiModelAttempt {
+  model: string
+  code: string
+  message: string
+  retryAfterSeconds?: number
+}
+
 export interface AiInvoiceDraft {
   supplier: {
     name: string
@@ -637,6 +652,9 @@ export interface AiInvoiceDraft {
   ai: {
     provider: string
     model: string
+    requestedModel?: string
+    fallbackUsed?: boolean
+    attempts?: AiModelAttempt[]
     extractedAt: string
     confidence: number
     extractionHash: string
@@ -689,6 +707,11 @@ export interface AiTestResult {
   model: string
   latencyMs: number
   message: string
+}
+
+export interface AiModelListResult {
+  models: AiModelOption[]
+  fetchedAt: string
 }
 
 export interface LegalConfig {
@@ -821,6 +844,10 @@ export interface SettingsData {
     anomalies: boolean
     provider?: string
     model: string
+    fallbackModels?: string[]
+    autoFallback?: boolean
+    modelCatalog?: AiModelOption[]
+    catalogUpdatedAt?: string | null
     configured?: boolean
     keyFingerprint?: string
   }

@@ -4,10 +4,12 @@ import {
   Building2,
   CheckCircle2,
   ClipboardPaste,
+  Cpu,
   FileText,
   Image as ImageIcon,
   PackagePlus,
   Plus,
+  RefreshCcw,
   ScanLine,
   Trash2,
   Upload,
@@ -17,13 +19,16 @@ import { toast } from 'sonner'
 import type {
   AiInvoiceCostChange,
   AiInvoiceDraft,
+  AiModelOption,
   DictionaryNode,
   Product,
   Purchase,
   PurchaseReviewNewProduct,
   Supplier
 } from '@/types'
-import { api, errorMessage } from '@/lib/backend'
+import { useAuth } from '@/contexts/AuthContext'
+import { can } from '@/lib/permissions'
+import { ApiError, api, errorMessage } from '@/lib/backend'
 import { formatCurrency } from '@/lib/format'
 import { dictionaryValues } from '@/lib/dictionaries'
 import { Button } from '@/components/ui/Button'
@@ -35,6 +40,21 @@ type ScanFile = {
   mimeType: string
   dataUrl: string
   isImage: boolean
+}
+
+type AiRuntimeSettings = {
+  model: string
+  fallbackModels: string[]
+  autoFallback: boolean
+  models: AiModelOption[]
+  configured: boolean
+}
+
+type ScanFailure = {
+  code: string
+  message: string
+  retryAfterSeconds?: number
+  attempts: Array<{ model: string; code: string; message: string }>
 }
 
 type NewProductDraft = {
@@ -127,12 +147,25 @@ export function InvoiceScanReviewModal({
   onRefresh: () => void
   onCreated: (purchase: Purchase) => void
 }) {
+  const { role } = useAuth()
+  const canSwitchModel = (role === 'superadmin' || role === 'admin') && can(role, 'useAI')
   const inputRef = useRef<HTMLInputElement>(null)
   const [localSuppliers, setLocalSuppliers] = useState<Supplier[]>(suppliers)
   const [scanFile, setScanFile] = useState<ScanFile | null>(null)
   const [scanning, setScanning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [draft, setDraft] = useState<AiInvoiceDraft | null>(null)
+  const [aiSettings, setAiSettings] = useState<AiRuntimeSettings>({
+    model: '',
+    fallbackModels: [],
+    autoFallback: false,
+    models: [],
+    configured: true
+  })
+  const [modelInput, setModelInput] = useState('')
+  const [modelsRefreshing, setModelsRefreshing] = useState(false)
+  const [modelSaving, setModelSaving] = useState(false)
+  const [scanError, setScanError] = useState<ScanFailure | null>(null)
   const [supplierId, setSupplierId] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10))
@@ -170,6 +203,33 @@ export function InvoiceScanReviewModal({
     setDifferenceConfirmed(false)
     setNewSupplierOpen(false)
     setSupplierForm({ name: '', nit: '', phone: '', category: 'Repuestos' })
+    setScanError(null)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    api.settings
+      .get()
+      .then((settings) => {
+        if (!active) return
+        const ai = settings.ai
+        const model = ai.model ?? ''
+        setAiSettings({
+          model,
+          fallbackModels: ai.fallbackModels ?? [],
+          autoFallback: Boolean(ai.autoFallback),
+          models: ai.modelCatalog ?? [],
+          configured: Boolean(ai.configured)
+        })
+        setModelInput(model)
+      })
+      .catch(() => {
+        // La configuración es informativa; el escaneo sigue disponible si el backend la valida.
+      })
+    return () => {
+      active = false
+    }
   }, [open])
 
   const categoryOptions = useMemo(() => {
@@ -186,6 +246,17 @@ export function InvoiceScanReviewModal({
     const values = dictionaryValues(dictionaries, 'supplier_category')
     return values.length ? values : ['Repuestos', 'Tecnología', 'Servicios']
   }, [dictionaries])
+  const modelOptions = useMemo(() => {
+    const entries = new Map<string, AiModelOption>()
+    if (aiSettings.model) {
+      entries.set(aiSettings.model, { id: aiSettings.model, displayName: aiSettings.model })
+    }
+    for (const option of aiSettings.models) entries.set(option.id, option)
+    for (const fallback of aiSettings.fallbackModels) {
+      if (!entries.has(fallback)) entries.set(fallback, { id: fallback, displayName: fallback })
+    }
+    return [...entries.values()]
+  }, [aiSettings])
 
   const acceptFile = useCallback(
     async (file: File) => {
@@ -215,6 +286,7 @@ export function InvoiceScanReviewModal({
         }
         setDraft(null)
         setLines([])
+        setScanError(null)
       } catch (error) {
         toast.error('No se pudo preparar la factura', { description: errorMessage(error) })
       }
@@ -292,9 +364,46 @@ export function InvoiceScanReviewModal({
     )
   }
 
+  async function refreshModels() {
+    if (!canSwitchModel || modelsRefreshing) return
+    setModelsRefreshing(true)
+    try {
+      const result = await api.ai.listModels()
+      setAiSettings((current) => ({ ...current, models: result.models }))
+      toast.success('Lista de modelos actualizada', {
+        description: `${result.models.length} modelos disponibles para esta clave.`
+      })
+    } catch (failure) {
+      toast.error('No se pudieron cargar los modelos', { description: errorMessage(failure) })
+    } finally {
+      setModelsRefreshing(false)
+    }
+  }
+
+  async function saveModel() {
+    if (!canSwitchModel || modelSaving) return
+    const next = modelInput.trim().replace(/^models\//, '')
+    if (!next) {
+      toast.error('Escribe o selecciona un modelo')
+      return
+    }
+    setModelSaving(true)
+    try {
+      const result = await api.ai.setModel(next)
+      setAiSettings((current) => ({ ...current, model: result.model }))
+      setModelInput(result.model)
+      toast.success('Modelo actualizado', { description: result.model })
+    } catch (failure) {
+      toast.error('No se pudo cambiar el modelo', { description: errorMessage(failure) })
+    } finally {
+      setModelSaving(false)
+    }
+  }
+
   async function scanInvoice() {
     if (!scanFile || scanning) return
     setScanning(true)
+    setScanError(null)
     try {
       const result = await api.purchases.scanInvoice({
         name: scanFile.name,
@@ -302,10 +411,33 @@ export function InvoiceScanReviewModal({
         dataUrl: scanFile.dataUrl
       })
       applyDraft(result)
+      const fallbackNote = result.ai.fallbackUsed
+        ? ` Se usó el respaldo ${result.ai.model}.`
+        : ''
       toast.success('Factura analizada', {
-        description: `${result.lines.length} línea${result.lines.length === 1 ? '' : 's'} detectada${result.lines.length === 1 ? '' : 's'}. Revisa antes de aprobar.`
+        description: `${result.lines.length} línea${result.lines.length === 1 ? '' : 's'} detectada${result.lines.length === 1 ? '' : 's'}. Revisa antes de aprobar.${fallbackNote}`
       })
     } catch (failure) {
+      const apiFailure = failure instanceof ApiError ? failure : null
+      const details = apiFailure?.details
+      const retryAfterSeconds = Number(details?.retryAfterSeconds)
+      const attempts = Array.isArray(details?.attempts)
+        ? details.attempts
+            .filter((attempt: any) => attempt && typeof attempt.model === 'string')
+            .map((attempt: any) => ({
+              model: String(attempt.model),
+              code: String(attempt.code ?? 'AI_ERROR'),
+              message: String(attempt.message ?? '')
+            }))
+        : []
+      setScanError({
+        code: apiFailure?.code ?? 'AI_ERROR',
+        message: errorMessage(failure),
+        ...(Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+          ? { retryAfterSeconds }
+          : {}),
+        attempts
+      })
       toast.error('No se pudo analizar la factura', { description: errorMessage(failure) })
     } finally {
       setScanning(false)
@@ -503,6 +635,89 @@ export function InvoiceScanReviewModal({
     }
   }
 
+  const modelBar = (
+    <div className="rounded-xl border border-line bg-white px-3.5 py-2.5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+            <Cpu className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+              Modelo de IA
+            </p>
+            {canSwitchModel ? (
+              <div className="mt-1 flex items-center gap-1.5">
+                <input
+                  list="invoice-ai-models"
+                  value={modelInput}
+                  onChange={(event) => setModelInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void saveModel()
+                    }
+                  }}
+                  className="field h-8 w-44 font-mono text-[10px]"
+                  aria-label="Modelo de IA para la factura"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <datalist id="invoice-ai-models">
+                  {modelOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.displayName}
+                    </option>
+                  ))}
+                </datalist>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void saveModel()}
+                  loading={modelSaving}
+                >
+                  Cambiar
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-1 truncate text-[10px] font-semibold text-ink">
+                {aiSettings.model || draft?.ai.model || 'Sin modelo'}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[9px] text-slate-400">
+          {!aiSettings.configured ? (
+            <span className="rounded-full bg-warning-50 px-2 py-1 font-semibold text-warning-700">
+              Sin clave configurada
+            </span>
+          ) : null}
+          {aiSettings.autoFallback && aiSettings.fallbackModels.length ? (
+            <span className="rounded-full bg-slate-100 px-2 py-1">
+              Respaldo: {aiSettings.fallbackModels.join(' → ')}
+            </span>
+          ) : null}
+          {draft?.ai.fallbackUsed ? (
+            <span className="rounded-full bg-warning-50 px-2 py-1 font-semibold text-warning-700">
+              Respondió {draft.ai.model}
+            </span>
+          ) : null}
+          {canSwitchModel ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void refreshModels()}
+              loading={modelsRefreshing}
+              leftIcon={<RefreshCcw className="h-3 w-3" />}
+            >
+              Actualizar lista
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+
   const footer = draft ? (
     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
       <Button
@@ -553,8 +768,50 @@ export function InvoiceScanReviewModal({
       size="xl"
       footer={footer}
     >
+      <div className="mb-3">{modelBar}</div>
       {!draft ? (
         <div className="space-y-4">
+          {scanError ? (
+            <div className="rounded-xl border border-danger-200 bg-danger-50/70 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger-600" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold text-danger-800">
+                    No se pudo analizar la factura
+                  </p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-danger-800">
+                    {scanError.message}
+                  </p>
+                  {scanError.retryAfterSeconds ? (
+                    <p className="mt-1 text-[9px] text-danger-700">
+                      Puedes reintentar en aproximadamente {scanError.retryAfterSeconds} s.
+                    </p>
+                  ) : null}
+                  {scanError.attempts.length > 1 ? (
+                    <p className="mt-1 text-[9px] text-danger-700">
+                      Modelos intentados: {scanError.attempts.map((attempt) => attempt.model).join(', ')}.
+                    </p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void scanInvoice()}
+                      disabled={!scanFile}
+                      loading={scanning}
+                    >
+                      Reintentar
+                    </Button>
+                    {canSwitchModel ? (
+                      <span className="text-[9px] text-danger-700">
+                        Cambia el modelo arriba y vuelve a intentar.
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <input
             ref={inputRef}
             type="file"
@@ -621,7 +878,10 @@ export function InvoiceScanReviewModal({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setScanFile(null)}
+                  onClick={() => {
+                    setScanFile(null)
+                    setScanError(null)
+                  }}
                   className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                   aria-label="Quitar archivo"
                 >

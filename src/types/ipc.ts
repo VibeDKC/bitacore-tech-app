@@ -14,6 +14,7 @@ export interface AppInfo {
 export interface RpcFailure {
   code: string
   message: string
+  details?: Record<string, unknown>
 }
 
 export type RpcEnvelope<T> = { ok: true; data: T } | { ok: false; error: RpcFailure }

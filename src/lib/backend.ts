@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import type {
   AiInvoiceDraft,
+  AiModelListResult,
   AiTestResult,
   AppUser,
   AuditEvent,
@@ -53,11 +54,13 @@ declare global {
 
 export class ApiError extends Error {
   code: string
+  details?: Record<string, unknown>
 
-  constructor(message: string, code = 'UNKNOWN') {
+  constructor(message: string, code = 'UNKNOWN', details?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
     this.code = code
+    this.details = details
   }
 }
 
@@ -105,7 +108,9 @@ export async function rpc<T>(command: string, payload: Record<string, unknown> =
   }
   const body = authToken ? { ...payload, __token: authToken } : payload
   const response = await window.bitacoretech.rpc<T>(command, body)
-  if (!response.ok) throw new ApiError(response.error.message, response.error.code)
+  if (!response.ok) {
+    throw new ApiError(response.error.message, response.error.code, response.error.details)
+  }
   return response.data
 }
 
@@ -448,6 +453,12 @@ export const api = {
   ai: {
     testConnection(input: { apiKey?: string; model?: string } = {}) {
       return rpc<AiTestResult>('ai.testConnection', input)
+    },
+    listModels() {
+      return rpc<AiModelListResult>('ai.listModels')
+    },
+    setModel(model: string) {
+      return rpc<{ model: string }>('ai.setModel', { model })
     }
   },
   suppliers: {

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useId, useState } from 'react'
 import {
   AlertTriangle,
   BookOpen,
@@ -35,7 +35,7 @@ import {
   X
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { AppUser, BackupRecord, LegalConfig, Role } from '@/types'
+import type { AiModelOption, AppUser, BackupRecord, LegalConfig, Role } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can, capabilityLabels, allCapabilities, permissionMatrix, roleCan, roleDescriptions, roleLabels, rootOnlyCapabilities } from '@/lib/permissions'
 import { defaultLegalConfig } from '@/lib/legalConfig'
@@ -63,7 +63,7 @@ const tabs: Array<{ value: SettingsTab; label: string; description: string; icon
   { value: 'impresion', label: 'Impresión', description: 'Formatos y comprobantes', icon: Printer },
   { value: 'mensajes', label: 'Mensajes', description: 'WhatsApp y reportes', icon: MessageCircle },
   { value: 'respaldos', label: 'Respaldos', description: 'Backup y restauración', icon: DatabaseBackup },
-  { value: 'ia', label: 'IA y API', description: 'Claves y asistentes', icon: Sparkles },
+  { value: 'ia', label: 'IA y API', description: 'Facturas y modelos', icon: Sparkles },
   { value: 'seguridad', label: 'Seguridad', description: 'Acceso y protección', icon: ShieldCheck }
 ]
 
@@ -103,6 +103,8 @@ interface AiDraft {
   anomalies: boolean
   provider: string
   model: string
+  fallbackModels: string[]
+  autoFallback: boolean
   apiKey: string
 }
 
@@ -223,11 +225,15 @@ export function SettingsPage() {
     anomalies: false,
     provider: 'gemini',
     model: 'gemini-3.5-flash',
+    fallbackModels: [],
+    autoFallback: false,
     apiKey: ''
   })
   const [messagesDraft, setMessagesDraft] = useState<MessageTemplates>(DEFAULT_MESSAGES)
   const [securityDraft, setSecurityDraft] = useState<SecurityDraft>({ sessionHours: 12 })
   const [aiTesting, setAiTesting] = useState(false)
+  const [aiModelsLoading, setAiModelsLoading] = useState(false)
+  const [adminModelSaving, setAdminModelSaving] = useState(false)
   const [rolePermissionsDraft, setRolePermissionsDraft] = useState<Record<string, boolean>>({})
 
   const canManageStaff = can(role, 'manageStaff')
@@ -240,9 +246,12 @@ export function SettingsPage() {
   const canBusiness = can(role, 'configureBusiness')
   const canPermissions = can(role, 'managePermissions')
   const canAI = can(role, 'configureAI')
+  const canSwitchModel =
+    canAI || ((role === 'admin' || role === 'superadmin') && can(role, 'useAI'))
   const isSuperadmin = role === 'superadmin'
 
   const settings = data?.settings ?? null
+  const aiModelOptions = settings?.ai.modelCatalog ?? []
   const staff = data?.users ?? []
   const backups = data?.backups ?? []
 
@@ -274,6 +283,10 @@ export function SettingsPage() {
       summary: current.ai.summary,
       anomalies: current.ai.anomalies,
       model: current.ai.model,
+      fallbackModels: Array.isArray(current.ai.fallbackModels)
+        ? current.ai.fallbackModels
+        : [],
+      autoFallback: Boolean(current.ai.autoFallback),
       provider: current.ai.provider ?? 'gemini',
       apiKey: ''
     })
@@ -387,6 +400,10 @@ export function SettingsPage() {
 
   async function saveAi() {
     if (!canAI || saving) return
+    if (!aiDraft.model.trim()) {
+      toast.error('Selecciona un modelo de IA')
+      return
+    }
     setSaving('ia')
     try {
       const payload: Record<string, unknown> = {
@@ -395,7 +412,9 @@ export function SettingsPage() {
         summary: aiDraft.summary,
         anomalies: aiDraft.anomalies,
         provider: aiDraft.provider,
-        model: aiDraft.model.trim() || 'Sin configurar'
+        model: aiDraft.model.trim(),
+        fallbackModels: aiDraft.fallbackModels.map((model) => model.trim()).filter(Boolean),
+        autoFallback: aiDraft.autoFallback
       }
       if (aiDraft.apiKey.trim()) payload.apiKey = aiDraft.apiKey.trim()
       const updated = await api.settings.updateSection('ai', payload)
@@ -407,6 +426,8 @@ export function SettingsPage() {
         anomalies: updated.ai.anomalies,
         provider: updated.ai.provider ?? 'gemini',
         model: updated.ai.model,
+        fallbackModels: updated.ai.fallbackModels ?? [],
+        autoFallback: Boolean(updated.ai.autoFallback),
         apiKey: ''
       })
       toast.success('Configuración de IA guardada', {
@@ -435,6 +456,75 @@ export function SettingsPage() {
     } finally {
       setAiTesting(false)
     }
+  }
+
+  async function loadAiModels() {
+    if (!canSwitchModel || aiModelsLoading) return
+    setAiModelsLoading(true)
+    try {
+      const result = await api.ai.listModels()
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              settings: {
+                ...current.settings,
+                ai: {
+                  ...current.settings.ai,
+                  modelCatalog: result.models,
+                  catalogUpdatedAt: result.fetchedAt
+                }
+              }
+            }
+          : current
+      )
+      toast.success('Modelos actualizados', {
+        description: `${result.models.length} modelos disponibles para esta clave.`
+      })
+    } catch (failure) {
+      toast.error('No se pudieron actualizar los modelos', { description: errorMessage(failure) })
+    } finally {
+      setAiModelsLoading(false)
+    }
+  }
+
+  async function saveAdminModel() {
+    if (!canSwitchModel || adminModelSaving) return
+    const model = aiDraft.model.trim()
+    if (!model) {
+      toast.error('Selecciona un modelo de IA')
+      return
+    }
+    setAdminModelSaving(true)
+    try {
+      const result = await api.ai.setModel(model)
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              settings: {
+                ...current.settings,
+                ai: { ...current.settings.ai, model: result.model }
+              }
+            }
+          : current
+      )
+      setAiDraft((current) => ({ ...current, model: result.model }))
+      toast.success('Modelo de IA actualizado', { description: result.model })
+    } catch (failure) {
+      toast.error('No se pudo cambiar el modelo', { description: errorMessage(failure) })
+    } finally {
+      setAdminModelSaving(false)
+    }
+  }
+
+  function updateFallbackModel(index: number, value: string) {
+    setAiDraft((current) => {
+      const next = [...current.fallbackModels]
+      while (next.length < 2) next.push('')
+      next[index] = value
+      return { ...current, fallbackModels: next }
+    })
   }
 
   async function saveRolePermissions() {
@@ -1943,93 +2033,214 @@ export function SettingsPage() {
 
           {tab === 'ia' ? (
             <>
-              <div className="card p-5 lg:p-6">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-display text-[16px] font-bold text-ink">Escaneo de facturas de compra</h2>
-                    <p className="mt-0.5 text-[11px] text-slate-400">Clave de Gemini, modelo y prueba de conexión</p>
-                  </div>
-                  <Badge variant={canAI ? 'brand' : 'neutral'}>
-                    <Sparkles className="h-3 w-3" />
-                    {canAI ? (settings.ai.configured ? 'Configurada' : 'Sin configurar') : 'Solo propietario'}
-                  </Badge>
-                </div>
-
-                <div className={cn('mt-4 divide-y divide-line rounded-xl border border-line', !canAI && 'pointer-events-none opacity-60')}>
-                  <div className="flex items-center justify-between gap-3 px-4 py-3">
+              {canAI ? (
+                <div className="card p-5 lg:p-6">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[11px] font-semibold text-ink">Activar escaneo de facturas</p>
-                      <p className="mt-0.5 text-[10px] text-slate-400">Permite cargar o pegar una factura de compra y analizarla con Gemini.</p>
+                      <h2 className="font-display text-[16px] font-bold text-ink">Escaneo de facturas de compra</h2>
+                      <p className="mt-0.5 text-[11px] text-slate-400">Clave de Gemini, modelo principal y respaldo automático</p>
                     </div>
-                    <Switch active={aiDraft.enabled} onClick={() => setAiDraft({ ...aiDraft, enabled: !aiDraft.enabled })} label="Activar escaneo de facturas" />
+                    <Badge variant="brand">
+                      <Sparkles className="h-3 w-3" />
+                      {settings.ai.configured ? 'Configurada' : 'Sin configurar'}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 divide-y divide-line rounded-xl border border-line">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-ink">Activar escaneo de facturas</p>
+                        <p className="mt-0.5 text-[10px] text-slate-400">Permite cargar o pegar una factura de compra y analizarla con Gemini.</p>
+                      </div>
+                      <Switch active={aiDraft.enabled} onClick={() => setAiDraft({ ...aiDraft, enabled: !aiDraft.enabled })} label="Activar escaneo de facturas" />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="block sm:col-span-2">
+                      <span className="field-label">Modelo principal</span>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <div className="min-w-0 flex-1">
+                          <ModelField
+                            value={aiDraft.model}
+                            onChange={(value) => setAiDraft({ ...aiDraft, model: value })}
+                            options={aiModelOptions}
+                            placeholder="gemini-3.5-flash"
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void loadAiModels()}
+                          loading={aiModelsLoading}
+                          leftIcon={<RefreshCcw className="h-3.5 w-3.5" />}
+                        >
+                          Actualizar modelos
+                        </Button>
+                      </div>
+                      <span className="mt-1 block text-[9px] text-slate-400">
+                        {settings.ai.catalogUpdatedAt
+                          ? `Catálogo actualizado ${formatDateTime(settings.ai.catalogUpdatedAt)}.`
+                          : 'Actualiza el catálogo para ver los modelos disponibles con tu clave.'}
+                      </span>
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="field-label">Clave de API</span>
+                      <div className="relative">
+                        <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type={showKey ? 'text' : 'password'}
+                          value={aiDraft.apiKey}
+                          onChange={(event) => setAiDraft({ ...aiDraft, apiKey: event.target.value })}
+                          disabled={!canAI}
+                          placeholder={
+                            settings.ai.configured && settings.ai.keyFingerprint
+                              ? `Configurada · huella ${settings.ai.keyFingerprint}`
+                              : 'Pega la clave del proveedor'
+                          }
+                          className="field pl-9 pr-11 font-mono text-[11px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowKey((value) => !value)}
+                          disabled={!canAI}
+                          className="focus-ring absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100"
+                          aria-label={showKey ? 'Ocultar clave' : 'Mostrar clave'}
+                        >
+                          {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                      <span className="mt-1.5 block text-[9px] text-slate-400">
+                        La clave se cifra en este equipo y nunca se devuelve a la interfaz. Si restauras un respaldo en otro equipo, vuelve a ingresarla.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-line">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div>
+                        <p className="text-[11px] font-semibold text-ink">Respaldo automático</p>
+                        <p className="mt-0.5 text-[10px] text-slate-400">Si el modelo principal se queda sin cuota, se intentará con el respaldo.</p>
+                      </div>
+                      <Switch
+                        active={aiDraft.autoFallback}
+                        onClick={() => setAiDraft({ ...aiDraft, autoFallback: !aiDraft.autoFallback })}
+                        label="Respaldo automático"
+                      />
+                    </div>
+                    {aiDraft.autoFallback ? (
+                      <div className="grid gap-3 border-t border-line px-4 py-3 sm:grid-cols-2">
+                        {[0, 1].map((index) => (
+                          <label key={index} className="block">
+                            <span className="field-label">
+                              {index === 0 ? 'Modelo de respaldo' : 'Segundo respaldo (opcional)'}
+                            </span>
+                            <ModelField
+                              value={aiDraft.fallbackModels[index] ?? ''}
+                              onChange={(value) => updateFallbackModel(index, value)}
+                              options={aiModelOptions}
+                              placeholder={index === 0 ? 'gemini-3.5-flash-lite' : 'Opcional'}
+                            />
+                          </label>
+                        ))}
+                        <p className="text-[9px] leading-relaxed text-slate-400 sm:col-span-2">
+                          Se intentará una vez por modelo. Si no indicas ningún respaldo, el cambio automático quedará desactivado al guardar. La cuota puede ser independiente por modelo o compartida por proyecto.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-line bg-slate-50/70 px-3.5 py-2.5">
+                    <p className="text-[10px] leading-relaxed text-slate-500">
+                      Diagnóstico técnico, resúmenes y anomalías de caja quedan para una fase posterior. Esta versión solo escanea facturas de compra.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button
+                      variant="secondary"
+                      disabled={!canAI || aiTesting || (!settings?.ai.configured && !aiDraft.apiKey.trim())}
+                      onClick={() => void testAiConnection()}
+                      loading={aiTesting}
+                      leftIcon={<CheckCircle2 className="h-4 w-4" />}
+                    >
+                      Probar conexión
+                    </Button>
+                    <Button disabled={!canAI} onClick={() => void saveAi()} loading={saving === 'ia'} leftIcon={<Save className="h-4 w-4" />}>
+                      Guardar
+                    </Button>
                   </div>
                 </div>
-
-                <div className={cn('mt-4 grid gap-3 sm:grid-cols-2', !canAI && 'pointer-events-none opacity-60')}>
-                  <label className="block sm:col-span-2">
-                    <span className="field-label">Modelo</span>
-                    <input
-                      value={aiDraft.model}
-                      onChange={(event) => setAiDraft({ ...aiDraft, model: event.target.value })}
-                      disabled={!canAI}
-                      placeholder="gemini-3.5-flash"
-                      className="field font-mono text-[11px]"
-                    />
-                    <span className="mt-1 block text-[9px] text-slate-400">Identificador del modelo configurado con el proveedor.</span>
-                  </label>
-                  <label className="block sm:col-span-2">
-                    <span className="field-label">Clave de API</span>
-                    <div className="relative">
-                      <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type={showKey ? 'text' : 'password'}
-                        value={aiDraft.apiKey}
-                        onChange={(event) => setAiDraft({ ...aiDraft, apiKey: event.target.value })}
-                        disabled={!canAI}
-                        placeholder={
-                          settings.ai.configured && settings.ai.keyFingerprint
-                            ? `Configurada · huella ${settings.ai.keyFingerprint}`
-                            : 'Pega la clave del proveedor'
-                        }
-                        className="field pl-9 pr-11 font-mono text-[11px]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowKey((value) => !value)}
-                        disabled={!canAI}
-                        className="focus-ring absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100"
-                        aria-label={showKey ? 'Ocultar clave' : 'Mostrar clave'}
-                      >
-                        {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                      </button>
+              ) : canSwitchModel ? (
+                <div className="card p-5 lg:p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-display text-[16px] font-bold text-ink">Modelo de IA para facturas</h2>
+                      <p className="mt-0.5 text-[11px] text-slate-400">Puedes cambiar el modelo activo sin acceso a la clave.</p>
                     </div>
-                    <span className="mt-1.5 block text-[9px] text-slate-400">
-                      La clave se cifra en este equipo y nunca se devuelve a la interfaz. Si restauras un respaldo en otro equipo, vuelve a ingresarla.
+                    <Badge variant="brand">
+                      <Sparkles className="h-3 w-3" />
+                      {settings.ai.configured ? 'Configurada' : 'Sin configurar'}
+                    </Badge>
+                  </div>
+
+                  <label className="mt-4 block">
+                    <span className="field-label">Modelo principal</span>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="min-w-0 flex-1">
+                        <ModelField
+                          value={aiDraft.model}
+                          onChange={(value) => setAiDraft({ ...aiDraft, model: value })}
+                          options={aiModelOptions}
+                          placeholder="gemini-3.5-flash"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void loadAiModels()}
+                        loading={aiModelsLoading}
+                        leftIcon={<RefreshCcw className="h-3.5 w-3.5" />}
+                      >
+                        Actualizar modelos
+                      </Button>
+                    </div>
+                    <span className="mt-1 block text-[9px] text-slate-400">
+                      {settings.ai.catalogUpdatedAt
+                        ? `Catálogo actualizado ${formatDateTime(settings.ai.catalogUpdatedAt)}.`
+                        : 'Actualiza el catálogo para ver los modelos disponibles con la clave configurada.'}
                     </span>
                   </label>
-                </div>
 
-                <div className="mt-4 rounded-xl border border-line bg-slate-50/70 px-3.5 py-2.5">
-                  <p className="text-[10px] leading-relaxed text-slate-500">
-                    Diagnóstico técnico, resúmenes y anomalías de caja quedan para una fase posterior. Esta versión solo escanea facturas de compra.
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      onClick={() => void saveAdminModel()}
+                      loading={adminModelSaving}
+                      leftIcon={<Save className="h-4 w-4" />}
+                    >
+                      Guardar modelo
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-line bg-slate-50/70 px-3.5 py-2.5">
+                    <p className="text-[10px] leading-relaxed text-slate-500">
+                      Respaldo automático:{' '}
+                      <span className="font-semibold text-ink">
+                        {settings.ai.autoFallback && settings.ai.fallbackModels?.length
+                          ? settings.ai.fallbackModels.join(', ')
+                          : 'Sin configurar'}
+                      </span>
+                      . La clave, el catálogo de respaldo y la prueba de conexión los administra el propietario.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="card p-5 lg:p-6">
+                  <p className="text-[11px] leading-relaxed text-slate-500">
+                    La configuración de IA está reservada al propietario y a los administradores con permiso de uso de IA.
                   </p>
                 </div>
-
-                <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                  <Button
-                    variant="secondary"
-                    disabled={!canAI || aiTesting || (!settings?.ai.configured && !aiDraft.apiKey.trim())}
-                    onClick={() => void testAiConnection()}
-                    loading={aiTesting}
-                    leftIcon={<CheckCircle2 className="h-4 w-4" />}
-                  >
-                    Probar conexión
-                  </Button>
-                  <Button disabled={!canAI} onClick={() => void saveAi()} loading={saving === 'ia'} leftIcon={<Save className="h-4 w-4" />}>
-                    Guardar
-                  </Button>
-                </div>
-              </div>
+              )}
 
               <div className="rounded-2xl border border-warning-100 bg-warning-50/70 p-4">
                 <div className="flex items-start gap-2.5">
@@ -2601,5 +2812,39 @@ export function SettingsPage() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+function ModelField({
+  value,
+  onChange,
+  options,
+  placeholder
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: AiModelOption[]
+  placeholder?: string
+}) {
+  const listId = useId()
+  return (
+    <>
+      <input
+        list={listId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="field font-mono text-[11px]"
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.displayName}
+          </option>
+        ))}
+      </datalist>
+    </>
   )
 }

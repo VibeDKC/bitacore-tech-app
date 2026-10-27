@@ -40,23 +40,102 @@ function modelPath(model: string) {
   return trimmed.startsWith('models/') ? trimmed : `models/${trimmed}`
 }
 
-function geminiError(status: number, detail: string) {
+function retrySecondsFromDetails(details: unknown): number | undefined {
+  if (!Array.isArray(details)) return undefined
+  for (const item of details) {
+    if (!item || typeof item !== 'object') continue
+    const delay = (item as Record<string, unknown>).retryDelay
+    if (typeof delay !== 'string') continue
+    const match = delay.trim().match(/^(\d+(?:\.\d+)?)s$/)
+    if (match) return Math.max(1, Math.ceil(Number(match[1])))
+  }
+  return undefined
+}
+
+function quotaFromDetails(details: unknown) {
+  if (!Array.isArray(details)) return { scope: 'unknown' as const }
+  for (const item of details) {
+    if (!item || typeof item !== 'object') continue
+    const violations = (item as Record<string, unknown>).violations
+    if (!Array.isArray(violations) || !violations.length) continue
+    const violation = violations[0] as Record<string, unknown>
+    const quotaId = typeof violation.quotaId === 'string' ? violation.quotaId : ''
+    const quotaMetric = typeof violation.quotaMetric === 'string' ? violation.quotaMetric : ''
+    const scope = /per.?day|daily/i.test(quotaId)
+      ? ('day' as const)
+      : /per.?minute|rpm/i.test(quotaId)
+        ? ('minute' as const)
+        : ('unknown' as const)
+    return { quotaId, quotaMetric, scope }
+  }
+  return { scope: 'unknown' as const }
+}
+
+function geminiError(status: number, detail: string, model = '', errorDetails?: unknown) {
+  const retryAfterSeconds = retrySecondsFromDetails(errorDetails)
+  const quota = quotaFromDetails(errorDetails)
+  const modelLabel = model ? ` del modelo ${model}` : ''
+  const waitText = retryAfterSeconds
+    ? ` Reintenta en ${retryAfterSeconds} s.`
+    : ' Espera un momento o cambia de modelo.'
+  const rpcDetails: Record<string, unknown> = {
+    ...(model ? { model } : {}),
+    ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+    ...(quota.quotaId ? { quotaId: quota.quotaId } : {}),
+    ...(quota.quotaMetric ? { quotaMetric: quota.quotaMetric } : {}),
+    ...(quota.scope !== 'unknown' ? { scope: quota.scope } : {})
+  }
   if (status === 400) {
-    return new RpcError(`Gemini rechazó la solicitud: ${detail}`, 'AI_BAD_REQUEST')
+    return new RpcError(`Gemini rechazó la solicitud: ${detail}`, 'AI_BAD_REQUEST', rpcDetails)
   }
   if (status === 401 || status === 403) {
-    return new RpcError('La clave de Gemini no es válida o no tiene permisos.', 'AI_AUTH')
+    return new RpcError('La clave de Gemini no es válida o no tiene permisos.', 'AI_AUTH', rpcDetails)
   }
   if (status === 404) {
-    return new RpcError('El modelo configurado no existe o no está disponible para esta clave.', 'AI_MODEL_NOT_FOUND')
+    return new RpcError(
+      `El modelo${modelLabel || ' configurado'} no existe o no está disponible para esta clave.`,
+      'AI_MODEL_NOT_FOUND',
+      rpcDetails
+    )
   }
   if (status === 429) {
-    return new RpcError('Se agotó la cuota de Gemini. Revisa el plan o espera unos minutos.', 'AI_QUOTA')
+    if (quota.scope === 'day') {
+      return new RpcError(
+        `Se agotó la cuota diaria${modelLabel}. Cambia de modelo o espera al restablecimiento.`,
+        'AI_QUOTA',
+        rpcDetails
+      )
+    }
+    if (quota.scope === 'minute') {
+      return new RpcError(
+        `Se alcanzó el límite por minuto${modelLabel}.${waitText}`,
+        'AI_QUOTA',
+        rpcDetails
+      )
+    }
+    return new RpcError(`Se agotó la cuota${modelLabel}.${waitText}`, 'AI_QUOTA', rpcDetails)
   }
   if (status >= 500) {
-    return new RpcError('Gemini no está disponible en este momento. Intenta de nuevo.', 'AI_UNAVAILABLE')
+    return new RpcError(
+      `Gemini no está disponible en este momento${modelLabel}. Intenta de nuevo.`,
+      'AI_UNAVAILABLE',
+      rpcDetails
+    )
   }
-  return new RpcError(`Gemini respondió con error ${status}: ${detail}`, 'AI_ERROR')
+  return new RpcError(`Gemini respondió con error ${status}: ${detail}`, 'AI_ERROR', rpcDetails)
+}
+
+export interface GeminiModelOption {
+  id: string
+  displayName: string
+  description?: string
+  inputTokenLimit?: number
+  outputTokenLimit?: number
+}
+
+export interface GeminiModelList {
+  models: GeminiModelOption[]
+  fetchedAt: string
 }
 
 async function callGemini({
@@ -95,10 +174,12 @@ async function callGemini({
         parsed?.message ??
         text.slice(0, 300) ??
         `HTTP ${response.status}`
-      throw geminiError(response.status, String(detail))
+      throw geminiError(response.status, String(detail), model, parsed?.error?.details)
     }
     if (!parsed) {
-      throw new RpcError('Gemini devolvió una respuesta vacía o ilegible.', 'AI_INVALID_RESPONSE')
+      throw new RpcError('Gemini devolvió una respuesta vacía o ilegible.', 'AI_INVALID_RESPONSE', {
+        model
+      })
     }
     const candidate = parsed?.candidates?.[0]
     const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []
@@ -112,18 +193,22 @@ async function callGemini({
         block
           ? `Gemini bloqueó la respuesta (${block}).`
           : 'Gemini no devolvió contenido para analizar.',
-        'AI_EMPTY_RESPONSE'
+        'AI_EMPTY_RESPONSE',
+        { model }
       )
     }
     return output
   } catch (error) {
     if (error instanceof RpcError) throw error
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new RpcError('Gemini tardó demasiado en responder. Intenta de nuevo.', 'AI_TIMEOUT')
+      throw new RpcError('Gemini tardó demasiado en responder. Intenta de nuevo.', 'AI_TIMEOUT', {
+        model
+      })
     }
     throw new RpcError(
       `No se pudo conectar con Gemini: ${error instanceof Error ? error.message : String(error)}`,
-      'AI_NETWORK'
+      'AI_NETWORK',
+      { model }
     )
   } finally {
     clearTimeout(timeout)
@@ -155,6 +240,85 @@ export async function testGeminiConnection({
     model,
     latencyMs: Date.now() - started,
     message: output.slice(0, 120)
+  }
+}
+
+export async function listGeminiModels({ apiKey }: { apiKey: string }): Promise<GeminiModelList> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30000)
+  try {
+    let pageToken = ''
+    const collected = new Map<string, GeminiModelOption>()
+    for (let page = 0; page < 5; page += 1) {
+      const url = new URL(`${baseUrl()}/v1beta/models`)
+      url.searchParams.set('pageSize', '1000')
+      if (pageToken) url.searchParams.set('pageToken', pageToken)
+      const response = await fetch(url.toString(), {
+        headers: { 'x-goog-api-key': apiKey },
+        signal: controller.signal
+      })
+      const text = await response.text()
+      let parsed: any = null
+      try {
+        parsed = text ? JSON.parse(text) : null
+      } catch {
+        parsed = null
+      }
+      if (!response.ok) {
+        const detail =
+          parsed?.error?.message ??
+          parsed?.message ??
+          text.slice(0, 300) ??
+          `HTTP ${response.status}`
+        throw geminiError(response.status, String(detail), '', parsed?.error?.details)
+      }
+      if (!parsed) {
+        throw new RpcError(
+          'Gemini devolvió un catálogo de modelos vacío o ilegible.',
+          'AI_INVALID_RESPONSE'
+        )
+      }
+      const entries = Array.isArray(parsed.models) ? parsed.models : []
+      for (const entry of entries) {
+        const id = String(entry?.name ?? '').replace(/^models\//, '').trim()
+        if (!id) continue
+        const methods = Array.isArray(entry?.supportedGenerationMethods)
+          ? entry.supportedGenerationMethods
+          : []
+        if (!methods.includes('generateContent')) continue
+        const displayName = String(entry?.displayName ?? id).trim().slice(0, 120)
+        const inputTokenLimit = Number(entry?.inputTokenLimit)
+        const outputTokenLimit = Number(entry?.outputTokenLimit)
+        collected.set(id, {
+          id,
+          displayName: displayName || id,
+          ...(typeof entry?.description === 'string'
+            ? { description: entry.description.slice(0, 300) }
+            : {}),
+          ...(Number.isFinite(inputTokenLimit) && inputTokenLimit > 0 ? { inputTokenLimit } : {}),
+          ...(Number.isFinite(outputTokenLimit) && outputTokenLimit > 0 ? { outputTokenLimit } : {})
+        })
+      }
+      pageToken = typeof parsed.nextPageToken === 'string' ? parsed.nextPageToken : ''
+      if (!pageToken) break
+    }
+    return {
+      models: [...collected.values()].sort((a, b) =>
+        a.displayName.localeCompare(b.displayName, 'es')
+      ),
+      fetchedAt: new Date().toISOString()
+    }
+  } catch (error) {
+    if (error instanceof RpcError) throw error
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new RpcError('Gemini tardó demasiado en devolver el catálogo de modelos.', 'AI_TIMEOUT')
+    }
+    throw new RpcError(
+      `No se pudo consultar el catálogo de Gemini: ${error instanceof Error ? error.message : String(error)}`,
+      'AI_NETWORK'
+    )
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

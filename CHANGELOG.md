@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.10.1 — 2026-10-27
+
+### Cuotas y modelos de IA
+- Catálogo de modelos de Gemini obtenido con la clave configurada.
+- Selector de modelo principal con opción de identificador personalizado.
+- Cambio rápido de modelo desde la ventana de escaneo para propietario y administradores.
+- Hasta dos modelos de respaldo y cambio automático opcional.
+- Reintento automático ante cuota agotada, modelo inexistente, timeout o servicio no disponible.
+- Enfriamiento temporal por modelo agotado para evitar reintentos innecesarios.
+- Mensajes 429 con tipo de límite y tiempo de espera.
+- Reintento sin perder la factura cargada.
+- Metadatos de modelo solicitado, modelo usado, intentos y respaldo.
+- La clave y la configuración del respaldo siguen reservadas al propietario.
+- Los técnicos no pueden cambiar ni listar modelos.
+- Sin migración de base de datos: solo cambia la configuración de IA.
+
+### Calidad
+- Aceptación 1.10.1: 15/15.
+- Smoke empaquetado 1.10.1: 15/15.
+- Regresión: 1.10.0 7/7, 1.9.0 9/9, 1.8.0 13/13, 1.7.0 11/11, 1.6.1 12/12, 1.6.0 14/14, 1.5.0 12/12, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Pruebas con Gemini simulado, sin consumir API real.
+- Instalador `BitacoreTech-1.10.1-x64.exe`.
+
 ## 1.10.0 — 2026-10-26
 
 ### IA de facturas de compra

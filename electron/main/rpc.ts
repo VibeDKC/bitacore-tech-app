@@ -52,7 +52,7 @@ import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './s
 import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import { runDemoSeed, type SeedOwner } from './seed'
 import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
-import { scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
+import { listGeminiModels, scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
 import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
@@ -756,11 +756,42 @@ function settingsData(db: Database) {
   delete aiConfig.apiKey
   delete aiConfig.configured
   delete aiConfig.keyFingerprint
+  const primaryModel =
+    typeof aiConfig.model === 'string' ? aiConfig.model.replace(/^models\//, '').trim() : ''
+  const fallbackModels = Array.isArray(aiConfig.fallbackModels)
+    ? aiConfig.fallbackModels
+        .filter((model: unknown): model is string => typeof model === 'string' && Boolean(model.trim()))
+        .map((model: string) => model.replace(/^models\//, '').trim())
+        .filter((model: string) => model !== primaryModel)
+        .slice(0, 3)
+    : []
+  const modelCatalog = Array.isArray(aiConfig.modelCatalog)
+    ? aiConfig.modelCatalog
+        .filter((model: any) => model && typeof model.id === 'string')
+        .map((model: any) => ({
+          id: String(model.id).replace(/^models\//, '').slice(0, 120),
+          displayName: String(model.displayName ?? model.id).slice(0, 120),
+          ...(typeof model.description === 'string'
+            ? { description: model.description.slice(0, 300) }
+            : {}),
+          ...(Number.isFinite(Number(model.inputTokenLimit)) && Number(model.inputTokenLimit) > 0
+            ? { inputTokenLimit: Number(model.inputTokenLimit) }
+            : {}),
+          ...(Number.isFinite(Number(model.outputTokenLimit)) &&
+          Number(model.outputTokenLimit) > 0
+            ? { outputTokenLimit: Number(model.outputTokenLimit) }
+            : {})
+        }))
+    : []
   return {
     legal: getLegal(db),
     print: db.getSetting('print_config', DEFAULT_SETTINGS.print),
     ai: {
       ...aiConfig,
+      fallbackModels,
+      autoFallback: Boolean(aiConfig.autoFallback),
+      modelCatalog,
+      catalogUpdatedAt: aiConfig.catalogUpdatedAt ?? null,
       configured: Boolean(aiKey?.encrypted),
       keyFingerprint: aiKey?.fingerprint ?? undefined
     },
@@ -965,6 +996,64 @@ function normalizeAiNit(value: unknown) {
   return digits || textValue.toLowerCase()
 }
 
+function normalizeAiModel(value: unknown, field = 'Modelo de IA') {
+  const raw = text(value, field, 1, 120)
+  const id = raw.replace(/^models\//, '').trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) {
+    fail('El identificador del modelo no es válido. Usa el nombre sin el prefijo "models/".')
+  }
+  return id
+}
+
+function requireAiModelManager(session: Session) {
+  requireModuleAccess(session, 'purchases')
+  requireCap(session, 'useAI')
+  if (session.role !== 'superadmin' && session.role !== 'admin') {
+    fail('Solo el propietario y los administradores pueden cambiar el modelo de IA.', 'FORBIDDEN')
+  }
+}
+
+function aiModelChain(config: any) {
+  const primary =
+    typeof config?.model === 'string'
+      ? config.model.replace(/^models\//, '').trim()
+      : ''
+  const fallbacks = Array.isArray(config?.fallbackModels)
+    ? config.fallbackModels
+        .filter((model: unknown): model is string => typeof model === 'string')
+        .map((model: string) => model.replace(/^models\//, '').trim())
+        .filter(Boolean)
+    : []
+  return [...new Set([primary, ...fallbacks].filter(Boolean))]
+}
+
+const AI_RETRYABLE_CODES = new Set([
+  'AI_QUOTA',
+  'AI_MODEL_NOT_FOUND',
+  'AI_UNAVAILABLE',
+  'AI_TIMEOUT'
+])
+
+const aiModelCooldowns = new Map<string, number>()
+
+function aiModelCooldownRemaining(model: string) {
+  const until = aiModelCooldowns.get(model) ?? 0
+  if (until <= Date.now()) {
+    aiModelCooldowns.delete(model)
+    return 0
+  }
+  return Math.ceil((until - Date.now()) / 1000)
+}
+
+function cooldownAiModel(model: string, seconds?: number) {
+  const duration = Math.max(30, Math.min(seconds ?? 60, 3600))
+  aiModelCooldowns.set(model, Date.now() + duration * 1000)
+}
+
+function clearAiModelCooldown(model: string) {
+  aiModelCooldowns.delete(model)
+}
+
 function aiNumber(value: unknown, fallback = 0) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
@@ -994,7 +1083,17 @@ function getStoredAiKey(db: Database) {
 function buildInvoiceDraft(
   db: Database,
   extraction: InvoiceExtraction,
-  source: { name: string; mimeType: string; size: number }
+  source: { name: string; mimeType: string; size: number },
+  aiMeta: {
+    model: string
+    requestedModel: string
+    attempts: Array<{
+      model: string
+      code: string
+      message: string
+      retryAfterSeconds?: number
+    }>
+  }
 ) {
   const suppliers = db.all<any>('SELECT id, name, nit, is_foreign_nit FROM suppliers WHERE active = 1')
   const supplierName = String(extraction.supplier?.name ?? '').trim().slice(0, 160)
@@ -1022,6 +1121,11 @@ function buildInvoiceDraft(
   const warnings = (Array.isArray(extraction.warnings) ? extraction.warnings : [])
     .map((item) => String(item).slice(0, 300))
     .filter(Boolean)
+  if (aiMeta.model !== aiMeta.requestedModel) {
+    warnings.push(
+      `Se usó el modelo de respaldo ${aiMeta.model} porque ${aiMeta.requestedModel} no estaba disponible.`
+    )
+  }
   const rawLines = Array.isArray(extraction.lines) ? extraction.lines : []
   const lines: Array<any> = []
   let subtotalCents = 0
@@ -1154,7 +1258,10 @@ function buildInvoiceDraft(
     warnings: [...new Set(warnings)],
     ai: {
       provider: 'gemini',
-      model: String(db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai).model ?? ''),
+      model: aiMeta.model,
+      requestedModel: aiMeta.requestedModel,
+      fallbackUsed: aiMeta.model !== aiMeta.requestedModel,
+      attempts: aiMeta.attempts,
       extractedAt: new Date().toISOString(),
       confidence: aiConfidence,
       extractionHash: sha256(JSON.stringify(extraction)),
@@ -4054,6 +4161,54 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return supplierDto(db, db.get<any>('SELECT * FROM suppliers WHERE id = ?', id))
     }
 
+    case 'ai.listModels': {
+      requireAiModelManager(session)
+      const config = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
+      if ((config.provider ?? 'gemini') !== 'gemini') fail('Solo Gemini está disponible en esta versión.')
+      const apiKey = getStoredAiKey(db)
+      if (!apiKey) fail('Configura la clave de Gemini antes de consultar los modelos.')
+      const result = await listGeminiModels({ apiKey })
+      if (!result.models.length) {
+        fail('Gemini no devolvió modelos compatibles con el análisis de facturas.')
+      }
+      db.setSetting('ai_config', {
+        ...config,
+        modelCatalog: result.models,
+        catalogUpdatedAt: result.fetchedAt
+      })
+      audit(
+        db,
+        session,
+        'Catálogo de modelos IA actualizado',
+        'Configuración',
+        `${result.models.length} modelos compatibles disponibles.`
+      )
+      return result
+    }
+
+    case 'ai.setModel': {
+      requireAiModelManager(session)
+      const config = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
+      const model = normalizeAiModel(payload?.model)
+      if (model !== config.model) {
+        const fallbackModels = Array.isArray(config.fallbackModels)
+          ? config.fallbackModels
+              .filter((item: unknown): item is string => typeof item === 'string')
+              .map((item: string) => item.replace(/^models\//, '').trim())
+              .filter((item: string) => Boolean(item) && item !== model)
+          : []
+        db.setSetting('ai_config', {
+          ...config,
+          model,
+          fallbackModels,
+          autoFallback: fallbackModels.length ? Boolean(config.autoFallback) : false
+        })
+        audit(db, session, 'Cambio de modelo IA', 'Configuración', `Modelo activo: ${model}`)
+      }
+      clearAiModelCooldown(model)
+      return { model }
+    }
+
     case 'ai.testConnection': {
       requireModuleAccess(session, 'settings')
       requireCap(session, 'configureAI')
@@ -4111,24 +4266,106 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const bytes = Buffer.from(base64, 'base64')
       if (!bytes.length) fail('El archivo de la factura está vacío.')
       if (bytes.length > 8 * 1024 * 1024) fail('La factura supera el límite de 8 MB.')
-      const model = text(config.model, 'Modelo de IA', 1, 120)
-      const extraction = await scanInvoice({
-        apiKey,
-        model,
-        mimeType,
-        dataBase64: base64
-      })
-      const draft = buildInvoiceDraft(db, extraction, {
-        name: String(file.name ?? 'factura').slice(0, 160),
-        mimeType,
-        size: bytes.length
-      })
+      const chain = aiModelChain(config)
+      if (!chain.length) fail('Configura un modelo de IA antes de escanear facturas.')
+      const requestedModel = chain[0]
+      const configuredChain = config.autoFallback ? chain : [requestedModel]
+      const readyModels = configuredChain.filter((model) => aiModelCooldownRemaining(model) === 0)
+      const modelsToTry = readyModels.length ? readyModels : configuredChain
+      const attempts: Array<{
+        model: string
+        code: string
+        message: string
+        retryAfterSeconds?: number
+      }> = []
+      let extraction: InvoiceExtraction | null = null
+      let modelUsed = requestedModel
+      let lastError: RpcError | null = null
+
+      for (const [index, model] of modelsToTry.entries()) {
+        try {
+          extraction = await scanInvoice({
+            apiKey,
+            model,
+            mimeType,
+            dataBase64: base64
+          })
+          modelUsed = model
+          clearAiModelCooldown(model)
+          break
+        } catch (error) {
+          const rpcError =
+            error instanceof RpcError
+              ? error
+              : new RpcError(
+                  error instanceof Error ? error.message : 'No se pudo analizar la factura.',
+                  'AI_ERROR'
+                )
+          const retryAfterSeconds = Number(rpcError.details?.retryAfterSeconds)
+          attempts.push({
+            model,
+            code: rpcError.code,
+            message: rpcError.message,
+            ...(Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+              ? { retryAfterSeconds }
+              : {})
+          })
+          lastError = rpcError
+          if (rpcError.code === 'AI_QUOTA') {
+            cooldownAiModel(
+              model,
+              Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+                ? retryAfterSeconds
+                : 60
+            )
+          }
+          const hasNext = index < modelsToTry.length - 1
+          if (!hasNext || !AI_RETRYABLE_CODES.has(rpcError.code)) break
+        }
+      }
+
+      if (!extraction) {
+        if (attempts.length > 1) {
+          const summary = attempts
+            .map((attempt) => `${attempt.model}: ${attempt.message}`)
+            .join(' ')
+          const retryAfterSeconds = Number(lastError?.details?.retryAfterSeconds)
+          throw new RpcError(
+            `Ningún modelo pudo analizar la factura. ${summary}`,
+            'AI_ALL_MODELS_FAILED',
+            {
+              attempts,
+              ...(Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+                ? { retryAfterSeconds }
+                : {})
+            }
+          )
+        }
+        throw lastError ?? new RpcError('No se pudo analizar la factura.', 'AI_ERROR')
+      }
+
+      const draft = buildInvoiceDraft(
+        db,
+        extraction,
+        {
+          name: String(file.name ?? 'factura').slice(0, 160),
+          mimeType,
+          size: bytes.length
+        },
+        {
+          model: modelUsed,
+          requestedModel,
+          attempts
+        }
+      )
+      const fallbackDetail =
+        modelUsed !== requestedModel ? ` · respaldo de ${requestedModel}` : ''
       audit(
         db,
         session,
         'Escaneo de factura con IA',
         'Compra',
-        `${draft.supplier.name || 'Proveedor sin identificar'} · ${draft.invoice.number || 'Sin número'} · ${draft.lines.length} líneas · ${draft.ai.extractionHash.slice(0, 12)}`,
+        `${draft.supplier.name || 'Proveedor sin identificar'} · ${draft.invoice.number || 'Sin número'} · ${draft.lines.length} líneas · ${modelUsed}${fallbackDetail} · ${draft.ai.extractionHash.slice(0, 12)}`,
         draft.duplicatePurchaseId ?? undefined
       )
       return draft
@@ -4804,9 +5041,29 @@ export async function handleRpc(command: string, payload: Payload, token: string
         const current = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
         const value = payload?.value && typeof payload.value === 'object' ? { ...payload.value } : {}
         const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : ''
-        delete value.apiKey
         const provider = schema(value.provider ?? current.provider ?? 'gemini', z.enum(['gemini']))
-        const model = text(value.model ?? current.model, 'Modelo de IA', 1, 120)
+        const model = normalizeAiModel(value.model ?? current.model)
+        if (value.fallbackModels !== undefined && !Array.isArray(value.fallbackModels)) {
+          fail('La lista de modelos de respaldo no es válida.')
+        }
+        const rawFallbacks = Array.isArray(value.fallbackModels)
+          ? value.fallbackModels
+          : Array.isArray(current.fallbackModels)
+            ? current.fallbackModels
+            : []
+        const fallbackModels = [
+          ...new Set(
+            rawFallbacks
+              .filter((item: unknown) => typeof item === 'string' && Boolean(item.trim()))
+              .map((item: string) => normalizeAiModel(item, 'Modelo de respaldo'))
+              .filter((item: string) => item !== model)
+          )
+        ].slice(0, 3)
+        const autoFallback = fallbackModels.length
+          ? value.autoFallback === undefined
+            ? Boolean(current.autoFallback)
+            : Boolean(value.autoFallback)
+          : false
         let aiKey = db.getSetting<any>('ai_key', null)
         if (apiKey) {
           if (!safeStorage.isEncryptionAvailable()) {
@@ -4821,9 +5078,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
         db.setSetting('ai_config', {
           ...current,
-          ...value,
+          enabled: value.enabled === undefined ? current.enabled : Boolean(value.enabled),
+          diagnosis:
+            value.diagnosis === undefined ? current.diagnosis : Boolean(value.diagnosis),
+          summary: value.summary === undefined ? current.summary : Boolean(value.summary),
+          anomalies:
+            value.anomalies === undefined ? current.anomalies : Boolean(value.anomalies),
           provider,
           model,
+          fallbackModels,
+          autoFallback,
+          modelCatalog: Array.isArray(current.modelCatalog) ? current.modelCatalog : [],
+          catalogUpdatedAt: current.catalogUpdatedAt ?? null,
           configured: Boolean(aiKey?.encrypted),
           keyFingerprint: aiKey?.fingerprint ?? undefined
         })

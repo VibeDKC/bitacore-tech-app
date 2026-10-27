@@ -181,10 +181,12 @@ export function roleLabel(role: Role) {
 
 export class RpcError extends Error {
   code: string
+  details?: Record<string, unknown>
 
-  constructor(message: string, code = 'BAD_REQUEST') {
+  constructor(message: string, code = 'BAD_REQUEST', details?: Record<string, unknown>) {
     super(message)
     this.name = 'RpcError'
     this.code = code
+    this.details = details
   }
 }
