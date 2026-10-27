@@ -561,17 +561,134 @@ export interface Purchase {
   items: number
   subtotal: number
   iva: number
+  discount: number
+  adjustment: number
   total: number
   status: 'recibida' | 'pendiente'
   notes?: string | null
+  ai?: {
+    provider?: string
+    model?: string
+    extractedAt?: string
+    confidence?: number
+    extractionHash?: string
+    warnings?: string[]
+    [key: string]: unknown
+  } | null
   lines?: Array<{
     id: string
     productId: string | null
     description: string
     quantity: number
     unitPrice: number
+    ivaRate: number
+    iva: number
     lineTotal: number
   }>
+}
+
+export interface AiInvoiceCostChange {
+  previousCost: number
+  newCost: number
+  marginPercent: number
+  suggestedPrice: number
+}
+
+export interface AiInvoiceLineDraft {
+  id: string
+  description: string
+  quantity: number
+  unitCost: number
+  ivaRate: number
+  confidence: number
+  productId: string | null
+  productName: string | null
+  productSku: string | null
+  matchConfidence: number
+  warnings: string[]
+  costChange: AiInvoiceCostChange | null
+}
+
+export interface AiInvoiceDraft {
+  supplier: {
+    name: string
+    nit: string
+    supplierId: string | null
+    matchedName: string | null
+    match: 'exact' | 'name' | 'none'
+    confidence: number
+  }
+  invoice: {
+    number: string
+    date: string
+    currency: string
+    confidence: number
+  }
+  lines: AiInvoiceLineDraft[]
+  subtotal: number
+  discount: number
+  iva: number
+  calculatedTotal: number
+  realTotal: number
+  difference: number
+  duplicate: boolean
+  duplicatePurchaseId: string | null
+  warnings: string[]
+  ai: {
+    provider: string
+    model: string
+    extractedAt: string
+    confidence: number
+    extractionHash: string
+    warnings: string[]
+  }
+  source: {
+    name: string
+    mimeType: string
+    size: number
+  }
+}
+
+export interface PurchaseReviewNewProduct {
+  name: string
+  sku: string
+  category: string
+  location: string
+  condition?: string
+  origin?: string
+  price: number
+  warrantyDays?: number
+}
+
+export interface PurchaseReviewLineInput {
+  description: string
+  quantity: number
+  unitCost: number
+  ivaRate: number
+  productId?: string | null
+  newProduct?: PurchaseReviewNewProduct | null
+  sellPrice?: number | null
+  updatePrice?: boolean
+}
+
+export interface PurchaseReviewInput {
+  supplierId: string
+  number: string
+  date: string
+  lines: PurchaseReviewLineInput[]
+  discount: number
+  realTotal: number
+  updatePrices?: boolean
+  duplicateConfirmed?: boolean
+  notes?: string
+  aiMetadata?: Record<string, unknown> | null
+}
+
+export interface AiTestResult {
+  ok: boolean
+  model: string
+  latencyMs: number
+  message: string
 }
 
 export interface LegalConfig {

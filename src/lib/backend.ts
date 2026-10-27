@@ -11,6 +11,8 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import type {
+  AiInvoiceDraft,
+  AiTestResult,
   AppUser,
   AuditEvent,
   BackupRecord,
@@ -30,6 +32,7 @@ import type {
   PaymentMethod,
   Product,
   Purchase,
+  PurchaseReviewInput,
   ReportData,
   Role,
   SaleReceipt,
@@ -428,6 +431,23 @@ export const api = {
     },
     create(input: Record<string, unknown>) {
       return rpc<Purchase>('purchases.create', input)
+    },
+    scanInvoice(file: { name: string; mimeType: string; dataUrl: string }) {
+      return rpc<AiInvoiceDraft>('purchases.scanInvoice', { file })
+    },
+    checkDuplicate(supplierId: string, number: string) {
+      return rpc<{ duplicate: boolean; purchaseId: string | null; number: string; date: string | null }>(
+        'purchases.checkDuplicate',
+        { supplierId, number }
+      )
+    },
+    createFromReview(input: PurchaseReviewInput) {
+      return rpc<Purchase>('purchases.createFromReview', input as unknown as Record<string, unknown>)
+    }
+  },
+  ai: {
+    testConnection(input: { apiKey?: string; model?: string } = {}) {
+      return rpc<AiTestResult>('ai.testConnection', input)
     }
   },
   suppliers: {

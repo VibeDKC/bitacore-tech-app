@@ -89,10 +89,17 @@ export class Database {
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
     this.ensureColumn('work_order_items', 'warranty_days', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('purchases', 'discount_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('purchases', 'adjustment_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('purchases', 'ai_metadata_json', 'TEXT')
+    this.ensureColumn('purchase_items', 'iva_rate', 'REAL NOT NULL DEFAULT 19')
+    this.ensureColumn('purchase_items', 'iva_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensurePurchasesNumberIndex()
+    this.backfillPurchaseItemIva()
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -102,6 +109,83 @@ export class Database {
     if (!columns.some((item) => item.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
     }
+  }
+
+  // El número de factura se busca por proveedor, pero no se bloquea con un
+  // índice único: la revisión de IA pide confirmación explícita para duplicados.
+  private ensurePurchasesNumberIndex() {
+    const table = this.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'purchases'"
+    )
+    if (
+      !table ||
+      (!/\bUNIQUE\b/i.test(table.sql) &&
+        this.get<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_purchases_supplier_number'"
+        ))
+    ) {
+      return
+    }
+    this.db.exec('PRAGMA foreign_keys = OFF')
+    try {
+      this.db.exec(`
+        BEGIN;
+        CREATE TABLE purchases_new (
+          id TEXT PRIMARY KEY,
+          number TEXT NOT NULL,
+          supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+          purchase_date TEXT NOT NULL,
+          item_count INTEGER NOT NULL DEFAULT 1,
+          subtotal_cents INTEGER NOT NULL,
+          iva_cents INTEGER NOT NULL,
+          total_cents INTEGER NOT NULL,
+          discount_cents INTEGER NOT NULL DEFAULT 0,
+          adjustment_cents INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL CHECK (status IN ('recibida', 'pendiente')),
+          notes TEXT,
+          ai_metadata_json TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO purchases_new
+          (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
+           discount_cents, adjustment_cents, status, notes, ai_metadata_json, created_by, created_at)
+        SELECT id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
+               discount_cents, adjustment_cents, status, notes, ai_metadata_json, created_by, created_at
+        FROM purchases;
+        DROP TABLE purchases;
+        ALTER TABLE purchases_new RENAME TO purchases;
+        CREATE INDEX IF NOT EXISTS idx_purchases_supplier_number ON purchases(supplier_id, number);
+        COMMIT;
+      `)
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        // La transacción pudo haber quedado cerrada.
+      }
+      throw error
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON')
+    }
+    const violations = this.all<any>('PRAGMA foreign_key_check')
+    if (violations.length) {
+      throw new Error(`La migración de compras dejó claves foráneas rotas: ${JSON.stringify(violations)}`)
+    }
+  }
+
+  private backfillPurchaseItemIva() {
+    const done = this.get<{ value: string }>("SELECT value FROM meta WHERE key = 'purchase_iva_backfill'")
+    if (done?.value === '1') return
+    this.tx(() => {
+      this.run('UPDATE purchase_items SET iva_rate = 19 WHERE iva_rate IS NULL OR iva_rate = 0')
+      this.run(
+        `UPDATE purchase_items
+         SET iva_cents = ROUND(unit_price_cents * quantity * iva_rate / 100.0)
+         WHERE iva_cents = 0 AND unit_price_cents > 0 AND iva_rate > 0`
+      )
+      this.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('purchase_iva_backfill', '1')")
+    })
   }
 
   private backfillCustomerPhones() {

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.10.0 — 2026-10-26
+
+### IA de facturas de compra
+- Nueva clave de Gemini cifrada con `safeStorage`; nunca se devuelve al renderer.
+- Botón **Probar conexión** y errores claros para clave, modelo, cuota y red.
+- Escaneo desde Compras con archivo, arrastrar/soltar o **Ctrl+V**.
+- Vista previa antes de enviar a Gemini.
+- Extracción de proveedor, NIT, número, fecha, líneas, costos, IVA y totales.
+- Revisión humana obligatoria antes de registrar la compra.
+- IVA por línea y descuento global.
+- Campo **Total real de la factura** y conciliación automática:
+  - Diferencia menor: descuento adicional.
+  - Diferencia mayor: ajuste positivo.
+- Advertencia y confirmación para duplicados del mismo proveedor y número.
+- Diferentes proveedores pueden usar el mismo número.
+- Creación de productos nuevos dentro de la revisión.
+- Alerta si el costo sube más del 10 %, con opción de actualizar precio de venta.
+- Las imágenes y PDFs no se guardan; solo la extracción, el modelo y un hash.
+- La clave de IA se descarta al restaurar un respaldo.
+
+### Compras
+- Migración 10: IVA por línea, descuento, ajuste y metadatos de IA.
+- Se retiró la unicidad global del número de factura y se agregó un índice por proveedor + número.
+- Comprobante de compra con IVA por línea, descuento y ajuste.
+- Detalle de compra con líneas reales y marca de procesamiento por IA.
+- Las compras manuales conservan su validación de duplicado por proveedor + número.
+
+### Calidad
+- Aceptación 1.10.0: 7/7.
+- Migración 10 sobre copia de la base real: OK.
+- Regresión: 1.9.0 9/9, 1.8.0 13/13, 1.7.0 11/11, 1.6.1 12/12, 1.6.0 14/14, 1.5.0 12/12, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Pruebas de IA con servidor Gemini simulado, sin consumir API real.
+- Instalador `BitacoreTech-1.10.0-x64.exe`.
+
 ## 1.9.0 — 2026-10-26
 
 ### Clientes y teléfonos

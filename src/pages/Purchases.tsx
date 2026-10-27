@@ -12,6 +12,7 @@ import {
   Phone,
   Plus,
   ReceiptText,
+  ScanLine,
   ShieldCheck,
   Trash2,
   Truck
@@ -35,6 +36,7 @@ import { Drawer } from '@/components/ui/Drawer'
 import { Modal } from '@/components/ui/Modal'
 import { SegmentedTabs } from '@/components/ui/Tabs'
 import { PurchaseReceiptModal } from '@/components/purchases/PurchaseReceipt'
+import { InvoiceScanReviewModal } from '@/components/purchases/InvoiceScanReview'
 import { cn } from '@/lib/utils'
 
 interface PurchaseLine {
@@ -79,6 +81,7 @@ export function PurchasesPage() {
   const [tab, setTab] = useState<'compras' | 'proveedores'>('compras')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [supplierOpen, setSupplierOpen] = useState(false)
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
@@ -102,6 +105,7 @@ export function PurchasesPage() {
   })
 
   const canCreate = can(role, 'createPurchase')
+  const canScan = canCreate && can(role, 'useAI')
   const selected = purchases.find((purchase) => purchase.id === selectedId) ?? null
   const visiblePurchases = useMemo(
     () => (supplierFilter ? purchases.filter((purchase) => purchase.supplierId === supplierFilter) : purchases),
@@ -315,6 +319,11 @@ export function PurchasesPage() {
             <Button variant="secondary" onClick={exportPurchases} leftIcon={<Download className="h-4 w-4" />}>
               Exportar
             </Button>
+            {canScan ? (
+              <Button variant="secondary" onClick={() => setScanOpen(true)} leftIcon={<ScanLine className="h-4 w-4" />}>
+                Escanear factura
+              </Button>
+            ) : null}
             {canCreate ? (
               <Button onClick={() => setCreateOpen(true)} leftIcon={<PackagePlus className="h-4 w-4" />}>
                 Registrar compra
@@ -357,7 +366,7 @@ export function PurchasesPage() {
         />
         <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
           <ShieldCheck className="h-3.5 w-3.5" />
-          IVA 19% solo en compras · ventas sin IVA por ahora
+          IVA por línea en compras · ventas sin IVA por ahora
         </div>
       </div>
 
@@ -383,7 +392,7 @@ export function PurchasesPage() {
                   <th className="table-th">Fecha</th>
                   <th className="table-th text-center">Ítems</th>
                   <th className="table-th text-right">Subtotal</th>
-                  <th className="table-th text-right">IVA 19%</th>
+                  <th className="table-th text-right">IVA</th>
                   <th className="table-th text-right">Total</th>
                   <th className="table-th">Estado</th>
                   <th className="table-th pr-5 text-right lg:pr-6"> </th>
@@ -544,9 +553,12 @@ export function PurchasesPage() {
                   <p className="text-[10px] text-slate-400">Factura de compra</p>
                 </div>
               </div>
-              <Badge variant={selected.status === 'recibida' ? 'success' : 'warning'} dot>
-                {selected.status === 'recibida' ? 'Recibida' : 'Pendiente'}
-              </Badge>
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                {selected.ai ? <Badge variant="brand">Procesada con IA</Badge> : null}
+                <Badge variant={selected.status === 'recibida' ? 'success' : 'warning'} dot>
+                  {selected.status === 'recibida' ? 'Recibida' : 'Pendiente'}
+                </Badge>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
@@ -563,10 +575,27 @@ export function PurchasesPage() {
             <div>
               <p className="field-label">Detalle</p>
               <div className="divide-y divide-line rounded-xl border border-line">
-                <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
-                  <span className="text-[11px] text-slate-600">Mercancía y repuestos según factura</span>
-                  <span className="tabular text-[11px] font-semibold text-ink">{formatCurrency(selected.subtotal)}</span>
-                </div>
+                {selected.lines?.length ? (
+                  selected.lines.map((line) => (
+                    <div key={line.id} className="flex items-start justify-between gap-3 px-3.5 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-medium text-ink">{line.description}</p>
+                        <p className="mt-0.5 text-[9px] text-slate-400">
+                          {line.quantity} × {formatCurrency(line.unitPrice)} · IVA {line.ivaRate}% ·{' '}
+                          {formatCurrency(line.iva)}
+                        </p>
+                      </div>
+                      <span className="tabular shrink-0 text-[11px] font-semibold text-ink">
+                        {formatCurrency(line.lineTotal)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                    <span className="text-[11px] text-slate-600">Mercancía y repuestos según factura</span>
+                    <span className="tabular text-[11px] font-semibold text-ink">{formatCurrency(selected.subtotal)}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -576,9 +605,21 @@ export function PurchasesPage() {
                 <span className="tabular font-semibold text-ink">{formatCurrency(selected.subtotal)}</span>
               </div>
               <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
-                <span>IVA 19%</span>
+                <span>IVA</span>
                 <span className="tabular font-semibold text-ink">{formatCurrency(selected.iva)}</span>
               </div>
+              {selected.discount > 0 ? (
+                <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Descuento</span>
+                  <span className="tabular font-semibold text-success-700">- {formatCurrency(selected.discount)}</span>
+                </div>
+              ) : null}
+              {selected.adjustment !== 0 ? (
+                <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Ajuste</span>
+                  <span className="tabular font-semibold text-warning-700">{formatCurrency(selected.adjustment)}</span>
+                </div>
+              ) : null}
               <div className="mt-2.5 flex items-center justify-between border-t border-line pt-2.5">
                 <span className="text-[12px] font-semibold text-slate-600">Total</span>
                 <span className="tabular font-display text-xl font-bold text-ink">{formatCurrency(selected.total)}</span>
@@ -807,6 +848,19 @@ export function PurchasesPage() {
           </label>
         </div>
       </Modal>
+
+      <InvoiceScanReviewModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        suppliers={suppliers}
+        products={products}
+        dictionaries={data?.dictionaries ?? []}
+        onRefresh={reload}
+        onCreated={(purchase) => {
+          reload()
+          setSelectedId(purchase.id)
+        }}
+      />
 
       <PurchaseReceiptModal
         purchase={receiptTarget}

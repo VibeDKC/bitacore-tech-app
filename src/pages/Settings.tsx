@@ -227,6 +227,7 @@ export function SettingsPage() {
   })
   const [messagesDraft, setMessagesDraft] = useState<MessageTemplates>(DEFAULT_MESSAGES)
   const [securityDraft, setSecurityDraft] = useState<SecurityDraft>({ sessionHours: 12 })
+  const [aiTesting, setAiTesting] = useState(false)
   const [rolePermissionsDraft, setRolePermissionsDraft] = useState<Record<string, boolean>>({})
 
   const canManageStaff = can(role, 'manageStaff')
@@ -409,12 +410,30 @@ export function SettingsPage() {
         apiKey: ''
       })
       toast.success('Configuración de IA guardada', {
-        description: 'La clave no se devuelve al renderer; solo se conserva su huella de verificación.'
+        description: 'La clave queda cifrada en este equipo y nunca se devuelve a la interfaz.'
       })
     } catch (failure) {
       toast.error('No se pudo guardar la configuración de IA', { description: errorMessage(failure) })
     } finally {
       setSaving(null)
+    }
+  }
+
+  async function testAiConnection() {
+    if (!canAI || aiTesting) return
+    setAiTesting(true)
+    try {
+      const result = await api.ai.testConnection({
+        apiKey: aiDraft.apiKey.trim() || undefined,
+        model: aiDraft.model.trim() || undefined
+      })
+      toast.success('Conexión con Gemini correcta', {
+        description: `${result.model} · ${result.latencyMs} ms`
+      })
+    } catch (failure) {
+      toast.error('No se pudo conectar con Gemini', { description: errorMessage(failure) })
+    } finally {
+      setAiTesting(false)
     }
   }
 
@@ -1927,8 +1946,8 @@ export function SettingsPage() {
               <div className="card p-5 lg:p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="font-display text-[16px] font-bold text-ink">Asistente de IA</h2>
-                    <p className="mt-0.5 text-[11px] text-slate-400">Sugerencias de diagnóstico y resúmenes operativos</p>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Escaneo de facturas de compra</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">Clave de Gemini, modelo y prueba de conexión</p>
                   </div>
                   <Badge variant={canAI ? 'brand' : 'neutral'}>
                     <Sparkles className="h-3 w-3" />
@@ -1939,10 +1958,10 @@ export function SettingsPage() {
                 <div className={cn('mt-4 divide-y divide-line rounded-xl border border-line', !canAI && 'pointer-events-none opacity-60')}>
                   <div className="flex items-center justify-between gap-3 px-4 py-3">
                     <div>
-                      <p className="text-[11px] font-semibold text-ink">Activar asistente</p>
-                      <p className="mt-0.5 text-[10px] text-slate-400">Habilita las sugerencias en las órdenes de trabajo.</p>
+                      <p className="text-[11px] font-semibold text-ink">Activar escaneo de facturas</p>
+                      <p className="mt-0.5 text-[10px] text-slate-400">Permite cargar o pegar una factura de compra y analizarla con Gemini.</p>
                     </div>
-                    <Switch active={aiDraft.enabled} onClick={() => setAiDraft({ ...aiDraft, enabled: !aiDraft.enabled })} label="Activar asistente" />
+                    <Switch active={aiDraft.enabled} onClick={() => setAiDraft({ ...aiDraft, enabled: !aiDraft.enabled })} label="Activar escaneo de facturas" />
                   </div>
                 </div>
 
@@ -1953,7 +1972,7 @@ export function SettingsPage() {
                       value={aiDraft.model}
                       onChange={(event) => setAiDraft({ ...aiDraft, model: event.target.value })}
                       disabled={!canAI}
-                      placeholder="Ej. gpt-4.1-mini"
+                      placeholder="gemini-3.5-flash"
                       className="field font-mono text-[11px]"
                     />
                     <span className="mt-1 block text-[9px] text-slate-400">Identificador del modelo configurado con el proveedor.</span>
@@ -1985,32 +2004,27 @@ export function SettingsPage() {
                       </button>
                     </div>
                     <span className="mt-1.5 block text-[9px] text-slate-400">
-                      La clave no se devuelve al renderer; solo se conserva su huella de verificación.
+                      La clave se cifra en este equipo y nunca se devuelve a la interfaz. Si restauras un respaldo en otro equipo, vuelve a ingresarla.
                     </span>
                   </label>
                 </div>
 
-                <div className={cn('mt-4 divide-y divide-line rounded-xl border border-line', !canAI && 'pointer-events-none opacity-60')}>
-                  {[
-                    { key: 'diagnosis' as const, label: 'Sugerir diagnóstico técnico', hint: 'Analiza la falla reportada y el historial del equipo.' },
-                    { key: 'summary' as const, label: 'Resumir órdenes y turnos', hint: 'Genera resúmenes para el propietario.' },
-                    { key: 'anomalies' as const, label: 'Detectar anomalías de caja', hint: 'Alertas de diferencias y patrones inusuales.' }
-                  ].map((option) => (
-                    <div key={option.key} className="flex items-center justify-between gap-3 px-4 py-3">
-                      <div>
-                        <p className="text-[11px] font-semibold text-ink">{option.label}</p>
-                        <p className="mt-0.5 text-[10px] text-slate-400">{option.hint}</p>
-                      </div>
-                      <Switch
-                        active={aiDraft[option.key]}
-                        onClick={() => canAI && setAiDraft({ ...aiDraft, [option.key]: !aiDraft[option.key] })}
-                        label={option.label}
-                      />
-                    </div>
-                  ))}
+                <div className="mt-4 rounded-xl border border-line bg-slate-50/70 px-3.5 py-2.5">
+                  <p className="text-[10px] leading-relaxed text-slate-500">
+                    Diagnóstico técnico, resúmenes y anomalías de caja quedan para una fase posterior. Esta versión solo escanea facturas de compra.
+                  </p>
                 </div>
 
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    variant="secondary"
+                    disabled={!canAI || aiTesting || (!settings?.ai.configured && !aiDraft.apiKey.trim())}
+                    onClick={() => void testAiConnection()}
+                    loading={aiTesting}
+                    leftIcon={<CheckCircle2 className="h-4 w-4" />}
+                  >
+                    Probar conexión
+                  </Button>
                   <Button disabled={!canAI} onClick={() => void saveAi()} loading={saving === 'ia'} leftIcon={<Save className="h-4 w-4" />}>
                     Guardar
                   </Button>
@@ -2021,7 +2035,7 @@ export function SettingsPage() {
                 <div className="flex items-start gap-2.5">
                   <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-warning-600" />
                   <p className="text-[10px] leading-relaxed text-warning-800">
-                    La IA es una ayuda opcional. No reemplaza el diagnóstico del técnico y no tiene acceso a costos ni utilidad si el rol no lo permite.
+                    La IA solo procesa facturas de compra. La revisión y aprobación siempre son humanas; no se guardan imágenes ni PDFs.
                   </p>
                 </div>
               </div>

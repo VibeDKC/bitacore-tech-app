@@ -52,6 +52,7 @@ import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './s
 import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import { runDemoSeed, type SeedOwner } from './seed'
 import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
+import { scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
 import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
@@ -750,10 +751,19 @@ function legalPublic(db: Database) {
 }
 
 function settingsData(db: Database) {
+  const aiConfig = { ...db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai) }
+  const aiKey = db.getSetting<any>('ai_key', null)
+  delete aiConfig.apiKey
+  delete aiConfig.configured
+  delete aiConfig.keyFingerprint
   return {
     legal: getLegal(db),
     print: db.getSetting('print_config', DEFAULT_SETTINGS.print),
-    ai: db.getSetting('ai_config', DEFAULT_SETTINGS.ai),
+    ai: {
+      ...aiConfig,
+      configured: Boolean(aiKey?.encrypted),
+      keyFingerprint: aiKey?.fingerprint ?? undefined
+    },
     security: db.getSetting('security_config', DEFAULT_SETTINGS.security),
     business: db.getSetting('business_config', DEFAULT_SETTINGS.business),
     equipment: db.getSetting('equipment_config', DEFAULT_SETTINGS.equipment),
@@ -909,8 +919,16 @@ function purchaseDto(db: Database, row: any) {
       description: line.description,
       quantity: Number(line.quantity),
       unitPrice: money(line.unit_price_cents),
+      ivaRate: Number(line.iva_rate ?? 19),
+      iva: money(line.iva_cents ?? 0),
       lineTotal: money(Number(line.unit_price_cents) * Number(line.quantity))
     }))
+  let aiMetadata: any = null
+  try {
+    aiMetadata = row.ai_metadata_json ? JSON.parse(row.ai_metadata_json) : null
+  } catch {
+    aiMetadata = null
+  }
   return {
     id: row.id,
     number: row.number,
@@ -922,11 +940,266 @@ function purchaseDto(db: Database, row: any) {
     items: row.item_count,
     subtotal: money(row.subtotal_cents),
     iva: money(row.iva_cents),
+    discount: money(row.discount_cents ?? 0),
+    adjustment: money(row.adjustment_cents ?? 0),
     total: money(row.total_cents),
     status: row.status,
     notes: row.notes ?? null,
+    ai: aiMetadata,
     lines
   }
+}
+
+function normalizeAiText(value: unknown) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function normalizeAiNit(value: unknown) {
+  const textValue = String(value ?? '').trim()
+  const digits = textValue.replace(/\D/g, '')
+  return digits || textValue.toLowerCase()
+}
+
+function aiNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function aiDate(value: unknown) {
+  const textValue = String(value ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(textValue)) return textValue.slice(0, 10)
+  const parsed = new Date(textValue)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10)
+  return ''
+}
+
+function getStoredAiKey(db: Database) {
+  const stored = db.getSetting<{ encrypted?: string } | null>('ai_key', null)
+  if (!stored?.encrypted) return null
+  if (!safeStorage.isEncryptionAvailable()) {
+    fail('El almacén seguro de Windows no está disponible; no se puede usar la clave de IA.')
+  }
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.encrypted, 'base64'))
+  } catch {
+    fail('No se pudo descifrar la clave de IA. Puede pertenecer a otro equipo o usuario de Windows; vuelve a ingresarla.', 'AI_KEY_INVALID')
+  }
+}
+
+function buildInvoiceDraft(
+  db: Database,
+  extraction: InvoiceExtraction,
+  source: { name: string; mimeType: string; size: number }
+) {
+  const suppliers = db.all<any>('SELECT id, name, nit, is_foreign_nit FROM suppliers WHERE active = 1')
+  const supplierName = String(extraction.supplier?.name ?? '').trim().slice(0, 160)
+  const supplierNit = String(extraction.supplier?.nit ?? '').trim().slice(0, 40)
+  const nitKey = normalizeAiNit(supplierNit)
+  let matchedSupplier: any = null
+  let supplierMatch: 'exact' | 'name' | 'none' = 'none'
+  if (nitKey) {
+    matchedSupplier = suppliers.find((item) => normalizeAiNit(item.nit) === nitKey) ?? null
+    if (matchedSupplier) supplierMatch = 'exact'
+  }
+  if (!matchedSupplier && supplierName) {
+    const nameKey = normalizeAiText(supplierName)
+    matchedSupplier =
+      suppliers.find((item) => normalizeAiText(item.name) === nameKey) ??
+      suppliers.find((item) => {
+        const candidate = normalizeAiText(item.name)
+        return candidate.includes(nameKey) || nameKey.includes(candidate)
+      }) ??
+      null
+    if (matchedSupplier) supplierMatch = 'name'
+  }
+
+  const products = db.all<any>('SELECT id, name, sku, cost_cents, price_cents FROM products WHERE active = 1')
+  const warnings = (Array.isArray(extraction.warnings) ? extraction.warnings : [])
+    .map((item) => String(item).slice(0, 300))
+    .filter(Boolean)
+  const rawLines = Array.isArray(extraction.lines) ? extraction.lines : []
+  const lines: Array<any> = []
+  let subtotalCents = 0
+  let ivaCents = 0
+
+  rawLines.forEach((raw, index) => {
+    const description = String(raw?.description ?? '').trim().slice(0, 240)
+    const quantity = aiNumber(raw?.quantity, 0)
+    const unitCost = aiNumber(raw?.unitCost, 0)
+    let ivaRate = aiNumber(raw?.ivaRate, 19)
+    if (!description || quantity <= 0 || unitCost < 0) {
+      warnings.push(`Línea ${index + 1} incompleta; revísala antes de aprobar.`)
+      return
+    }
+    if (ivaRate < 0 || ivaRate > 100) {
+      warnings.push(`Línea ${index + 1}: IVA inválido; se usará 19 %.`)
+      ivaRate = 19
+    }
+    const unitCostCents = toCents(unitCost)
+    const lineBaseCents = Math.round(unitCostCents * quantity)
+    const lineIvaCents = Math.round((lineBaseCents * ivaRate) / 100)
+    subtotalCents += lineBaseCents
+    ivaCents += lineIvaCents
+
+    const descriptionKey = normalizeAiText(description)
+    let product =
+      products.find(
+        (item) =>
+          normalizeAiText(item.sku) === descriptionKey || normalizeAiText(item.name) === descriptionKey
+      ) ?? null
+    let matchConfidence = product ? 1 : 0
+    if (!product && descriptionKey) {
+      product =
+        products.find((item) => {
+          const productKey = normalizeAiText(item.name)
+          return productKey.includes(descriptionKey) || descriptionKey.includes(productKey)
+        }) ?? null
+      if (product) matchConfidence = 0.7
+    }
+    const previousCost = product ? money(product.cost_cents) : 0
+    const previousPrice = product ? money(product.price_cents) : 0
+    let costChange = null
+    if (product && previousCost > 0 && unitCost > previousCost * 1.1) {
+      const marginPercent =
+        previousPrice > 0 ? Math.max(0, ((previousPrice - previousCost) / previousPrice) * 100) : 0
+      const suggestedPrice =
+        previousCost > 0 ? money(toCents(unitCost * (previousPrice / previousCost))) : previousPrice
+      costChange = {
+        previousCost,
+        newCost: money(toCents(unitCost)),
+        marginPercent: money(toCents(marginPercent)),
+        suggestedPrice
+      }
+      warnings.push(`El costo de ${product.name} subió más del 10 %.`)
+    }
+    lines.push({
+      id: `line_${index + 1}`,
+      description,
+      quantity,
+      unitCost: money(toCents(unitCost)),
+      ivaRate,
+      confidence: Math.max(0, Math.min(1, aiNumber(raw?.confidence, matchConfidence || 0.7))),
+      productId: product?.id ?? null,
+      productName: product?.name ?? null,
+      productSku: product?.sku ?? null,
+      matchConfidence,
+      warnings: [],
+      costChange
+    })
+  })
+
+  const discountCents = Math.max(
+    0,
+    Math.min(subtotalCents + ivaCents, toCents(aiNumber(extraction.discount, 0)))
+  )
+  const calculatedTotalCents = subtotalCents + ivaCents - discountCents
+  const extractedTotalCents = toCents(aiNumber(extraction.total, 0))
+  const realTotalCents = extractedTotalCents > 0 ? extractedTotalCents : calculatedTotalCents
+  const differenceCents = realTotalCents - calculatedTotalCents
+  const number = String(extraction.invoice?.number ?? '').trim().slice(0, 80)
+  const date = aiDate(extraction.invoice?.date)
+  const duplicate =
+    matchedSupplier && number
+      ? db.get<any>('SELECT id FROM purchases WHERE supplier_id = ? AND number = ?', matchedSupplier.id, number)
+      : null
+
+  if (!supplierName) warnings.push('No se pudo leer el nombre del proveedor.')
+  if (!number) warnings.push('No se pudo leer el número de factura.')
+  if (!date) warnings.push('No se pudo leer la fecha de factura.')
+  if (!lines.length) warnings.push('No se detectaron líneas en la factura.')
+  if (differenceCents !== 0 && lines.length) {
+    warnings.push('El total real no coincide con el total calculado; revisa el ajuste antes de aprobar.')
+  }
+  if (duplicate) {
+    warnings.push(`Ya existe una factura de ${matchedSupplier.name} con el número ${number}.`)
+  }
+
+  const averageConfidence = lines.length
+    ? lines.reduce((sum, line) => sum + Number(line.confidence ?? 0), 0) / lines.length
+    : 0
+  const aiConfidence = Math.max(
+    0,
+    Math.min(1, aiNumber(extraction.confidence, averageConfidence || 0.7))
+  )
+
+  return {
+    supplier: {
+      name: supplierName,
+      nit: supplierNit,
+      supplierId: matchedSupplier?.id ?? null,
+      matchedName: matchedSupplier?.name ?? null,
+      match: supplierMatch,
+      confidence: Math.max(0, Math.min(1, aiNumber(extraction.supplier?.confidence, supplierMatch === 'none' ? 0.5 : 0.9)))
+    },
+    invoice: {
+      number,
+      date,
+      currency: String(extraction.invoice?.currency || 'COP').trim().toUpperCase().slice(0, 8),
+      confidence: Math.max(0, Math.min(1, aiNumber(extraction.invoice?.confidence, 0.7)))
+    },
+    lines,
+    subtotal: money(subtotalCents),
+    discount: money(discountCents),
+    iva: money(ivaCents),
+    calculatedTotal: money(calculatedTotalCents),
+    realTotal: money(realTotalCents),
+    difference: money(differenceCents),
+    duplicate: Boolean(duplicate),
+    duplicatePurchaseId: duplicate?.id ?? null,
+    warnings: [...new Set(warnings)],
+    ai: {
+      provider: 'gemini',
+      model: String(db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai).model ?? ''),
+      extractedAt: new Date().toISOString(),
+      confidence: aiConfidence,
+      extractionHash: sha256(JSON.stringify(extraction)),
+      warnings: [...new Set(warnings)]
+    },
+    source
+  }
+}
+
+function createProductFromPurchaseReview(
+  db: Database,
+  input: any,
+  unitCostCents: number,
+  nowIso: string
+) {
+  const name = text(input?.name, 'Nombre del producto', 2, 160)
+  const sku = text(input?.sku, 'SKU', 2, 60)
+  if (db.get<any>('SELECT id FROM products WHERE sku = ?', sku)) {
+    fail(`Ya existe un producto con el SKU ${sku}.`, 'DUPLICATE')
+  }
+  const category = text(input?.category ?? 'Repuestos', 'Categoría', 2, 80)
+  const location = text(input?.location ?? 'Bodega A', 'Ubicación', 2, 80)
+  const priceCents = toCents(numberValue(input?.price, 'Precio de venta', { min: 0.01 }))
+  const warrantyDays = Math.max(0, Math.round(aiNumber(input?.warrantyDays, 0)))
+  const id = `prod_${sha256(`${sku}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
+  db.run(
+    `INSERT INTO products
+      (id, name, sku, barcode, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
+       warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, NULL, 1, 'rotativo', 1, ?, ?)`,
+    id,
+    name,
+    sku,
+    String(input?.barcode ?? `AI${Date.now().toString().slice(-9)}`).slice(0, 60),
+    category,
+    location,
+    typeof input?.condition === 'string' ? input.condition.trim().slice(0, 80) : '',
+    typeof input?.origin === 'string' ? input.origin.trim().slice(0, 80) : '',
+    unitCostCents,
+    priceCents,
+    warrantyDays,
+    nowIso,
+    nowIso
+  )
+  return id
 }
 
 function parsePeriod(value: string) {
@@ -1469,6 +1742,25 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
       entity: 'Respaldo',
       entityId: backup.id,
       detail: `${credentialsRestored} credenciales cifradas descartadas para evitar dependencia del equipo de origen.`
+    })
+  }
+  const restoredAiKey = restored.getSetting<any>('ai_key', null)
+  if (restoredAiKey?.encrypted) {
+    restored.run("DELETE FROM app_settings WHERE key = 'ai_key'")
+    const aiConfig = restored.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
+    restored.setSetting('ai_config', {
+      ...aiConfig,
+      configured: false,
+      keyFingerprint: null
+    })
+    restored.appendAudit({
+      userId: session.userId,
+      userName: displayUser(session).name,
+      role: roleLabel(session.role as any),
+      action: 'Clave de IA descartada por restauración',
+      entity: 'Respaldo',
+      entityId: backup.id,
+      detail: 'La clave de IA se descartó para evitar dependencia del equipo de origen. Vuelve a configurarla.'
     })
   }
   restored.run(
@@ -3762,6 +4054,86 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return supplierDto(db, db.get<any>('SELECT * FROM suppliers WHERE id = ?', id))
     }
 
+    case 'ai.testConnection': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'configureAI')
+      const config = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
+      if ((config.provider ?? 'gemini') !== 'gemini') fail('Solo Gemini está disponible en esta versión.')
+      const apiKey =
+        typeof payload?.apiKey === 'string' && payload.apiKey.trim()
+          ? payload.apiKey.trim()
+          : getStoredAiKey(db)
+      if (!apiKey) fail('Configura la clave de Gemini antes de probar la conexión.')
+      const model = text(payload?.model ?? config.model, 'Modelo de IA', 1, 120)
+      const result = await testGeminiConnection({ apiKey, model })
+      audit(db, session, 'Prueba de conexión IA', 'Configuración', `Gemini · ${model} · OK · ${result.latencyMs} ms`)
+      return result
+    }
+
+    case 'purchases.checkDuplicate': {
+      requireModuleAccess(session, 'purchases')
+      requireCap(session, 'createPurchase')
+      const supplierId = typeof payload?.supplierId === 'string' ? payload.supplierId.trim() : ''
+      const number = typeof payload?.number === 'string' ? payload.number.trim() : ''
+      if (!supplierId || !number) {
+        return { duplicate: false, purchaseId: null, number, date: null }
+      }
+      const existing = db.get<any>(
+        'SELECT id, purchase_date FROM purchases WHERE supplier_id = ? AND number = ? LIMIT 1',
+        supplierId,
+        number
+      )
+      return {
+        duplicate: Boolean(existing),
+        purchaseId: existing?.id ?? null,
+        number,
+        date: existing?.purchase_date ?? null
+      }
+    }
+
+    case 'purchases.scanInvoice': {
+      requireModuleAccess(session, 'purchases')
+      requireCap(session, 'useAI')
+      requireCap(session, 'createPurchase')
+      const config = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
+      if (!config.enabled) fail('Activa el escaneo de facturas en Configuración → IA.')
+      if ((config.provider ?? 'gemini') !== 'gemini') fail('Solo Gemini está disponible en esta versión.')
+      const apiKey = getStoredAiKey(db)
+      if (!apiKey) fail('Configura la clave de Gemini antes de escanear facturas.')
+      const file = payload?.file && typeof payload.file === 'object' ? payload.file : {}
+      const mimeType = String(file.mimeType ?? '').toLowerCase()
+      if (!['image/png', 'image/jpeg', 'image/webp', 'application/pdf'].includes(mimeType)) {
+        fail('La factura debe ser una imagen PNG/JPEG/WebP o un PDF.')
+      }
+      const dataUrl = String(file.dataUrl ?? '')
+      const base64 = dataUrl.startsWith('data:') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl
+      if (!base64) fail('No se recibió la imagen o el PDF de la factura.')
+      const bytes = Buffer.from(base64, 'base64')
+      if (!bytes.length) fail('El archivo de la factura está vacío.')
+      if (bytes.length > 8 * 1024 * 1024) fail('La factura supera el límite de 8 MB.')
+      const model = text(config.model, 'Modelo de IA', 1, 120)
+      const extraction = await scanInvoice({
+        apiKey,
+        model,
+        mimeType,
+        dataBase64: base64
+      })
+      const draft = buildInvoiceDraft(db, extraction, {
+        name: String(file.name ?? 'factura').slice(0, 160),
+        mimeType,
+        size: bytes.length
+      })
+      audit(
+        db,
+        session,
+        'Escaneo de factura con IA',
+        'Compra',
+        `${draft.supplier.name || 'Proveedor sin identificar'} · ${draft.invoice.number || 'Sin número'} · ${draft.lines.length} líneas · ${draft.ai.extractionHash.slice(0, 12)}`,
+        draft.duplicatePurchaseId ?? undefined
+      )
+      return draft
+    }
+
     case 'purchases.create': {
       requireModuleAccess(session, 'purchases')
       requireCap(session, 'createPurchase')
@@ -3769,6 +4141,12 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const supplier = db.get<any>('SELECT * FROM suppliers WHERE id = ? AND active = 1', supplierId)
       if (!supplier) fail('Proveedor no encontrado')
       const purchaseNumber = text(payload?.number, 'Número de factura', 1, 80)
+      const duplicatePurchase = db.get<any>(
+        'SELECT id FROM purchases WHERE supplier_id = ? AND number = ?',
+        supplierId,
+        purchaseNumber
+      )
+      if (duplicatePurchase) fail('Ya existe una compra de este proveedor con ese número.', 'DUPLICATE')
       const itemsInput = Array.isArray(payload?.items) ? payload.items : []
       const computedSubtotal = itemsInput.reduce((sum: number, item: any) => {
         const quantity = Number(item?.quantity ?? 1)
@@ -3786,8 +4164,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
       db.tx(() => {
         db.run(
           `INSERT INTO purchases
-            (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents, status, notes, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
+             discount_cents, adjustment_cents, status, notes, ai_metadata_json, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, NULL, ?, ?)`,
           id,
           purchaseNumber,
           supplierId,
@@ -3803,27 +4182,33 @@ export async function handleRpc(command: string, payload: Payload, token: string
         )
         if (!itemsInput.length) {
           db.run(
-            `INSERT INTO purchase_items (id, purchase_id, product_id, description, quantity, unit_price_cents)
-             VALUES (?, ?, NULL, ?, 1, ?)`,
+            `INSERT INTO purchase_items
+              (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents)
+             VALUES (?, ?, NULL, ?, 1, ?, 19, ?)`,
             `puri_${Date.now()}`,
             id,
             'Compra registrada según factura de proveedor',
-            subtotalCents
+            subtotalCents,
+            ivaCents
           )
         } else {
           for (const [index, item] of itemsInput.entries()) {
             const product = item?.productId ? db.get<any>('SELECT * FROM products WHERE id = ?', item.productId) : null
             const quantity = numberValue(item?.quantity ?? 1, 'Cantidad', { min: 0.01 })
             const unitPrice = item?.unitPrice !== undefined ? numberValue(item.unitPrice, 'Valor unitario', { min: 0 }) : subtotal / Math.max(itemsInput.length, 1)
+            const unitPriceCents = toCents(unitPrice)
+            const lineIvaCents = Math.round(unitPriceCents * quantity * 0.19)
             db.run(
-              `INSERT INTO purchase_items (id, purchase_id, product_id, description, quantity, unit_price_cents)
-               VALUES (?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO purchase_items
+                (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents)
+               VALUES (?, ?, ?, ?, ?, ?, 19, ?)`,
               `puri_${index}_${Date.now()}`,
               id,
               product?.id ?? null,
               product?.name ?? String(item?.description ?? 'Compra de mercancía').slice(0, 240),
               quantity,
-              toCents(unitPrice)
+              unitPriceCents,
+              lineIvaCents
             )
             if (product && status === 'recibida') {
               db.run(
@@ -3856,6 +4241,184 @@ export async function handleRpc(command: string, payload: Payload, token: string
           'Registro de compra',
           'Compra',
           `${purchaseNumber} · ${supplier.name} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · IVA ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(ivaCents))}`,
+          id
+        )
+      })
+      return purchaseDto(db, db.get<any>('SELECT * FROM purchases WHERE id = ?', id))
+    }
+
+    case 'purchases.createFromReview': {
+      requireModuleAccess(session, 'purchases')
+      requireCap(session, 'createPurchase')
+      const supplierId = text(payload?.supplierId, 'Proveedor', 1, 80)
+      const supplier = db.get<any>('SELECT * FROM suppliers WHERE id = ? AND active = 1', supplierId)
+      if (!supplier) fail('Proveedor no encontrado')
+      const purchaseNumber = text(payload?.number, 'Número de factura', 1, 80)
+      const purchaseDate = isoDate(payload?.date, 'Fecha de compra')
+      const linesInput = Array.isArray(payload?.lines) ? payload.lines : []
+      if (!linesInput.length) fail('Agrega al menos una línea a la compra.')
+      const discount = numberValue(payload?.discount ?? 0, 'Descuento', { min: 0 })
+      const realTotal = numberValue(payload?.realTotal, 'Total real de la factura', { min: 0.01 })
+      const updatePrices = Boolean(payload?.updatePrices)
+      const duplicateConfirmed = Boolean(payload?.duplicateConfirmed)
+      const duplicate = db.get<any>(
+        'SELECT id FROM purchases WHERE supplier_id = ? AND number = ? LIMIT 1',
+        supplierId,
+        purchaseNumber
+      )
+      if (duplicate && !duplicateConfirmed) {
+        fail('Ya existe una compra de este proveedor con ese número. Confirma el duplicado para continuar.', 'DUPLICATE')
+      }
+      const newSkus = new Set<string>()
+      const prepared = linesInput.map((item: any, index: number) => {
+        const description = text(item?.description, `Descripción de línea ${index + 1}`, 1, 240)
+        const quantity = numberValue(item?.quantity, `Cantidad de línea ${index + 1}`, { min: 0.01 })
+        const unitCost = numberValue(item?.unitCost, `Costo de línea ${index + 1}`, { min: 0 })
+        const ivaRate = numberValue(item?.ivaRate ?? 19, `IVA de línea ${index + 1}`, {
+          min: 0,
+          max: 100
+        })
+        const productId =
+          typeof item?.productId === 'string' && item.productId ? item.productId : null
+        const newProduct =
+          item?.newProduct && typeof item.newProduct === 'object' ? item.newProduct : null
+        if (productId && newProduct) {
+          fail(`La línea ${index + 1} no puede tener producto existente y producto nuevo a la vez.`)
+        }
+        if (productId) {
+          const product = db.get<any>('SELECT id FROM products WHERE id = ? AND active = 1', productId)
+          if (!product) fail(`El producto de la línea ${index + 1} no está activo.`)
+        }
+        if (newProduct) {
+          const sku = text(newProduct.sku, `SKU de línea ${index + 1}`, 2, 60)
+          if (newSkus.has(sku.toLowerCase())) {
+            fail(`El SKU ${sku} está repetido en la revisión.`)
+          }
+          newSkus.add(sku.toLowerCase())
+          if (db.get<any>('SELECT id FROM products WHERE sku = ?', sku)) {
+            fail(`Ya existe un producto con el SKU ${sku}.`, 'DUPLICATE')
+          }
+          text(newProduct.name, `Nombre de línea ${index + 1}`, 2, 160)
+          numberValue(newProduct.price, `Precio de venta de línea ${index + 1}`, { min: 0.01 })
+        }
+        const unitCostCents = toCents(unitCost)
+        const baseCents = Math.round(unitCostCents * quantity)
+        const ivaCents = Math.round((baseCents * ivaRate) / 100)
+        const sellPrice =
+          item?.sellPrice !== undefined && item.sellPrice !== null && item.sellPrice !== ''
+            ? numberValue(item.sellPrice, `Precio de venta de línea ${index + 1}`, { min: 0.01 })
+            : null
+        return {
+          description,
+          quantity,
+          unitCostCents,
+          ivaRate,
+          ivaCents,
+          baseCents,
+          productId,
+          newProduct,
+          sellPrice,
+          updatePrice: Boolean(item?.updatePrice)
+        }
+      })
+      const subtotalCents = prepared.reduce((sum, item) => sum + item.baseCents, 0)
+      const ivaCents = prepared.reduce((sum, item) => sum + item.ivaCents, 0)
+      const baseDiscountCents = Math.min(subtotalCents + ivaCents, Math.max(0, toCents(discount)))
+      const calculatedTotalCents = subtotalCents + ivaCents - baseDiscountCents
+      const realTotalCents = toCents(realTotal)
+      const differenceCents = realTotalCents - calculatedTotalCents
+      const discountCents =
+        differenceCents < 0 ? baseDiscountCents + Math.abs(differenceCents) : baseDiscountCents
+      const adjustmentCents = differenceCents > 0 ? differenceCents : 0
+      if (discountCents > subtotalCents + ivaCents) {
+        fail('El descuento supera el valor de la factura.')
+      }
+      const aiMetadata =
+        payload?.aiMetadata && typeof payload.aiMetadata === 'object'
+          ? JSON.stringify(payload.aiMetadata)
+          : null
+      if (aiMetadata && aiMetadata.length > 30000) {
+        fail('Los metadatos de la IA son demasiado grandes.')
+      }
+      const id = `pur_${sha256(`${supplierId}|${purchaseNumber}|${Date.now()}`).slice(0, 20)}`
+      const nowIso = new Date().toISOString()
+      db.tx(() => {
+        db.run(
+          `INSERT INTO purchases
+            (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
+             discount_cents, adjustment_cents, status, notes, ai_metadata_json, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recibida', ?, ?, ?, ?)`,
+          id,
+          purchaseNumber,
+          supplierId,
+          purchaseDate,
+          prepared.length,
+          subtotalCents,
+          ivaCents,
+          realTotalCents,
+          discountCents,
+          adjustmentCents,
+          typeof payload?.notes === 'string' ? payload.notes.slice(0, 1000) : null,
+          aiMetadata,
+          session.userId,
+          nowIso
+        )
+        for (const [index, item] of prepared.entries()) {
+          let productId = item.productId
+          if (!productId && item.newProduct) {
+            productId = createProductFromPurchaseReview(db, item.newProduct, item.unitCostCents, nowIso)
+          }
+          db.run(
+            `INSERT INTO purchase_items
+              (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `puri_${index}_${Date.now()}`,
+            id,
+            productId,
+            item.description,
+            item.quantity,
+            item.unitCostCents,
+            item.ivaRate,
+            item.ivaCents
+          )
+          if (productId) {
+            db.run(
+              'UPDATE products SET stock = stock + ?, cost_cents = ?, updated_at = ? WHERE id = ?',
+              item.quantity,
+              item.unitCostCents,
+              nowIso,
+              productId
+            )
+            db.run(
+              `INSERT INTO stock_movements
+                (id, product_id, type, quantity, unit_cost_cents, reason, reference_type, reference_id, user_id, user_name, created_at)
+               VALUES (?, ?, 'compra', ?, ?, ?, 'purchase', ?, ?, ?, ?)`,
+              `sm_${Date.now()}_${index}`,
+              productId,
+              Math.abs(item.quantity),
+              item.unitCostCents,
+              `Compra ${purchaseNumber} · IA`,
+              id,
+              session.userId,
+              displayUser(session).name,
+              nowIso
+            )
+            if (updatePrices && item.updatePrice && item.sellPrice) {
+              db.run(
+                'UPDATE products SET price_cents = ?, updated_at = ? WHERE id = ?',
+                toCents(item.sellPrice),
+                nowIso,
+                productId
+              )
+            }
+          }
+        }
+        audit(
+          db,
+          session,
+          'Registro de compra desde IA',
+          'Compra',
+          `${purchaseNumber} · ${supplier.name} · ${prepared.length} líneas · total ${money(realTotalCents)} · ajuste ${money(adjustmentCents)}`,
           id
         )
       })
@@ -4237,18 +4800,33 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (section === 'ai') requireCap(session, 'configureAI')
       if (section === 'equipment') requireCap(session, 'manageStaff')
       if (section === 'business') requireCap(session, 'configureBusiness')
-      if (section === 'ai' && payload?.value && typeof payload.value === 'object' && 'apiKey' in payload.value) {
-        // La clave nunca se devuelve al renderer ni se guarda en texto plano en la base.
-        const value = { ...payload.value }
-        const key = String(value.apiKey ?? '')
+      if (section === 'ai') {
+        const current = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
+        const value = payload?.value && typeof payload.value === 'object' ? { ...payload.value } : {}
+        const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : ''
         delete value.apiKey
-        if (key) {
-          const current = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
-          db.setSetting('ai_config', { ...current, ...value, configured: true, keyFingerprint: sha256(key).slice(0, 12) })
-        } else {
-          const current = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
-          db.setSetting('ai_config', { ...current, ...value })
+        const provider = schema(value.provider ?? current.provider ?? 'gemini', z.enum(['gemini']))
+        const model = text(value.model ?? current.model, 'Modelo de IA', 1, 120)
+        let aiKey = db.getSetting<any>('ai_key', null)
+        if (apiKey) {
+          if (!safeStorage.isEncryptionAvailable()) {
+            fail('El almacén seguro de Windows no está disponible; no se puede guardar la clave de IA.')
+          }
+          aiKey = {
+            encrypted: safeStorage.encryptString(apiKey).toString('base64'),
+            fingerprint: sha256(apiKey).slice(0, 12),
+            updatedAt: new Date().toISOString()
+          }
+          db.setSetting('ai_key', aiKey)
         }
+        db.setSetting('ai_config', {
+          ...current,
+          ...value,
+          provider,
+          model,
+          configured: Boolean(aiKey?.encrypted),
+          keyFingerprint: aiKey?.fingerprint ?? undefined
+        })
       } else {
         const current = db.getSetting<any>(`${section}_config`, (DEFAULT_SETTINGS as any)[section])
         db.setSetting(`${section}_config`, { ...current, ...(payload?.value ?? {}) })

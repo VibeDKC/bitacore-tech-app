@@ -14,6 +14,8 @@ function receiptLines(purchase: Purchase) {
       description: 'Compra registrada según factura de proveedor',
       quantity: purchase.items || 1,
       unitPrice: purchase.subtotal,
+      ivaRate: 19,
+      iva: purchase.iva,
       lineTotal: purchase.subtotal
     }
   ]
@@ -53,6 +55,7 @@ function ReceiptBody({ purchase }: { purchase: Purchase }) {
             <th className="py-1.5 pr-2 font-semibold">Descripción</th>
             <th className="py-1.5 px-2 text-right font-semibold">Cant.</th>
             <th className="py-1.5 px-2 text-right font-semibold">Costo unit.</th>
+            <th className="py-1.5 px-2 text-right font-semibold">IVA</th>
             <th className="py-1.5 pl-2 text-right font-semibold">Total</th>
           </tr>
         </thead>
@@ -62,6 +65,7 @@ function ReceiptBody({ purchase }: { purchase: Purchase }) {
               <td className="py-1.5 pr-2">{line.description}</td>
               <td className="py-1.5 px-2 text-right tabular">{line.quantity}</td>
               <td className="py-1.5 px-2 text-right tabular">{formatCurrency(line.unitPrice)}</td>
+              <td className="py-1.5 px-2 text-right tabular">{line.ivaRate}% · {formatCurrency(line.iva)}</td>
               <td className="py-1.5 pl-2 text-right tabular">{formatCurrency(line.lineTotal)}</td>
             </tr>
           ))}
@@ -74,9 +78,21 @@ function ReceiptBody({ purchase }: { purchase: Purchase }) {
           <span className="font-semibold tabular">{formatCurrency(purchase.subtotal)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-black/60">IVA 19%</span>
+          <span className="text-black/60">IVA</span>
           <span className="font-semibold tabular">{formatCurrency(purchase.iva)}</span>
         </div>
+        {purchase.discount > 0 ? (
+          <div className="flex justify-between">
+            <span className="text-black/60">Descuento</span>
+            <span className="font-semibold tabular">- {formatCurrency(purchase.discount)}</span>
+          </div>
+        ) : null}
+        {purchase.adjustment !== 0 ? (
+          <div className="flex justify-between">
+            <span className="text-black/60">Ajuste</span>
+            <span className="font-semibold tabular">{formatCurrency(purchase.adjustment)}</span>
+          </div>
+        ) : null}
         <div className="flex justify-between border-t border-black/30 pt-1 text-[12px]">
           <span className="font-bold">Total</span>
           <span className="font-bold tabular">{formatCurrency(purchase.total)}</span>

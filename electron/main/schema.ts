@@ -206,18 +206,23 @@ CREATE TABLE IF NOT EXISTS suppliers (
 
 CREATE TABLE IF NOT EXISTS purchases (
   id TEXT PRIMARY KEY,
-  number TEXT NOT NULL UNIQUE,
+  number TEXT NOT NULL,
   supplier_id TEXT NOT NULL REFERENCES suppliers(id),
   purchase_date TEXT NOT NULL,
   item_count INTEGER NOT NULL DEFAULT 1,
   subtotal_cents INTEGER NOT NULL,
   iva_cents INTEGER NOT NULL,
   total_cents INTEGER NOT NULL,
+  discount_cents INTEGER NOT NULL DEFAULT 0,
+  adjustment_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK (status IN ('recibida', 'pendiente')),
   notes TEXT,
+  ai_metadata_json TEXT,
   created_by TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_purchases_supplier_number ON purchases(supplier_id, number);
 
 CREATE TABLE IF NOT EXISTS purchase_items (
   id TEXT PRIMARY KEY,
@@ -225,7 +230,9 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   product_id TEXT,
   description TEXT NOT NULL,
   quantity REAL NOT NULL DEFAULT 1,
-  unit_price_cents INTEGER NOT NULL DEFAULT 0
+  unit_price_cents INTEGER NOT NULL DEFAULT 0,
+  iva_rate REAL NOT NULL DEFAULT 19,
+  iva_cents INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS work_orders (

@@ -63,6 +63,22 @@ Los respaldos `.db` de versiones anteriores se siguen pudiendo restaurar. Al res
 
 La purga crea primero un respaldo completo, elimina las fotografías de las OT purgadas y conserva los respaldos para auditoría.
 
+### IA de facturas de compra
+
+- Escaneo de facturas con Gemini desde **Compras → Escanear factura**.
+- Se puede cargar una imagen o PDF, arrastrarlo o pegar una imagen con **Ctrl+V**.
+- La clave se cifra con el almacén seguro de Windows y nunca vuelve al renderer.
+- El propietario configura la IA y prueba la conexión; el administrador puede escanear si tiene `useAI` y `createPurchase`.
+- La revisión es humana y obligatoria.
+- La IA extrae proveedor, NIT, número, fecha, líneas, costos, IVA y totales.
+- Se permite IVA por línea, descuento global y **total real** de la factura.
+- La diferencia entre el total calculado y el real se registra como descuento o ajuste.
+- Se pueden crear productos nuevos dentro de la revisión.
+- Se advierte si el costo sube más del 10 %.
+- Se advierte y pide confirmación para facturas duplicadas del mismo proveedor y número.
+- No se guardan imágenes ni PDFs; solo la extracción, el modelo y un hash.
+- Las pruebas automatizadas usan un Gemini simulado, sin consumir API real.
+
 ### Evidencias fotográficas
 
 - Se pueden cargar archivos o tomar la foto con la cámara del equipo. Si no hay cámara o el permiso falla, la carga de archivos permanece disponible.
@@ -143,11 +159,13 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.7.0` | Credenciales cifradas, borrado automático, mensajes y reportes PDF. |
 | `npm run test:acceptance:1.8.0` | Permisos de admin, negocio, salud %, garantía de inventario y falla/mantenimiento. |
 | `npm run test:acceptance:1.9.0` | Teléfonos múltiples, documento opcional, condición/origen y ficha “Otro”. |
+| `npm run test:acceptance:1.10.0` | IA de facturas, Ctrl+V, revisión, AliExpress, duplicados y ajuste. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
 | `npm run test:migration:1.8.0` | Migración 8, garantía por repuesto y nuevas capacidades. |
 | `npm run test:migration:1.9.0` | Migración 9, teléfonos y diccionarios de inventario/componentes. |
+| `npm run test:migration:1.10.0` | Migración 10, IVA por línea y revisión de compras. |
 
 ## Pruebas de aceptación
 
@@ -164,14 +182,16 @@ npm run test:acceptance:1.6.1
 npm run test:acceptance:1.7.0
 npm run test:acceptance:1.8.0
 npm run test:acceptance:1.9.0
+npm run test:acceptance:1.10.0
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
 npm run test:migration:1.7.0
 npm run test:migration:1.8.0
 npm run test:migration:1.9.0
+npm run test:migration:1.10.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK`, `13/13 OK` y `9/9 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK`, `13/13 OK`, `9/9 OK` y `7/7 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -179,7 +199,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.9.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.10.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -205,5 +225,6 @@ El instalador queda en `release/` como `BitacoreTech-1.9.0-x64.exe`. La configur
 - El admin puede editar la identidad del negocio y la matriz de permisos; las cláusulas, la garantía legal y el abandono siguen siendo del propietario.
 - Las credenciales del equipo son temporales, cifradas y se eliminan al entregar o cerrar la OT.
 - Los reportes de diagnóstico se generan en PDF A4 y usan las plantillas de Configuración → Mensajes; WhatsApp se abre con el mensaje, pero el PDF se adjunta manualmente.
-- La IA es opcional y su integración real (facturas, diagnóstico y resúmenes) sigue pendiente. Hoy solo existe la configuración y la huella de la clave; no se guarda la clave en texto plano.
+- La IA de facturas de compra es opcional; el diagnóstico técnico, los resúmenes y las anomalías de caja siguen pendientes.
+- Al restaurar un respaldo en otro equipo se descarta la clave de IA y se debe volver a configurar.
 - Las fotos de evidencia se conservan en la carpeta de datos y en cada respaldo completo; no se envían a servicios externos.
