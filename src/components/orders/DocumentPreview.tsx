@@ -76,6 +76,8 @@ interface DocumentData {
   evidenceCount: number
   internalComponents?: string
   includesExternalDrives?: boolean
+  customBuild?: boolean
+  alias?: string
   technicalSheet?: TechnicalSheet
 }
 
@@ -141,6 +143,8 @@ function buildData(order: WorkOrder, customer: Customer | null, legal: LegalConf
     evidenceCount: order.evidenceCount ?? 0,
     internalComponents: intake?.internalComponents,
     includesExternalDrives: intake?.includesExternalDrives,
+    customBuild: Boolean(intake?.customBuild),
+    alias: intake?.alias,
     technicalSheet: intake?.technicalSheet
   }
 }
@@ -350,9 +354,9 @@ function A4Copy({
             <Info label="Documento" value={data.customerDocument} />
             <Info label="Teléfono" value={data.customerPhone} />
             <Info label="Equipo" value={order.equipmentType} />
-            <Info label="Marca" value={order.brand} />
+            <Info label="Marca" value={data.customBuild ? 'Armado' : order.brand} />
             <Info label="Modelo" value={order.model} />
-            <Info label="Serial" value={data.serial} />
+            <Info label={data.customBuild ? 'Código interno' : 'Serial'} value={data.serial} />
             <Info label="Técnico receptor" value={data.receivedBy} />
           </div>
 

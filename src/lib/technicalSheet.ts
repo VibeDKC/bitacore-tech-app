@@ -45,7 +45,8 @@ function normalizeCpu(value: unknown): TechnicalSheetCpu {
   return {
     brand: text(row.brand),
     family: text(row.family),
-    model: text(row.model)
+    model: text(row.model),
+    notVisible: Boolean(row.notVisible)
   }
 }
 
@@ -58,7 +59,8 @@ function normalizeGpu(value: unknown): TechnicalSheetGpu {
     type,
     brand: text(row.brand),
     model: text(row.model),
-    vram: text(row.vram)
+    vram: text(row.vram),
+    notVisible: Boolean(row.notVisible)
   }
 }
 
@@ -109,11 +111,15 @@ export function normalizeTechnicalSheet(value: unknown): TechnicalSheet {
   const hasLegacy = Object.values(legacy).some(Boolean)
   return {
     os: text(source.os),
+    osNotVisible: Boolean(source.osNotVisible),
     cpu: normalizeCpu(source.cpu),
     gpu: normalizeGpu(source.gpu),
     ramModules: normalizeRamRows(source.ramModules),
+    ramNotVisible: Boolean(source.ramNotVisible),
     storageDrives: normalizeStorageRows(source.storageDrives),
+    storageNotVisible: Boolean(source.storageNotVisible),
     battery: text(source.battery),
+    batteryNotVisible: Boolean(source.batteryNotVisible),
     notes: text(source.notes),
     ...(hasLegacy ? { legacy } : {})
   }
@@ -122,15 +128,21 @@ export function normalizeTechnicalSheet(value: unknown): TechnicalSheet {
 export function sanitizeTechnicalSheet(value: TechnicalSheet): TechnicalSheet {
   const cpu = value.cpu
   const gpu = value.gpu
-  const cleanCpu = cpu && (cpu.brand || cpu.family || cpu.model)
-    ? { brand: cpu.brand?.trim() ?? '', family: cpu.family?.trim() ?? '', model: cpu.model?.trim() ?? '' }
+  const cleanCpu = cpu && (cpu.brand || cpu.family || cpu.model || cpu.notVisible)
+    ? {
+        brand: cpu.brand?.trim() ?? '',
+        family: cpu.family?.trim() ?? '',
+        model: cpu.model?.trim() ?? '',
+        notVisible: Boolean(cpu.notVisible)
+      }
     : undefined
-  const cleanGpu = gpu && (gpu.type || gpu.brand || gpu.model || gpu.vram)
+  const cleanGpu = gpu && (gpu.type || gpu.brand || gpu.model || gpu.vram || gpu.notVisible)
     ? {
         type: gpu.type ?? '',
         brand: gpu.brand?.trim() ?? '',
         model: gpu.model?.trim() ?? '',
-        vram: gpu.vram?.trim() ?? ''
+        vram: gpu.vram?.trim() ?? '',
+        notVisible: Boolean(gpu.notVisible)
       }
     : undefined
   const ramModules = (value.ramModules ?? [])
@@ -156,11 +168,15 @@ export function sanitizeTechnicalSheet(value: TechnicalSheet): TechnicalSheet {
     .filter((row) => Object.entries(row).some(([key, item]) => key !== 'id' && Boolean(item)))
   return {
     os: value.os?.trim() ?? '',
+    osNotVisible: Boolean(value.osNotVisible),
     cpu: cleanCpu,
     gpu: cleanGpu,
     ramModules,
+    ramNotVisible: Boolean(value.ramNotVisible),
     storageDrives,
+    storageNotVisible: Boolean(value.storageNotVisible),
     battery: value.battery?.trim() ?? '',
+    batteryNotVisible: Boolean(value.batteryNotVisible),
     notes: value.notes?.trim() ?? '',
     ...(value.legacy ? { legacy: value.legacy } : {})
   }
@@ -176,22 +192,28 @@ export function gpuKindLabel(value?: GpuKind) {
 export function technicalSheetEntries(value: unknown): Array<[string, string]> {
   const sheet = normalizeTechnicalSheet(value)
   const entries: Array<[string, string]> = []
-  if (sheet.os) entries.push(['Sistema operativo', sheet.os])
+  if (sheet.osNotVisible) entries.push(['Sistema operativo', 'N/A'])
+  else if (sheet.os) entries.push(['Sistema operativo', sheet.os])
   const cpu = [sheet.cpu?.brand, sheet.cpu?.family, sheet.cpu?.model].filter(Boolean).join(' ')
-  if (cpu) entries.push(['CPU', cpu])
+  if (sheet.cpu?.notVisible) entries.push(['CPU', 'N/A'])
+  else if (cpu) entries.push(['CPU', cpu])
   const gpu = [gpuKindLabel(sheet.gpu?.type), sheet.gpu?.brand, sheet.gpu?.model, sheet.gpu?.vram]
     .filter(Boolean)
     .join(' ')
-  if (gpu) entries.push(['GPU', gpu])
+  if (sheet.gpu?.notVisible) entries.push(['GPU', 'N/A'])
+  else if (gpu) entries.push(['GPU', gpu])
   const ramRows = (sheet.ramModules ?? [])
     .map((row) => [row.type, row.capacity, row.speed, row.brand, row.warranty].filter(Boolean).join(' '))
     .filter(Boolean)
-  if (ramRows.length) entries.push(['RAM', ramRows.join(' · ')])
+  if (sheet.ramNotVisible) entries.push(['RAM', 'N/A'])
+  else if (ramRows.length) entries.push(['RAM', ramRows.join(' · ')])
   const storageRows = (sheet.storageDrives ?? [])
     .map((row) => [row.type, row.capacity, row.speed, row.model, row.health, row.warranty].filter(Boolean).join(' '))
     .filter(Boolean)
-  if (storageRows.length) entries.push(['Almacenamiento', storageRows.join(' · ')])
-  if (sheet.battery) entries.push(['Batería', sheet.battery])
+  if (sheet.storageNotVisible) entries.push(['Almacenamiento', 'N/A'])
+  else if (storageRows.length) entries.push(['Almacenamiento', storageRows.join(' · ')])
+  if (sheet.batteryNotVisible) entries.push(['Batería', 'N/A'])
+  else if (sheet.battery) entries.push(['Batería', sheet.battery])
   if (sheet.notes) entries.push(['Observaciones', sheet.notes])
   if (sheet.legacy?.cpu) entries.push(['CPU · ficha anterior', sheet.legacy.cpu])
   if (sheet.legacy?.gpu) entries.push(['GPU · ficha anterior', sheet.legacy.gpu])

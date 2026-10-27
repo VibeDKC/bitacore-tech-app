@@ -18,6 +18,7 @@ import { api, errorMessage } from '@/lib/backend'
 import { Avatar } from '@/components/ui/Avatar'
 import { SearchInput } from '@/components/ui/Input'
 import { DropdownDivider, DropdownItem, DropdownLabel, DropdownMenu } from '@/components/ui/DropdownMenu'
+import { ProfileDialog } from '@/components/layout/ProfileDialog'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -37,6 +38,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   const [search, setSearch] = useState('')
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [switching, setSwitching] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const isDashboard = location.pathname === '/'
@@ -223,7 +225,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           </div>
           <DropdownDivider />
           <DropdownLabel>Cuenta</DropdownLabel>
-          <DropdownItem icon={<UserRound className="h-3.5 w-3.5" />} label="Mi perfil" description="Datos de la cuenta" onClick={() => navigate('/configuracion')} />
+          <DropdownItem icon={<UserRound className="h-3.5 w-3.5" />} label="Mi perfil" description="Datos de la cuenta" onClick={() => setProfileOpen(true)} />
           {canAccessModule(role, 'settings') ? (
             <DropdownItem icon={<Settings className="h-3.5 w-3.5" />} label="Configuración" onClick={() => navigate('/configuracion')} />
           ) : null}
@@ -235,6 +237,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
         </DropdownMenu>
       </div>
 
+      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
     </header>
   )
 }

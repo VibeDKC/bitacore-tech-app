@@ -154,6 +154,7 @@ export interface TechnicalSheetCpu {
   brand?: string
   family?: string
   model?: string
+  notVisible?: boolean
 }
 
 export type GpuKind = '' | 'none' | 'integrated' | 'dedicated'
@@ -163,6 +164,7 @@ export interface TechnicalSheetGpu {
   brand?: string
   model?: string
   vram?: string
+  notVisible?: boolean
 }
 
 export interface TechnicalSheetRamModule {
@@ -195,11 +197,15 @@ export interface TechnicalSheetLegacy {
 
 export interface TechnicalSheet {
   os?: string
+  osNotVisible?: boolean
   cpu?: TechnicalSheetCpu
   gpu?: TechnicalSheetGpu
   ramModules?: TechnicalSheetRamModule[]
+  ramNotVisible?: boolean
   storageDrives?: TechnicalSheetStorageDrive[]
+  storageNotVisible?: boolean
   battery?: string
+  batteryNotVisible?: boolean
   notes?: string
   /** Datos de las OT creadas antes de 1.6.0. */
   legacy?: TechnicalSheetLegacy
@@ -217,6 +223,8 @@ export interface LegalSnapshot {
 export interface WorkOrderIntake {
   category: DeviceCategory
   categoryLabel: string
+  customBuild?: boolean
+  alias?: string
   powerState: PowerState
   conditions: IntakeConditions
   conditionNotes: string

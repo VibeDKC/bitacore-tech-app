@@ -7,8 +7,6 @@ import {
   CalendarDays,
   Camera,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   ClipboardList,
   CreditCard,
   FileText,
@@ -116,7 +114,7 @@ export function OrderDetailPage() {
 
   const [diagnosis, setDiagnosis] = useState('')
   const [editingDiagnosis, setEditingDiagnosis] = useState(false)
-  const [sheetOpen, setSheetOpen] = useState(false)
+
   const [itemModal, setItemModal] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
   const [paymentModal, setPaymentModal] = useState(false)
@@ -202,6 +200,11 @@ export function OrderDetailPage() {
         .map(([key]) => conditionLabels[key] ?? key)
     : []
   const technicalEntries = intake?.technicalSheet ? technicalSheetEntries(intake.technicalSheet) : []
+  const equipmentTitle = order
+    ? intake?.customBuild
+      ? intake.alias ?? order.model
+      : `${order.brand} ${order.model}`
+    : ''
   const sortedTimeline = useMemo(
     () =>
       [...(order?.timeline ?? [])].sort(
@@ -552,7 +555,7 @@ export function OrderDetailPage() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="font-display text-xl font-bold tracking-tight text-ink">
-                  {order.brand} {order.model}
+                  {equipmentTitle}
                 </h1>
                 <WorkOrderStatusBadge status={status} />
               </div>
@@ -632,8 +635,8 @@ export function OrderDetailPage() {
             <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
               {[
                 ['Tipo de equipo', order.equipmentType],
-                ['Marca / modelo', `${order.brand} ${order.model}`],
-                ['Serial', order.serial],
+                ['Marca / modelo', intake?.customBuild ? `Armado · ${intake.alias ?? order.model}` : `${order.brand} ${order.model}`],
+                ['Serial', intake?.customBuild ? `Código interno ${order.serial}` : order.serial],
                 ['Técnico receptor', intake?.receivedBy ?? order.technician],
                 ['Accesorios', order.accessories],
                 ['Condición física', order.physicalCondition],
@@ -694,24 +697,17 @@ export function OrderDetailPage() {
 
             {technicalEntries.length ? (
               <div className="mt-4 overflow-hidden rounded-xl border border-line">
-                <button
-                  type="button"
-                  onClick={() => setSheetOpen((value) => !value)}
-                  className="focus-ring flex w-full items-center justify-between gap-2 bg-slate-50/70 px-3.5 py-2.5 text-left"
-                >
+                <div className="bg-slate-50/70 px-3.5 py-2.5">
                   <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Ficha técnica avanzada</span>
-                  {sheetOpen ? <ChevronUp className="h-3.5 w-3.5 text-slate-400" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />}
-                </button>
-                {sheetOpen ? (
-                  <div className="grid gap-2 px-3.5 py-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {technicalEntries.map(([label, value]) => (
-                      <div key={label}>
-                        <p className="text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
-                        <p className="mt-0.5 text-[10px] text-slate-600">{value}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                </div>
+                <div className="grid gap-2 px-3.5 py-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {technicalEntries.map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-[8px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-600">{value}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>

@@ -111,6 +111,29 @@ function DictionarySelect({
   )
 }
 
+function NotVisibleToggle({
+  checked,
+  onChange,
+  disabled
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-1.5 text-[9px] font-semibold text-slate-400">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        disabled={disabled}
+        className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+      />
+      No visible / N/A
+    </label>
+  )
+}
+
 function RowShell({
   title,
   children,
@@ -212,31 +235,57 @@ export function TechnicalSheetForm({
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <label className="block">
-          <span className="field-label">Sistema operativo</span>
-          <SelectOrCustom value={value.os} options={osOptions} onChange={(os) => onChange({ ...value, os })} disabled={disabled} />
-        </label>
-        <label className="block sm:col-span-2">
-          <span className="field-label">Batería</span>
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="field-label">Sistema operativo</span>
+            <NotVisibleToggle
+              checked={Boolean(value.osNotVisible)}
+              onChange={(checked) => onChange({ ...value, osNotVisible: checked })}
+              disabled={disabled}
+            />
+          </div>
+          <SelectOrCustom
+            value={value.os}
+            options={osOptions}
+            onChange={(os) => onChange({ ...value, os })}
+            disabled={disabled || Boolean(value.osNotVisible)}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="field-label">Batería</span>
+            <NotVisibleToggle
+              checked={Boolean(value.batteryNotVisible)}
+              onChange={(checked) => onChange({ ...value, batteryNotVisible: checked })}
+              disabled={disabled}
+            />
+          </div>
           <input
             value={value.battery ?? ''}
             onChange={(event) => onChange({ ...value, battery: event.target.value })}
-            disabled={disabled}
-            className="field h-9 text-[11px]"
+            disabled={disabled || Boolean(value.batteryNotVisible)}
+            className="field h-9 text-[11px] disabled:bg-slate-50 disabled:text-slate-400"
             placeholder="Estado, duración o número de celdas"
           />
-        </label>
+        </div>
       </div>
 
       <div className="rounded-xl border border-line p-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-            <CpuIcon className="h-4 w-4" />
-          </span>
-          <div>
-            <p className="text-[11px] font-bold text-ink">Procesador</p>
-            <p className="text-[9px] text-slate-400">Marca y familia desde diccionario; modelo editable.</p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+              <CpuIcon className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-[11px] font-bold text-ink">Procesador</p>
+              <p className="text-[9px] text-slate-400">Marca y familia desde diccionario; modelo editable.</p>
+            </div>
           </div>
+          <NotVisibleToggle
+            checked={Boolean(cpu.notVisible)}
+            onChange={(checked) => patchCpu({ notVisible: checked })}
+            disabled={disabled}
+          />
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           <label className="block">
@@ -245,7 +294,7 @@ export function TechnicalSheetForm({
               value={cpu.brand}
               options={cpuBrands}
               onChange={(brand) => patchCpu({ brand, family: '' })}
-              disabled={disabled}
+              disabled={disabled || Boolean(cpu.notVisible)}
             />
           </label>
           <label className="block">
@@ -254,7 +303,7 @@ export function TechnicalSheetForm({
               value={cpu.family}
               options={cpuFamilyOptions}
               onChange={(family) => patchCpu({ family })}
-              disabled={disabled}
+              disabled={disabled || Boolean(cpu.notVisible)}
               customLabel="Otra familia"
             />
           </label>
@@ -263,8 +312,8 @@ export function TechnicalSheetForm({
             <input
               value={cpu.model ?? ''}
               onChange={(event) => patchCpu({ model: event.target.value })}
-              disabled={disabled}
-              className="field h-9 text-[11px]"
+              disabled={disabled || Boolean(cpu.notVisible)}
+              className="field h-9 text-[11px] disabled:bg-slate-50 disabled:text-slate-400"
               placeholder="Ej. i7-12700H, Ryzen 7 5800X"
             />
           </label>
@@ -272,14 +321,21 @@ export function TechnicalSheetForm({
       </div>
 
       <div className="rounded-xl border border-line p-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
-            <Monitor className="h-4 w-4" />
-          </span>
-          <div>
-            <p className="text-[11px] font-bold text-ink">Tarjeta gráfica</p>
-            <p className="text-[9px] text-slate-400">Tipo, marca, modelo y VRAM.</p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
+              <Monitor className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-[11px] font-bold text-ink">Tarjeta gráfica</p>
+              <p className="text-[9px] text-slate-400">Tipo, marca, modelo y VRAM.</p>
+            </div>
           </div>
+          <NotVisibleToggle
+            checked={Boolean(gpu.notVisible)}
+            onChange={(checked) => patchGpu({ notVisible: checked })}
+            disabled={disabled}
+          />
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <label className="block">
@@ -287,8 +343,8 @@ export function TechnicalSheetForm({
             <select
               value={gpu.type ?? ''}
               onChange={(event) => patchGpu({ type: event.target.value as GpuKind })}
-              disabled={disabled}
-              className="field h-9 text-[11px]"
+              disabled={disabled || Boolean(gpu.notVisible)}
+              className="field h-9 text-[11px] disabled:bg-slate-50 disabled:text-slate-400"
             >
               {gpuKinds.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -299,15 +355,20 @@ export function TechnicalSheetForm({
           </label>
           <label className="block">
             <span className="field-label">Marca</span>
-            <SelectOrCustom value={gpu.brand} options={gpuBrands} onChange={(brand) => patchGpu({ brand })} disabled={disabled} />
+            <SelectOrCustom
+              value={gpu.brand}
+              options={gpuBrands}
+              onChange={(brand) => patchGpu({ brand })}
+              disabled={disabled || Boolean(gpu.notVisible)}
+            />
           </label>
           <label className="block">
             <span className="field-label">Modelo</span>
             <input
               value={gpu.model ?? ''}
               onChange={(event) => patchGpu({ model: event.target.value })}
-              disabled={disabled}
-              className="field h-9 text-[11px]"
+              disabled={disabled || Boolean(gpu.notVisible)}
+              className="field h-9 text-[11px] disabled:bg-slate-50 disabled:text-slate-400"
               placeholder="RTX 3060, RX 6700 XT..."
             />
           </label>
@@ -316,8 +377,8 @@ export function TechnicalSheetForm({
             <input
               value={gpu.vram ?? ''}
               onChange={(event) => patchGpu({ vram: event.target.value })}
-              disabled={disabled}
-              className="field h-9 text-[11px]"
+              disabled={disabled || Boolean(gpu.notVisible)}
+              className="field h-9 text-[11px] disabled:bg-slate-50 disabled:text-slate-400"
               placeholder="6 GB, 8 GB..."
             />
           </label>
@@ -335,17 +396,29 @@ export function TechnicalSheetForm({
               <p className="text-[9px] text-slate-400">Añade un módulo por cada instalación.</p>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onChange({ ...value, ramModules: [...ramModules, newRamModule()] })}
-            disabled={disabled}
-            leftIcon={<Plus className="h-3.5 w-3.5" />}
-          >
-            Añadir módulo
-          </Button>
+          <div className="flex items-center gap-3">
+            <NotVisibleToggle
+              checked={Boolean(value.ramNotVisible)}
+              onChange={(checked) => onChange({ ...value, ramNotVisible: checked })}
+              disabled={disabled}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onChange({ ...value, ramModules: [...ramModules, newRamModule()] })}
+              disabled={disabled || Boolean(value.ramNotVisible)}
+              leftIcon={<Plus className="h-3.5 w-3.5" />}
+            >
+              Añadir módulo
+            </Button>
+          </div>
         </div>
+        {value.ramNotVisible ? (
+          <p className="mt-3 rounded-lg border border-dashed border-line px-3 py-3 text-center text-[10px] text-slate-400">
+            RAM marcada como no visible / N/A.
+          </p>
+        ) : (
         <div className={cn('mt-3 space-y-2', !ramModules.length && 'rounded-lg border border-dashed border-line px-3 py-3 text-center text-[10px] text-slate-400')}>
           {ramModules.length ? (
             ramModules.map((row, index) => (
@@ -383,6 +456,7 @@ export function TechnicalSheetForm({
             'Sin módulos registrados.'
           )}
         </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-line p-3">
@@ -396,17 +470,29 @@ export function TechnicalSheetForm({
               <p className="text-[9px] text-slate-400">Añade un disco por cada unidad instalada.</p>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onChange({ ...value, storageDrives: [...storageDrives, newStorageDrive()] })}
-            disabled={disabled}
-            leftIcon={<Plus className="h-3.5 w-3.5" />}
-          >
-            Añadir disco
-          </Button>
+          <div className="flex items-center gap-3">
+            <NotVisibleToggle
+              checked={Boolean(value.storageNotVisible)}
+              onChange={(checked) => onChange({ ...value, storageNotVisible: checked })}
+              disabled={disabled}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onChange({ ...value, storageDrives: [...storageDrives, newStorageDrive()] })}
+              disabled={disabled || Boolean(value.storageNotVisible)}
+              leftIcon={<Plus className="h-3.5 w-3.5" />}
+            >
+              Añadir disco
+            </Button>
+          </div>
         </div>
+        {value.storageNotVisible ? (
+          <p className="mt-3 rounded-lg border border-dashed border-line px-3 py-3 text-center text-[10px] text-slate-400">
+            Almacenamiento marcado como no visible / N/A.
+          </p>
+        ) : (
         <div className={cn('mt-3 space-y-2', !storageDrives.length && 'rounded-lg border border-dashed border-line px-3 py-3 text-center text-[10px] text-slate-400')}>
           {storageDrives.length ? (
             storageDrives.map((row, index) => (
@@ -454,6 +540,7 @@ export function TechnicalSheetForm({
             'Sin discos registrados.'
           )}
         </div>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">

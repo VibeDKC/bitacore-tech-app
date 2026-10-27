@@ -4,9 +4,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   BadgeCheck,
+  Camera,
   Check,
   ChevronDown,
-  ChevronUp,
   CircleDollarSign,
   FileText,
   Gamepad2,
@@ -193,12 +193,16 @@ export function NewOrderPage() {
   }, [customerId])
 
   function applyEquipment(equipment: Equipment) {
-    setCategory((equipment.category as DeviceCategory) || 'otro')
+    const category = (equipment.category as DeviceCategory) || 'otro'
+    const custom = (category === 'pc_torre' || category === 'otro') && equipment.brand === 'Armado'
+    setCategory(category)
     setDeviceLabel(equipment.categoryLabel || equipment.equipmentType || 'Equipo')
-    setBrand(equipment.brand)
-    setModel(equipment.model)
-    setSerial(equipment.serial)
-    setSerialUnknown(equipment.serial === 'Sin serial' || equipment.serial === 'Serial no visible')
+    setCustomBuild(custom)
+    setCustomAlias(custom ? equipment.model : '')
+    setBrand(custom ? '' : equipment.brand)
+    setModel(custom ? '' : equipment.model)
+    setSerial(custom ? '' : equipment.serial)
+    setSerialUnknown(!custom && (equipment.serial === 'Sin serial' || equipment.serial === 'Serial no visible'))
     setAccessories(
       equipment.accessories && equipment.accessories !== 'Sin accesorios'
         ? equipment.accessories.split(',').map((item) => item.trim()).filter(Boolean)
@@ -210,6 +214,8 @@ export function NewOrderPage() {
   function selectEquipment(id: string) {
     setEquipmentId(id)
     if (!id) {
+      setCustomBuild(false)
+      setCustomAlias('')
       setBrand('')
       setModel('')
       setSerial('')
@@ -223,6 +229,8 @@ export function NewOrderPage() {
 
   const [category, setCategory] = useState<DeviceCategory>('laptop')
   const [deviceLabel, setDeviceLabel] = useState('Laptop')
+  const [customBuild, setCustomBuild] = useState(false)
+  const [customAlias, setCustomAlias] = useState('')
   const [brand, setBrand] = useState('')
   const [model, setModel] = useState('')
   const [serial, setSerial] = useState('')
@@ -246,7 +254,6 @@ export function NewOrderPage() {
   const [technicianId, setTechnicianId] = useState('')
   const [promisedAt, setPromisedAt] = useState(defaultPromiseDate)
   const [notes, setNotes] = useState('')
-  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [technicalSheet, setTechnicalSheet] = useState<TechnicalSheet>(() => emptyTechnicalSheet())
 
   const [legalAccepted, setLegalAccepted] = useState(false)
@@ -287,6 +294,10 @@ export function NewOrderPage() {
     deviceCards.find((item) => item.category === category) ??
     deviceCards[0]
   const SelectedDeviceIcon = selectedDevice.icon
+  const supportsCustomBuild = category === 'pc_torre' || category === 'otro'
+  const equipmentDisplayName = customBuild && supportsCustomBuild
+    ? customAlias.trim() || 'Equipo armado'
+    : `${brand} ${model}`.trim() || selectedDevice.label
 
   const customerMatches = useMemo(() => {
     const term = customerQuery.trim().toLowerCase()
@@ -404,6 +415,8 @@ export function NewOrderPage() {
     const laptopCard = deviceCards.find((item) => item.category === 'laptop') ?? deviceCards[0]
     setCategory(laptopCard?.category ?? 'laptop')
     setDeviceLabel(laptopCard?.label ?? 'Laptop')
+    setCustomBuild(false)
+    setCustomAlias('')
     setBrand('')
     setModel('')
     setSerial('')
@@ -426,7 +439,6 @@ export function NewOrderPage() {
     setTechnicianId(technicians[0]?.id ?? '')
     setPromisedAt(defaultPromiseDate())
     setNotes('')
-    setAdvancedOpen(false)
     setTechnicalSheet(emptyTechnicalSheet())
     setLegalAccepted(false)
     setEvidenceDrafts([])
@@ -443,7 +455,12 @@ export function NewOrderPage() {
       toast.error('Selecciona o crea el cliente')
       return
     }
-    if (!brand.trim() || !model.trim()) {
+    if (customBuild && supportsCustomBuild) {
+      if (!customAlias.trim()) {
+        toast.error('Escribe un alias para identificar el equipo armado')
+        return
+      }
+    } else if (!brand.trim() || !model.trim()) {
       toast.error('Completa la marca y el modelo del equipo')
       return
     }
@@ -487,6 +504,8 @@ export function NewOrderPage() {
     const intake: WorkOrderIntake = {
       category,
       categoryLabel: selectedDevice.label,
+      customBuild: customBuild && supportsCustomBuild ? true : undefined,
+      alias: customBuild && supportsCustomBuild ? customAlias.trim() : undefined,
       powerState,
       conditions: normalizedConditions,
       conditionNotes: conditionNotes.trim(),
@@ -520,9 +539,15 @@ export function NewOrderPage() {
         deviceCategory: category,
         categoryLabel: selectedDevice.label,
         equipmentType: selectedDevice.equipmentType,
-        brand: brand.trim(),
-        model: model.trim(),
-        serial: serialUnknown ? 'Serial no visible' : serial.trim() || 'Sin serial',
+        customBuild: customBuild && supportsCustomBuild,
+        alias: customBuild && supportsCustomBuild ? customAlias.trim() : undefined,
+        brand: customBuild && supportsCustomBuild ? 'Armado' : brand.trim(),
+        model: customBuild && supportsCustomBuild ? customAlias.trim() : model.trim(),
+        serial: customBuild && supportsCustomBuild
+          ? ''
+          : serialUnknown
+            ? 'Serial no visible'
+            : serial.trim() || 'Sin serial',
         accessories: accessories.join(', ') || 'Sin accesorios',
         physicalCondition,
         reportedIssue: reportedIssue.trim(),
@@ -757,7 +782,9 @@ export function NewOrderPage() {
                 <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">
                   {selectedEquipment
                     ? `Equipo registrado el ${formatDate(selectedEquipment.createdAt)}. Se reutiliza su ficha y se conserva el historial.`
-                    : 'Se creará un equipo nuevo al guardar la OT. Si el serial ya existe para este cliente, se reutilizará.'}
+                    : customBuild && supportsCustomBuild
+                      ? 'Se creará un equipo armado nuevo con su alias y código interno. Si la misma torre vuelve, selecciónala desde este historial.'
+                      : 'Se creará un equipo nuevo al guardar la OT. Si el serial ya existe para este cliente, se reutilizará.'}
                 </p>
               </div>
             ) : null}
@@ -773,6 +800,10 @@ export function NewOrderPage() {
                     onClick={() => {
                       setCategory(option.category)
                       setDeviceLabel(option.label)
+                      if (option.category !== 'pc_torre' && option.category !== 'otro') {
+                        setCustomBuild(false)
+                        setCustomAlias('')
+                      }
                     }}
                     className={cn(
                       'focus-ring rounded-xl border p-3 text-left transition',
@@ -789,47 +820,92 @@ export function NewOrderPage() {
               })}
             </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="field-label">Marca *</span>
+            {supportsCustomBuild ? (
+              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-sky-100 bg-sky-50/60 px-3.5 py-3">
                 <input
-                  value={brand}
-                  onChange={(event) => setBrand(event.target.value)}
-                  placeholder={category === 'laptop' ? 'Apple, HP, Lenovo...' : category === 'celular' ? 'Samsung, Apple, Xiaomi...' : 'Marca del equipo'}
-                  className="field"
+                  type="checkbox"
+                  checked={customBuild}
+                  onChange={(event) => {
+                    const checked = event.target.checked
+                    setCustomBuild(checked)
+                    if (checked) {
+                      setBrand('')
+                      setModel('')
+                      setSerial('')
+                      setSerialUnknown(false)
+                    } else {
+                      setCustomAlias('')
+                    }
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
                 />
-              </label>
-              <label className="block">
-                <span className="field-label">Modelo *</span>
-                <input
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  placeholder={category === 'laptop' ? 'MacBook Pro 13" 2020' : 'Modelo o referencia'}
-                  className="field"
-                />
-              </label>
-              <label className="block">
-                <span className="field-label">Número de serie</span>
-                <input
-                  value={serialUnknown ? '' : serial}
-                  onChange={(event) => setSerial(event.target.value)}
-                  disabled={serialUnknown}
-                  placeholder={serialUnknown ? 'No visible / no aplica' : 'Serial del equipo'}
-                  className="field disabled:bg-slate-50 disabled:text-slate-400"
-                />
-              </label>
-              <label className="flex items-end pb-2.5">
-                <span className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-500">
-                  <input
-                    type="checkbox"
-                    checked={serialUnknown}
-                    onChange={(event) => setSerialUnknown(event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                  />
-                  Serial ilegible, borrado o no disponible
+                <span>
+                  <span className="block text-[11px] font-semibold text-ink">Equipo armado por partes</span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-slate-500">
+                    Para torres o equipos ensamblados con componentes distintos. No se pedirá marca, modelo ni serial de fábrica; se identificará con un alias y un código interno.
+                  </span>
                 </span>
               </label>
-            </div>
+            ) : null}
+
+            {customBuild && supportsCustomBuild ? (
+              <div className="mt-4 rounded-xl border border-line bg-slate-50/60 p-3.5">
+                <label className="block">
+                  <span className="field-label">Alias del equipo *</span>
+                  <input
+                    value={customAlias}
+                    onChange={(event) => setCustomAlias(event.target.value)}
+                    placeholder="Ej. Torre gaming, PC de la oficina, Servidor de recepción"
+                    className="field"
+                  />
+                </label>
+                <p className="mt-2 text-[9px] leading-relaxed text-slate-400">
+                  Se guardará como marca <span className="font-semibold">Armado</span> y se asignará un código interno. Si la misma torre vuelve, selecciónala desde el historial del cliente.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="field-label">Marca *</span>
+                  <input
+                    value={brand}
+                    onChange={(event) => setBrand(event.target.value)}
+                    placeholder={category === 'laptop' ? 'Apple, HP, Lenovo...' : category === 'celular' ? 'Samsung, Apple, Xiaomi...' : 'Marca del equipo'}
+                    className="field"
+                  />
+                </label>
+                <label className="block">
+                  <span className="field-label">Modelo *</span>
+                  <input
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    placeholder={category === 'laptop' ? 'MacBook Pro 13" 2020' : 'Modelo o referencia'}
+                    className="field"
+                  />
+                </label>
+                <label className="block">
+                  <span className="field-label">Número de serie</span>
+                  <input
+                    value={serialUnknown ? '' : serial}
+                    onChange={(event) => setSerial(event.target.value)}
+                    disabled={serialUnknown}
+                    placeholder={serialUnknown ? 'No visible / no aplica' : 'Serial del equipo'}
+                    className="field disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                </label>
+                <label className="flex items-end pb-2.5">
+                  <span className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={serialUnknown}
+                      onChange={(event) => setSerialUnknown(event.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                    />
+                    Serial ilegible, borrado o no disponible
+                  </span>
+                </label>
+              </div>
+            )}
 
             <div className="mt-5">
               <p className="field-label">Estado de encendido al recibir</p>
@@ -1023,6 +1099,23 @@ export function NewOrderPage() {
           <section className="card p-5 lg:p-6">
             <SectionTitle
               step="3"
+              icon={Monitor}
+              title="Ficha técnica avanzada"
+              description="Componentes, RAM y almacenamiento. Usa N/A cuando un componente no sea visible o no aplique."
+            />
+            <div className="mt-4">
+              <TechnicalSheetForm
+                value={technicalSheet}
+                onChange={setTechnicalSheet}
+                nodes={dictionaries}
+                disabled={saving}
+              />
+            </div>
+          </section>
+
+          <section className="card p-5 lg:p-6">
+            <SectionTitle
+              step="4"
               icon={Package}
               title="Accesorios dejados"
               description="Marca los accesorios recibidos y agrega texto libre si hace falta."
@@ -1092,7 +1185,25 @@ export function NewOrderPage() {
 
           <section className="card p-5 lg:p-6">
             <SectionTitle
-              step="4"
+              step="5"
+              icon={Camera}
+              title="Evidencia fotográfica"
+              description="Registra el estado visual del equipo al ingreso."
+            />
+            <div className="mt-4">
+              <EvidenceCapture
+                items={evidenceDrafts}
+                onChange={setEvidenceDrafts}
+                stage="ingreso"
+                disabled={saving}
+                bare
+              />
+            </div>
+          </section>
+
+          <section className="card p-5 lg:p-6">
+            <SectionTitle
+              step="6"
               icon={Wrench}
               title="Falla y presupuesto"
               description="Usa las palabras exactas del cliente. El diagnóstico se completa después."
@@ -1184,42 +1295,6 @@ export function NewOrderPage() {
               <span className="font-semibold">Sin cobro en recepción.</span> El presupuesto y la revisión quedan registrados, pero el cobro y la factura interna se generan cuando la OT pasa a <span className="font-semibold">Entregado</span>.
             </div>
           </section>
-
-          <section className="card overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((value) => !value)}
-              className="focus-ring flex w-full items-center justify-between gap-3 px-5 py-4 text-left lg:px-6"
-            >
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-500">
-                  <Monitor className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-[13px] font-bold text-ink">Ficha técnica avanzada</p>
-                  <p className="mt-0.5 text-[10px] text-slate-400">Opcional. Componentes, módulos de RAM y discos con datos del diccionario.</p>
-                </div>
-              </div>
-              {advancedOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-            </button>
-            {advancedOpen ? (
-              <div className="border-t border-line px-5 py-4 lg:px-6">
-                <TechnicalSheetForm
-                  value={technicalSheet}
-                  onChange={setTechnicalSheet}
-                  nodes={dictionaries}
-                  disabled={saving}
-                />
-              </div>
-            ) : null}
-          </section>
-
-          <EvidenceCapture
-            items={evidenceDrafts}
-            onChange={setEvidenceDrafts}
-            stage="ingreso"
-            disabled={saving}
-          />
         </div>
 
         <aside className="space-y-4 xl:sticky xl:top-0">
@@ -1254,10 +1329,10 @@ export function NewOrderPage() {
                   </span>
                   <div className="min-w-0">
                     <p className="truncate text-[11px] font-semibold text-ink">
-                      {brand || model ? `${brand} ${model}`.trim() : selectedDevice.label}
+                      {equipmentDisplayName}
                     </p>
                     <p className="text-[9px] text-slate-400">
-                      {selectedDevice.label} · {serialUnknown ? 'Serial no visible' : serial || 'Sin serial'}
+                      {selectedDevice.label} · {customBuild && supportsCustomBuild ? 'Equipo armado · código interno' : serialUnknown ? 'Serial no visible' : serial || 'Sin serial'}
                     </p>
                   </div>
                 </div>

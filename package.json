@@ -1,7 +1,7 @@
 {
   "name": "bitacoretech",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "BitacoreTech Taller & POS - gestión integral para talleres técnicos",
   "author": "BitacoreTech",
   "type": "module",
@@ -17,6 +17,7 @@
     "test:acceptance:f4f5": "node scripts/acceptance/f4-f5.cjs",
     "test:acceptance:1.5.0": "node scripts/acceptance/1.5.0.cjs",
     "test:acceptance:1.6.0": "node scripts/acceptance/1.6.0.cjs",
+    "test:acceptance:1.6.1": "node scripts/acceptance/1.6.1.cjs",
     "test:migration:1.5.0": "node scripts/acceptance/migration-1.5.0.cjs",
     "test:migration:1.6.0": "node scripts/acceptance/migration-1.6.0.cjs",
     "lint": "npm run typecheck"

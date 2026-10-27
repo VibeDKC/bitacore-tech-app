@@ -661,12 +661,22 @@ function userDto(db: Database, row: any) {
   }
 }
 
-function listUsers(db: Database) {
+function listUsers(db: Database, viewerRole: string) {
   const rows = db.all<any>('SELECT * FROM users ORDER BY is_protected DESC, created_at ASC')
-  return rows.map((row) => userDto(db, row))
+  return rows
+    .filter((row) => viewerRole === 'superadmin' || row.role !== 'superadmin')
+    .map((row) => userDto(db, row))
 }
 
 const DICTIONARY_TYPE_VALUES = DICTIONARY_TYPES.map((item) => item.value) as [DictionaryType, ...DictionaryType[]]
+
+function supportsCustomBuild(category: string) {
+  return category === 'pc_torre' || category === 'otro'
+}
+
+function customBuildSerial(seed: string) {
+  return `ARM-${sha256(seed).slice(0, 8).toUpperCase()}`
+}
 
 function dictionaryUsageCount(db: Database, row: any) {
   if (row.type === 'inventory_category') {
@@ -1193,8 +1203,14 @@ function decryptBackupPayload(data: Buffer, password: string) {
   }
 }
 
-function backupList(db: Database) {
-  return db.all<any>('SELECT * FROM backups ORDER BY created_at DESC').map((row) => {
+function backupList(db: Database, viewerRole = 'superadmin') {
+  return db
+    .all<any>(
+      `SELECT b.*, u.role AS author_role
+       FROM backups b LEFT JOIN users u ON u.id = b.created_by
+       ORDER BY b.created_at DESC`
+    )
+    .map((row) => {
     const format = row.format === 'folder' ? 'folder' : 'db'
     const summary = format === 'folder' ? manifestSummary(String(row.path)) : null
     return {
@@ -1202,7 +1218,10 @@ function backupList(db: Database) {
       name: row.filename,
       date: row.created_at,
       size: row.size_bytes,
-      author: row.created_by_name,
+      author:
+        viewerRole !== 'superadmin' && row.author_role === 'superadmin'
+          ? 'Cuenta raíz'
+          : row.created_by_name,
       sha256: row.sha256,
       path: row.path,
       format,
@@ -1753,18 +1772,28 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const customerId = text(payload?.customerId, 'Cliente', 1, 80)
       const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', customerId)
       if (!customer) fail('Cliente no encontrado', 'NOT_FOUND')
-      const brand = text(payload?.brand, 'Marca', 1, 80)
-      const model = text(payload?.model, 'Modelo', 1, 120)
-      const serial = text(payload?.serial ?? 'Sin serial', 'Serial', 1, 120)
-      const duplicate = db.get<any>(
-        `SELECT id FROM equipment
-         WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE`,
-        customerId,
-        serial,
-        brand,
-        model
-      )
-      if (duplicate) fail('Ya existe un equipo con ese serial para este cliente.', 'DUPLICATE')
+      const category = String(payload?.category ?? 'otro').slice(0, 40)
+      const customBuild = Boolean(payload?.customBuild)
+      if (customBuild && !supportsCustomBuild(category)) {
+        fail('El modo de equipo armado solo aplica a PC Torre u Otro.')
+      }
+      const alias = customBuild ? text(payload?.alias ?? payload?.model, 'Alias del equipo', 2, 120) : null
+      const brand = customBuild ? 'Armado' : text(payload?.brand, 'Marca', 1, 80)
+      const model = customBuild ? String(alias) : text(payload?.model, 'Modelo', 1, 120)
+      const serial = customBuild
+        ? customBuildSerial(`${customerId}|${model}|${Date.now()}|${Math.random()}`)
+        : text(payload?.serial ?? 'Sin serial', 'Serial', 1, 120)
+      if (!customBuild) {
+        const duplicate = db.get<any>(
+          `SELECT id FROM equipment
+           WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE`,
+          customerId,
+          serial,
+          brand,
+          model
+        )
+        if (duplicate) fail('Ya existe un equipo con ese serial para este cliente.', 'DUPLICATE')
+      }
       const id = `eq_${sha256(`${customerId}|${serial}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       const technicalSheet =
@@ -1779,7 +1808,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           customerId,
-          String(payload?.category ?? 'otro').slice(0, 40),
+          category,
           String(payload?.categoryLabel ?? 'Equipo').slice(0, 80),
           String(payload?.equipmentType ?? payload?.categoryLabel ?? 'Equipo').slice(0, 80),
           brand,
@@ -1806,6 +1835,21 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const params: any[] = []
       let ownershipChanged = false
       let ownershipDetail = ''
+      const customBuildUpdate = payload?.customBuild === true
+      if (customBuildUpdate) {
+        const nextCategory =
+          payload?.category !== undefined ? String(payload.category).slice(0, 40) : row.category
+        if (!supportsCustomBuild(nextCategory)) {
+          fail('El modo de equipo armado solo aplica a PC Torre u Otro.')
+        }
+        const alias = text(payload?.alias ?? payload?.model, 'Alias del equipo', 2, 120)
+        const serial =
+          row.brand === 'Armado' && String(row.serial).startsWith('ARM-')
+            ? row.serial
+            : customBuildSerial(`${row.customer_id}|${alias}|${Date.now()}|${Math.random()}`)
+        updates.push('brand = ?', 'model = ?', 'serial = ?')
+        params.push('Armado', alias, serial)
+      }
       if (payload?.customerId !== undefined && payload.customerId !== row.customer_id) {
         requireCap(session, 'manageStaff')
         const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', payload.customerId)
@@ -1826,6 +1870,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         ['accessories', 'accessories', 1000],
         ['notes', 'notes', 1000]
       ] as const) {
+        if (customBuildUpdate && (key === 'brand' || key === 'model' || key === 'serial')) continue
         if (payload?.[key] !== undefined) {
           updates.push(`${column} = ?`)
           params.push(String(payload[key]).slice(0, max))
@@ -2363,8 +2408,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const category = text(payload?.deviceCategory ?? intakeInput.category ?? 'otro', 'Categoría', 2, 40)
       const categoryLabel = text(payload?.categoryLabel ?? intakeInput.categoryLabel ?? 'Equipo', 'Tipo de equipo', 2, 80)
       const equipmentType = text(payload?.equipmentType ?? categoryLabel, 'Tipo de equipo', 2, 80)
-      const brand = text(payload?.brand, 'Marca', 1, 80)
-      const model = text(payload?.model, 'Modelo', 1, 120)
+      const customBuild = Boolean(payload?.customBuild ?? intakeInput.customBuild)
+      if (customBuild && !supportsCustomBuild(category)) {
+        fail('El modo de equipo armado solo aplica a PC Torre u Otro.')
+      }
+      const alias = customBuild ? text(payload?.alias ?? intakeInput.alias, 'Alias del equipo', 2, 120) : null
+      const brand = customBuild ? 'Armado' : text(payload?.brand, 'Marca', 1, 80)
+      const model = customBuild ? String(alias) : text(payload?.model, 'Modelo', 1, 120)
       const reportedIssue = text(payload?.reportedIssue, 'Falla reportada', 4, 3000)
       const nowIso = new Date().toISOString()
       const technicianName = typeof payload?.technician === 'string' ? payload.technician : ''
@@ -2387,9 +2437,10 @@ export async function handleRpc(command: string, payload: Payload, token: string
         fail('Selecciona un técnico para asignar la orden de trabajo.')
       }
       const requestedEquipmentId = typeof payload?.equipmentId === 'string' ? payload.equipmentId : ''
+      let selectedEquipmentRow: any = null
       if (requestedEquipmentId) {
-        const equipment = db.get<any>('SELECT * FROM equipment WHERE id = ? AND customer_id = ?', requestedEquipmentId, customerId)
-        if (!equipment) fail('El equipo seleccionado no pertenece al cliente.')
+        selectedEquipmentRow = db.get<any>('SELECT * FROM equipment WHERE id = ? AND customer_id = ?', requestedEquipmentId, customerId)
+        if (!selectedEquipmentRow) fail('El equipo seleccionado no pertenece al cliente.')
       }
       const id = `wo_${sha256(`${customerId}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
       const number = db.orderNumber()
@@ -2397,6 +2448,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         ...intakeInput,
         category,
         categoryLabel,
+        customBuild: customBuild || undefined,
+        alias: alias ?? undefined,
         estimate: Math.max(0, numberValue(intakeInput.estimate ?? 0, 'Presupuesto', { min: 0 })),
         diagnosticFee: Math.max(0, numberValue(intakeInput.diagnosticFee ?? 0, 'Diagnóstico', { min: 0 })),
         accessories: Array.isArray(intakeInput.accessories) ? intakeInput.accessories.slice(0, 40) : [],
@@ -2406,7 +2459,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const physicalCondition = text(payload?.physicalCondition ?? 'Sin observaciones', 'Condición física', 1, 3000)
       const accessories = text(payload?.accessories ?? 'Sin accesorios', 'Accesorios', 1, 1000)
-      const serial = text(payload?.serial ?? 'Sin serial', 'Serial', 1, 120)
+      const serial = customBuild
+        ? selectedEquipmentRow?.brand === 'Armado'
+          ? selectedEquipmentRow.serial
+          : customBuildSerial(`${customerId}|${model}|${Date.now()}|${Math.random()}`)
+        : text(payload?.serial ?? 'Sin serial', 'Serial', 1, 120)
       const promisedAt = isoDate(payload?.promisedAt, 'Fecha de promesa')
       const preparedEvidence = Array.isArray(payload?.evidence) && payload.evidence.length
         ? prepareEvidenceFiles({
@@ -2425,15 +2482,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
         if (equipmentId) {
           db.run('UPDATE equipment SET updated_at = ? WHERE id = ?', nowIso, equipmentId)
         } else {
-          const existingEquipment = db.get<any>(
-            `SELECT * FROM equipment
-             WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE
-             LIMIT 1`,
-            customerId,
-            serial,
-            brand,
-            model
-          )
+          const existingEquipment = customBuild
+            ? null
+            : db.get<any>(
+                `SELECT * FROM equipment
+                 WHERE customer_id = ? AND serial = ? COLLATE NOCASE AND brand = ? COLLATE NOCASE AND model = ? COLLATE NOCASE
+                 LIMIT 1`,
+                customerId,
+                serial,
+                brand,
+                model
+              )
           if (existingEquipment) {
             equipmentId = existingEquipment.id
             db.run('UPDATE equipment SET updated_at = ? WHERE id = ?', nowIso, equipmentId)
@@ -3805,10 +3864,65 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return settingsData(db)
     }
 
+    case 'profile.get': {
+      const row = db.get<any>('SELECT * FROM users WHERE id = ? AND active = 1', session.userId)
+      if (!row) fail('La cuenta ya no está disponible.', 'NOT_FOUND')
+      return userDto(db, row)
+    }
+
+    case 'profile.update': {
+      const row = db.get<any>('SELECT * FROM users WHERE id = ? AND active = 1', session.userId)
+      if (!row) fail('La cuenta ya no está disponible.', 'NOT_FOUND')
+      const updates: string[] = []
+      const params: any[] = []
+      const changed: string[] = []
+      if (payload?.name !== undefined) {
+        updates.push('name = ?')
+        params.push(text(payload.name, 'Nombre', 3, 160))
+        changed.push('nombre')
+      }
+      if (payload?.email !== undefined) {
+        updates.push('email = ?')
+        params.push(String(payload.email).trim().slice(0, 200))
+        changed.push('correo')
+      }
+      if (payload?.phone !== undefined) {
+        updates.push('phone = ?')
+        params.push(typeof payload.phone === 'string' && payload.phone.trim() ? payload.phone.trim().slice(0, 80) : null)
+        changed.push('teléfono')
+      }
+      if (payload?.address !== undefined) {
+        updates.push('address = ?')
+        params.push(typeof payload.address === 'string' && payload.address.trim() ? payload.address.trim().slice(0, 200) : null)
+        changed.push('dirección')
+      }
+      if (payload?.documentType !== undefined) {
+        updates.push('document_type = ?')
+        params.push(typeof payload.documentType === 'string' ? payload.documentType.slice(0, 20) : null)
+        changed.push('tipo de documento')
+      }
+      if (payload?.document !== undefined) {
+        updates.push('document = ?')
+        params.push(typeof payload.document === 'string' && payload.document.trim() ? payload.document.trim().slice(0, 40) : null)
+        changed.push('documento')
+      }
+      if (payload?.photoDataUrl !== undefined) {
+        updates.push('photo_path = ?')
+        params.push(normalizeUserPhoto(payload.photoDataUrl))
+        changed.push(payload.photoDataUrl ? 'foto' : 'foto eliminada')
+      }
+      if (!updates.length) fail('No hay cambios para guardar')
+      db.tx(() => {
+        db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, ...params, session.userId)
+        audit(db, session, 'Actualización de perfil', 'Usuario', `${row.name} · ${changed.join(', ')}`, session.userId)
+      })
+      return userDto(db, db.get<any>('SELECT * FROM users WHERE id = ?', session.userId))
+    }
+
     case 'users.list': {
       requireModuleAccess(session, 'settings')
       requireCap(session, 'manageStaff')
-      return listUsers(db)
+      return listUsers(db, session.actualRole)
     }
 
     case 'users.create': {
@@ -3860,6 +3974,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const id = text(payload?.id, 'Usuario', 1, 80)
       const row = db.get<any>('SELECT * FROM users WHERE id = ?', id)
       if (!row) fail('Usuario no encontrado', 'NOT_FOUND')
+      if (row.role === 'superadmin') fail('La cuenta raíz solo se modifica desde Mi perfil.', 'FORBIDDEN')
       const photoPath = normalizeUserPhoto(payload?.photoDataUrl)
       db.tx(() => {
         db.run('UPDATE users SET photo_path = ? WHERE id = ?', photoPath, id)
@@ -3950,7 +4065,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
     case 'backups.list': {
       requireModuleAccess(session, 'settings')
       requireCap(session, 'createBackup')
-      return backupList(db)
+      return backupList(db, session.actualRole)
     }
 
     case 'backups.create': {
@@ -3960,7 +4075,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       db.tx(() => {
         audit(db, session, 'Creación de respaldo', 'Respaldo', backup.name, backup.id)
       })
-      return { backup, backups: backupList(db) }
+      return { backup, backups: backupList(db, session.actualRole) }
     }
 
     case 'backups.setPassword': {

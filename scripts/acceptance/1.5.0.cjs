@@ -142,8 +142,19 @@ async function launch() {
     const techLogin = await rpc(page, 'auth.login', { username: 'tecnico4', password: 'Tecnico12345' })
     const techToken = techLogin.token
 
-    const ownerPhoto = await rpc(page, 'users.updatePhoto', { id: owner.user.id, photoDataUrl: tinyPng }, adminToken)
-    assert(ownerPhoto.photoUrl, 'El admin no pudo guardar la foto del propietario')
+    const ownerPhotoByAdmin = await rpcRaw(
+      page,
+      'users.updatePhoto',
+      { id: owner.user.id, photoDataUrl: tinyPng },
+      adminToken
+    )
+    assert(!ownerPhotoByAdmin.ok, 'El admin pudo cambiar la foto del propietario')
+    const adminUsers = await rpc(page, 'users.list', {}, adminToken)
+    assert(!adminUsers.some((member) => member.id === owner.user.id), 'El admin puede ver al propietario en usuarios')
+    const ownerUsers = await rpc(page, 'users.list')
+    assert(ownerUsers.some((member) => member.id === owner.user.id), 'El propietario no se ve a sí mismo en usuarios')
+    const ownerProfilePhoto = await rpc(page, 'profile.update', { photoDataUrl: tinyPng })
+    assert(ownerProfilePhoto.photoUrl, 'El propietario no pudo cambiar su propia foto')
     const adminPhoto = await rpc(page, 'users.updatePhoto', { id: admin.id, photoDataUrl: tinyPng }, adminToken)
     assert(adminPhoto.photoUrl, 'El admin no pudo guardar su propia foto')
     const forbiddenOwnerEdit = await rpcRaw(page, 'users.update', { id: owner.user.id, name: 'Owner alterado' }, adminToken)
@@ -152,7 +163,7 @@ async function launch() {
     assert(adminInventoryUpdate.price === 35000, 'El admin no pudo editar la referencia')
     const techInventoryUpdate = await rpcRaw(page, 'inventory.update', { id: testProduct.id, price: 99999 }, techToken)
     assert(!techInventoryUpdate.ok, 'El técnico pudo editar una referencia de inventario')
-    pass('permisos: admin edita inventario y foto; técnico no edita referencias')
+    pass('permisos: admin no ve ni edita al propietario; dueño sí se ve y edita su perfil')
 
     const service = await rpc(page, 'inventory.create', {
       name: 'Mantenimiento de servidores',
@@ -251,28 +262,25 @@ async function launch() {
     await page.getByText('Configuración', { exact: true }).first().waitFor({ timeout: 30000 })
     await page.getByText('Configuración', { exact: true }).first().click()
     await page.getByText('Usuarios y roles', { exact: true }).first().click()
-    await page.getByText('Owner T4', { exact: true }).first().waitFor({ timeout: 15000 })
-    await page.getByLabel('Cambiar foto de Owner T4').click()
-    await page.getByText('Solo cambia la foto', { exact: false }).waitFor({ timeout: 15000 })
-    await page
-      .getByRole('dialog', { name: 'Foto de perfil' })
-      .locator('input[type="file"]')
-      .setInputFiles({
-        name: 'owner.png',
-        mimeType: 'image/png',
-        buffer: Buffer.from(tinyPng.split(',')[1], 'base64')
-      })
-    await page.getByRole('button', { name: 'Guardar foto' }).click()
-    await page.getByText('Foto de perfil actualizada', { exact: false }).first().waitFor({ timeout: 15000 })
-    pass('admin cambia la foto del propietario desde la interfaz')
-    await page.screenshot({ path: path.join(shots, '02-admin-foto-propietario.png') })
+    await page.getByText('Admin Foto T4', { exact: true }).first().waitFor({ timeout: 15000 })
+    const ownerVisibleForAdmin = await page.getByText('Owner T4', { exact: true }).count()
+    assert(ownerVisibleForAdmin === 0, 'El admin ve al propietario en Configuración')
+    pass('el propietario es invisible en la lista de usuarios para el admin')
+    await page.screenshot({ path: path.join(shots, '02-admin-sin-propietario.png') })
 
     await page.evaluate((token) => sessionStorage.setItem('bitacoretech.session.token', token), ownerToken)
     await page.reload()
-    await page.getByText('Punto de venta', { exact: true }).first().waitFor({ timeout: 30000 })
+    await page.getByText('Configuración', { exact: true }).first().click()
+    await page.getByText('Usuarios y roles', { exact: true }).first().click()
+    await page.getByText('Owner T4', { exact: true }).first().waitFor({ timeout: 15000 })
+    assert((await page.getByLabel('Cambiar foto de Owner T4').count()) === 0, 'El propietario sigue teniendo cámara en la lista')
+    pass('el propietario se ve a sí mismo en Configuración y no expone cámara')
+    await page.screenshot({ path: path.join(shots, '03-propietario-lista.png') })
+
+    await page.getByText('Punto de venta', { exact: true }).first().click()
     assert((await page.locator('img[alt="Owner T4"]').count()) > 0, 'La foto del propietario no se muestra en el avatar global')
     pass('foto de perfil visible en topbar/sidebar')
-    await page.screenshot({ path: path.join(shots, '03-avatar-foto.png') })
+    await page.screenshot({ path: path.join(shots, '04-avatar-foto.png') })
 
     await app.close()
     closed = true
@@ -284,7 +292,7 @@ async function launch() {
     const tokenAfterClose = await loginPage.evaluate(() => sessionStorage.getItem('bitacoretech.session.token'))
     assert(!tokenAfterClose, 'El token sobrevivió al cierre de la aplicación')
     pass('la sesión se cierra al cerrar la aplicación')
-    await loginPage.screenshot({ path: path.join(shots, '04-sesion-cerrada.png') })
+    await loginPage.screenshot({ path: path.join(shots, '05-sesion-cerrada.png') })
     await app.close()
     closed = true
   } catch (error) {

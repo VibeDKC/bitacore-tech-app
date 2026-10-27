@@ -201,6 +201,8 @@ export interface NewOrderInput {
   brand: string
   model: string
   serial: string
+  customBuild?: boolean
+  alias?: string
   accessories: string
   physicalCondition: string
   reportedIssue: string
@@ -418,6 +420,14 @@ export const api = {
     },
     verify() {
       return rpc<{ valid: boolean; brokenAt: string | null; checked: number }>('audit.verify')
+    }
+  },
+  profile: {
+    get() {
+      return rpc<AppUser>('profile.get')
+    },
+    update(input: Record<string, unknown>) {
+      return rpc<AppUser>('profile.update', input)
     }
   },
   settings: {

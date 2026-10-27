@@ -284,7 +284,7 @@ export function SettingsPage() {
     setRolePermissionsDraft(permissions)
   }, [data])
 
-  const visibleStaff = staff
+  const visibleStaff = isSuperadmin ? staff : staff.filter((member) => member.role !== 'superadmin')
   const visibleMatrix = permissionMatrix
     .map((group) => ({
       ...group,
@@ -1220,7 +1220,7 @@ export function SettingsPage() {
                     <h2 className="font-display text-[16px] font-bold text-ink">Equipo del taller</h2>
                     <p className="mt-0.5 text-[11px] text-slate-400">
                       {visibleStaff.length} cuentas
-                      {isSuperadmin ? ' · la cuenta raíz está protegida' : ' · foto de cualquier cuenta; ficha completa según permisos'}
+                      {isSuperadmin ? ' · la cuenta raíz está protegida y se edita desde Mi perfil' : ' · gestión de técnicos, cajeros y admins según permisos'}
                     </p>
                   </div>
                   {canManageStaff ? (
@@ -1258,7 +1258,7 @@ export function SettingsPage() {
                           <span className="hidden w-[130px] text-right text-[9px] text-slate-400 lg:block">
                             {formatLastAccess(member.lastAccess)}
                           </span>
-                          {canManageStaff ? (
+                          {canManageStaff && member.role !== 'superadmin' ? (
                             <button
                               type="button"
                               onClick={() => openPhotoEditor(member)}

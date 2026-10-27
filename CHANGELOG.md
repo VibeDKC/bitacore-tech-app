@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.6.1 — 2026-10-26
+
+### Perfil y seguridad
+- “Mi perfil” abre un modal propio; “Configuración” sigue llevando a los datos del taller.
+- Cada usuario puede editar su nombre, correo, teléfono, dirección, documento, foto y contraseña.
+- El propietario es invisible para todos los demás usuarios en gestión de usuarios y respaldos.
+- El propietario se ve a sí mismo en Configuración y administra su cuenta desde Mi perfil.
+- Se bloqueó que un administrador cambie la foto o la ficha del propietario.
+
+### Equipos armados
+- Casilla **Equipo armado por partes** para PC Torre y Otro.
+- Marca, modelo y serial de fábrica dejan de ser obligatorios.
+- Se usa un alias y un código interno `ARM-...`.
+- Los equipos armados no se deduplican por marca/modelo/serial; si vuelve la misma torre se selecciona desde el historial del cliente.
+- El comprobante A4 muestra el código interno.
+
+### Ficha técnica y recepción
+- Orden del formulario: Cliente, Equipo, Ficha técnica, Accesorios, Evidencia, Falla y presupuesto.
+- La ficha técnica queda siempre visible, sin acordeón.
+- Controles **No visible / N/A** para sistema operativo, CPU, GPU, RAM, almacenamiento y batería.
+- La ficha del detalle de la OT también queda siempre visible.
+- Se conserva “Falla y presupuesto” sin agregar un campo de repuesto.
+
+### Calidad
+- Aceptación 1.6.1: 12/12.
+- Regresión: 1.5.0 12/12, 1.6.0 14/14, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Instalador `BitacoreTech-1.6.1-x64.exe`.
+
 ## 1.6.0 — 2026-10-26
 
 ### Diccionarios
@@ -56,7 +84,7 @@
 
 ### Perfiles y sesión
 - Foto de perfil visible en topbar, sidebar y lista de usuarios.
-- El admin puede cambiar su propia foto y la foto del propietario sin editar el resto de la cuenta raíz.
+- El admin puede cambiar su propia foto y la foto del propietario sin editar el resto de la cuenta raíz. **Superado por 1.6.1:** el propietario ya no es visible ni editable por administradores.
 - Nueva operación `users.updatePhoto` con auditoría.
 - Prueba de regresión de cierre de sesión al cerrar la aplicación.
 
