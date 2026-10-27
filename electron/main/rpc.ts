@@ -53,6 +53,8 @@ import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import { runDemoSeed, type SeedOwner } from './seed'
 import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
 import { listGeminiModels, scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
+import { resolveInternalSku } from './sku'
+import { cleanProductText } from './productText'
 import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
@@ -944,15 +946,36 @@ function purchaseDto(db: Database, row: any) {
       : undefined
   const lines = db
     .all<any>('SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY rowid ASC', row.id)
-    .map((line) => ({
-      id: line.id,
-      productId: line.product_id ?? null,
-      description: line.description,
-      quantity: Number(line.quantity),
-      unitPrice: money(line.unit_price_cents),
-      ivaRate: Number(line.iva_rate ?? 19),
-      iva: money(line.iva_cents ?? 0),
-      lineTotal: money(Number(line.unit_price_cents) * Number(line.quantity))
+    .map((line) => {
+      const quantity = Number(line.quantity) || 1
+      const ivaCents = Number(line.iva_cents ?? 0)
+      const unitPriceCents = Number(line.unit_price_cents) || 0
+      return {
+        id: line.id,
+        productId: line.product_id ?? null,
+        description: line.description,
+        quantity,
+        unitPrice: money(unitPriceCents),
+        ivaRate: Number(line.iva_rate ?? 19),
+        iva: money(ivaCents),
+        unitPriceWithTax: money(unitPriceCents + ivaCents / quantity),
+        supplierSku: String(line.supplier_sku ?? ''),
+        serialText: String(line.serial_text ?? ''),
+        lineTotal: money(unitPriceCents * quantity)
+      }
+    })
+  const payments = db
+    .all<any>(
+      'SELECT * FROM supplier_payments WHERE purchase_id = ? ORDER BY paid_at ASC, rowid ASC',
+      row.id
+    )
+    .map((payment) => ({
+      id: payment.id,
+      amount: money(payment.amount_cents),
+      method: payment.method,
+      date: payment.paid_at,
+      notes: payment.notes ?? null,
+      createdByName: payment.created_by_name ?? null
     }))
   let aiMetadata: any = null
   try {
@@ -975,9 +998,99 @@ function purchaseDto(db: Database, row: any) {
     adjustment: money(row.adjustment_cents ?? 0),
     total: money(row.total_cents),
     status: row.status,
+    paymentStatus: row.payment_status ?? (Number(row.balance_cents ?? 0) > 0 ? 'pendiente' : 'pagada'),
+    paymentMethod: row.payment_method ?? 'Transferencia',
+    paid: money(row.paid_cents ?? 0),
+    balance: money(row.balance_cents ?? 0),
+    dueDate: row.due_date ?? null,
+    payments,
     notes: row.notes ?? null,
     ai: aiMetadata,
     lines
+  }
+}
+
+const PURCHASE_PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta', 'Crédito'] as const
+
+function purchasePaymentMethod(value: unknown, fallback = 'Transferencia') {
+  const method = typeof value === 'string' ? value.trim() : ''
+  return (PURCHASE_PAYMENT_METHODS as readonly string[]).includes(method) ? method : fallback
+}
+
+function purchasePaymentSummary({
+  totalCents,
+  paymentCondition,
+  initialPayment,
+  paymentMethod
+}: {
+  totalCents: number
+  paymentCondition: unknown
+  initialPayment: unknown
+  paymentMethod: unknown
+}) {
+  const condition = paymentCondition === 'credito' ? 'credito' : 'contado'
+  const method = purchasePaymentMethod(paymentMethod, condition === 'credito' ? 'Crédito' : 'Transferencia')
+  if (condition === 'contado') {
+    return {
+      paymentStatus: 'pagada',
+      paymentMethod: method === 'Crédito' ? 'Transferencia' : method,
+      paidCents: totalCents,
+      balanceCents: 0
+    }
+  }
+  const paidCents = Math.min(
+    totalCents,
+    Math.max(0, toCents(numberValue(initialPayment ?? 0, 'Abono inicial', { min: 0 })))
+  )
+  const balanceCents = totalCents - paidCents
+  return {
+    paymentStatus:
+      balanceCents <= 0 ? 'pagada' : paidCents > 0 ? 'parcial' : 'pendiente',
+    paymentMethod: paidCents > 0 && method === 'Crédito' ? 'Transferencia' : method,
+    paidCents,
+    balanceCents
+  }
+}
+
+function recordSupplierPayment(
+  db: Database,
+  session: Session,
+  input: {
+    purchaseId: string
+    purchaseNumber: string
+    amountCents: number
+    method: string
+    paidAt: string
+    notes?: string | null
+    registerCash?: boolean
+  }
+) {
+  if (input.amountCents <= 0) return
+  const id = `sp_${sha256(`${input.purchaseId}|${input.amountCents}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
+  db.run(
+    `INSERT INTO supplier_payments
+      (id, purchase_id, amount_cents, method, paid_at, notes, created_by, created_by_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    id,
+    input.purchaseId,
+    input.amountCents,
+    input.method,
+    input.paidAt,
+    input.notes ?? null,
+    session.userId,
+    displayUser(session).name,
+    new Date().toISOString()
+  )
+  if (input.registerCash && input.method === 'Efectivo') {
+    recordCash(db, session, {
+      type: 'egreso',
+      method: 'Efectivo',
+      amountCents: input.amountCents,
+      reason: `Pago compra ${input.purchaseNumber}`,
+      referenceType: 'purchase',
+      referenceId: input.purchaseId,
+      createdAt: input.paidAt
+    })
   }
 }
 
@@ -1117,7 +1230,9 @@ function buildInvoiceDraft(
     if (matchedSupplier) supplierMatch = 'name'
   }
 
-  const products = db.all<any>('SELECT id, name, sku, cost_cents, price_cents FROM products WHERE active = 1')
+  const products = db.all<any>(
+    'SELECT id, name, sku, supplier_sku, cost_cents, price_cents FROM products WHERE active = 1'
+  )
   const warnings = (Array.isArray(extraction.warnings) ? extraction.warnings : [])
     .map((item) => String(item).slice(0, 300))
     .filter(Boolean)
@@ -1128,14 +1243,21 @@ function buildInvoiceDraft(
   }
   const rawLines = Array.isArray(extraction.lines) ? extraction.lines : []
   const lines: Array<any> = []
+  const usedSkus = new Set<string>(products.map((product) => String(product.sku).toLowerCase()))
   let subtotalCents = 0
   let ivaCents = 0
 
   rawLines.forEach((raw, index) => {
-    const description = String(raw?.description ?? '').trim().slice(0, 240)
+    const cleaned = cleanProductText(
+      String(raw?.description ?? ''),
+      Array.isArray(raw?.serials) ? raw.serials.map((serial: unknown) => String(serial)) : []
+    )
+    const description = cleaned.name.trim().slice(0, 240)
     const quantity = aiNumber(raw?.quantity, 0)
     const unitCost = aiNumber(raw?.unitCost, 0)
     let ivaRate = aiNumber(raw?.ivaRate, 19)
+    const supplierSku = String(raw?.supplierSku ?? '').trim().slice(0, 60)
+    const serialText = cleaned.serials.join(', ').slice(0, 1000)
     if (!description || quantity <= 0 || unitCost < 0) {
       warnings.push(`Línea ${index + 1} incompleta; revísala antes de aprobar.`)
       return
@@ -1147,15 +1269,38 @@ function buildInvoiceDraft(
     const unitCostCents = toCents(unitCost)
     const lineBaseCents = Math.round(unitCostCents * quantity)
     const lineIvaCents = Math.round((lineBaseCents * ivaRate) / 100)
+    const computedLineTotalCents = lineBaseCents + lineIvaCents
+    const extractedLineTotalCents = toCents(aiNumber(raw?.lineTotal, 0))
     subtotalCents += lineBaseCents
     ivaCents += lineIvaCents
+    if (
+      extractedLineTotalCents > 0 &&
+      Math.abs(extractedLineTotalCents - computedLineTotalCents) > 1
+    ) {
+      warnings.push(
+        `La línea ${index + 1} no coincide con el total de la fila; revisa cantidad, IVA y costo.`
+      )
+    }
 
     const descriptionKey = normalizeAiText(description)
-    let product =
-      products.find(
-        (item) =>
-          normalizeAiText(item.sku) === descriptionKey || normalizeAiText(item.name) === descriptionKey
-      ) ?? null
+    const supplierSkuKey = normalizeAiText(supplierSku)
+    let product = null
+    if (supplierSkuKey) {
+      product =
+        products.find(
+          (item) =>
+            normalizeAiText(item.supplier_sku) === supplierSkuKey &&
+            Boolean(String(item.supplier_sku ?? '').trim())
+        ) ?? null
+    }
+    if (!product) {
+      product =
+        products.find(
+          (item) =>
+            normalizeAiText(item.sku) === descriptionKey ||
+            normalizeAiText(item.name) === descriptionKey
+        ) ?? null
+    }
     let matchConfidence = product ? 1 : 0
     if (!product && descriptionKey) {
       product =
@@ -1175,22 +1320,47 @@ function buildInvoiceDraft(
         previousCost > 0 ? money(toCents(unitCost * (previousPrice / previousCost))) : previousPrice
       costChange = {
         previousCost,
+        previousPrice,
         newCost: money(toCents(unitCost)),
         marginPercent: money(toCents(marginPercent)),
         suggestedPrice
       }
       warnings.push(`El costo de ${product.name} subió más del 10 %.`)
     }
+
+    let skuResolution = product
+      ? {
+          sku: product.sku,
+          source: 'producto' as const,
+          warning: null as string | null
+        }
+      : resolveInternalSku({
+          aiSku: raw?.skuSugerido,
+          name: description,
+          supplierSku,
+          existingSkus: [...usedSkus]
+        })
+    if (!product && skuResolution.sku) {
+      usedSkus.add(skuResolution.sku.toLowerCase())
+    }
+    if (skuResolution.warning) warnings.push(`Línea ${index + 1}: ${skuResolution.warning}`)
+
     lines.push({
       id: `line_${index + 1}`,
       description,
       quantity,
       unitCost: money(toCents(unitCost)),
       ivaRate,
+      unitCostWithTax: money(toCents(unitCost * (1 + ivaRate / 100))),
       confidence: Math.max(0, Math.min(1, aiNumber(raw?.confidence, matchConfidence || 0.7))),
       productId: product?.id ?? null,
       productName: product?.name ?? null,
       productSku: product?.sku ?? null,
+      supplierSku,
+      serialText,
+      skuSugerido: skuResolution.sku,
+      skuSource: skuResolution.source,
+      skuWarning: skuResolution.warning,
       matchConfidence,
       warnings: [],
       costChange
@@ -1244,6 +1414,14 @@ function buildInvoiceDraft(
       number,
       date,
       currency: String(extraction.invoice?.currency || 'COP').trim().toUpperCase().slice(0, 8),
+      paymentMethod: String(extraction.paymentMethod ?? '').trim().slice(0, 40),
+      paymentCondition: String(extraction.paymentCondition ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .includes('cred')
+        ? 'credito'
+        : 'contado',
       confidence: Math.max(0, Math.min(1, aiNumber(extraction.invoice?.confidence, 0.7)))
     },
     lines,
@@ -1286,16 +1464,19 @@ function createProductFromPurchaseReview(
   const location = text(input?.location ?? 'Bodega A', 'Ubicación', 2, 80)
   const priceCents = toCents(numberValue(input?.price, 'Precio de venta', { min: 0.01 }))
   const warrantyDays = Math.max(0, Math.round(aiNumber(input?.warrantyDays, 0)))
+  const supplierSku =
+    typeof input?.supplierSku === 'string' ? input.supplierSku.trim().slice(0, 60) : ''
   const id = `prod_${sha256(`${sku}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
   db.run(
     `INSERT INTO products
-      (id, name, sku, barcode, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
+      (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
        warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, NULL, 1, 'rotativo', 1, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, NULL, 1, 'rotativo', 1, ?, ?)`,
     id,
     name,
     sku,
     String(input?.barcode ?? `AI${Date.now().toString().slice(-9)}`).slice(0, 60),
+    supplierSku,
     category,
     location,
     typeof input?.condition === 'string' ? input.condition.trim().slice(0, 80) : '',
@@ -2563,17 +2744,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const id = `prod_${sha256(`${sku}|${Date.now()}`).slice(0, 20)}`
       const barcode = String(payload?.barcode ?? `LOCAL${Date.now().toString().slice(-9)}`).slice(0, 60)
+      const supplierSku =
+        typeof payload?.supplierSku === 'string' ? payload.supplierSku.trim().slice(0, 60) : ''
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO products
-            (id, name, sku, barcode, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
+            (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
              warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           id,
           name,
           sku,
           barcode,
+          supplierSku,
           text(payload?.category ?? 'Repuestos', 'Categoría', 2, 80),
           text(payload?.location ?? 'Bodega A', 'Ubicación', 2, 80),
           typeof payload?.condition === 'string' ? payload.condition.trim().slice(0, 80) : '',
@@ -2639,6 +2823,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('barcode = ?')
         params.push(text(payload.barcode, 'Código de barras', 1, 60))
         changed.push('código de barras')
+      }
+      if (payload?.supplierSku !== undefined) {
+        updates.push('supplier_sku = ?')
+        params.push(
+          typeof payload.supplierSku === 'string' ? payload.supplierSku.trim().slice(0, 60) : ''
+        )
+        changed.push('SKU de proveedor')
       }
       if (payload?.category !== undefined) {
         updates.push('category = ?')
@@ -4396,14 +4587,25 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const totalCents = subtotalCents + ivaCents
       const status = schema(payload?.status ?? 'recibida', z.enum(['recibida', 'pendiente']))
       const purchaseDate = isoDate(payload?.date, 'Fecha de compra')
+      const dueDate =
+        typeof payload?.dueDate === 'string' && payload.dueDate.trim()
+          ? isoDate(payload.dueDate, 'Fecha de vencimiento')
+          : null
+      const payment = purchasePaymentSummary({
+        totalCents,
+        paymentCondition: payload?.paymentCondition,
+        initialPayment: payload?.initialPayment,
+        paymentMethod: payload?.paymentMethod
+      })
       const id = `pur_${sha256(`${purchaseNumber}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO purchases
             (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
-             discount_cents, adjustment_cents, status, notes, ai_metadata_json, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, NULL, ?, ?)`,
+             discount_cents, adjustment_cents, status, payment_status, payment_method, paid_cents,
+             balance_cents, due_date, notes, ai_metadata_json, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
           id,
           purchaseNumber,
           supplierId,
@@ -4413,6 +4615,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
           ivaCents,
           totalCents,
           status,
+          payment.paymentStatus,
+          payment.paymentMethod,
+          payment.paidCents,
+          payment.balanceCents,
+          dueDate,
           typeof payload?.notes === 'string' ? payload.notes.slice(0, 1000) : null,
           session.userId,
           nowIso
@@ -4420,8 +4627,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
         if (!itemsInput.length) {
           db.run(
             `INSERT INTO purchase_items
-              (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents)
-             VALUES (?, ?, NULL, ?, 1, ?, 19, ?)`,
+              (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents,
+               supplier_sku, serial_text)
+             VALUES (?, ?, NULL, ?, 1, ?, 19, ?, '', '')`,
             `puri_${Date.now()}`,
             id,
             'Compra registrada según factura de proveedor',
@@ -4435,18 +4643,31 @@ export async function handleRpc(command: string, payload: Payload, token: string
             const unitPrice = item?.unitPrice !== undefined ? numberValue(item.unitPrice, 'Valor unitario', { min: 0 }) : subtotal / Math.max(itemsInput.length, 1)
             const unitPriceCents = toCents(unitPrice)
             const lineIvaCents = Math.round(unitPriceCents * quantity * 0.19)
+            const supplierSku = String(item?.supplierSku ?? '').trim().slice(0, 60)
+            const serialText = String(item?.serialText ?? '').trim().slice(0, 1000)
             db.run(
               `INSERT INTO purchase_items
-                (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents)
-               VALUES (?, ?, ?, ?, ?, ?, 19, ?)`,
+                (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents,
+                 supplier_sku, serial_text)
+               VALUES (?, ?, ?, ?, ?, ?, 19, ?, ?, ?)`,
               `puri_${index}_${Date.now()}`,
               id,
               product?.id ?? null,
               product?.name ?? String(item?.description ?? 'Compra de mercancía').slice(0, 240),
               quantity,
               unitPriceCents,
-              lineIvaCents
+              lineIvaCents,
+              supplierSku,
+              serialText
             )
+            if (product && supplierSku) {
+              db.run(
+                `UPDATE products SET supplier_sku = ?
+                 WHERE id = ? AND TRIM(COALESCE(supplier_sku, '')) = ''`,
+                supplierSku,
+                product.id
+              )
+            }
             if (product && status === 'recibida') {
               db.run(
                 'UPDATE products SET stock = stock + ?, cost_cents = ?, updated_at = ? WHERE id = ?',
@@ -4472,12 +4693,26 @@ export async function handleRpc(command: string, payload: Payload, token: string
             }
           }
         }
+        if (payment.paidCents > 0) {
+          recordSupplierPayment(db, session, {
+            purchaseId: id,
+            purchaseNumber,
+            amountCents: payment.paidCents,
+            method: payment.paymentMethod,
+            paidAt: nowIso,
+            notes:
+              payment.paymentStatus === 'parcial'
+                ? 'Abono inicial de la compra'
+                : 'Pago de la compra',
+            registerCash: true
+          })
+        }
         audit(
           db,
           session,
           'Registro de compra',
           'Compra',
-          `${purchaseNumber} · ${supplier.name} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · IVA ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(ivaCents))}`,
+          `${purchaseNumber} · ${supplier.name} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · IVA ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(ivaCents))} · ${payment.paymentStatus} · saldo ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(payment.balanceCents))}`,
           id
         )
       })
@@ -4498,6 +4733,10 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const realTotal = numberValue(payload?.realTotal, 'Total real de la factura', { min: 0.01 })
       const updatePrices = Boolean(payload?.updatePrices)
       const duplicateConfirmed = Boolean(payload?.duplicateConfirmed)
+      const dueDate =
+        typeof payload?.dueDate === 'string' && payload.dueDate.trim()
+          ? isoDate(payload.dueDate, 'Fecha de vencimiento')
+          : null
       const duplicate = db.get<any>(
         'SELECT id FROM purchases WHERE supplier_id = ? AND number = ? LIMIT 1',
         supplierId,
@@ -4518,7 +4757,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
         const productId =
           typeof item?.productId === 'string' && item.productId ? item.productId : null
         const newProduct =
-          item?.newProduct && typeof item.newProduct === 'object' ? item.newProduct : null
+          item?.newProduct && typeof item.newProduct === 'object' ? { ...item.newProduct } : null
+        const supplierSku = String(item?.supplierSku ?? newProduct?.supplierSku ?? '')
+          .trim()
+          .slice(0, 60)
+        const serialText = String(item?.serialText ?? '').trim().slice(0, 1000)
         if (productId && newProduct) {
           fail(`La línea ${index + 1} no puede tener producto existente y producto nuevo a la vez.`)
         }
@@ -4537,6 +4780,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           }
           text(newProduct.name, `Nombre de línea ${index + 1}`, 2, 160)
           numberValue(newProduct.price, `Precio de venta de línea ${index + 1}`, { min: 0.01 })
+          newProduct.supplierSku = supplierSku
         }
         const unitCostCents = toCents(unitCost)
         const baseCents = Math.round(unitCostCents * quantity)
@@ -4554,6 +4798,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           baseCents,
           productId,
           newProduct,
+          supplierSku,
+          serialText,
           sellPrice,
           updatePrice: Boolean(item?.updatePrice)
         }
@@ -4577,14 +4823,21 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (aiMetadata && aiMetadata.length > 30000) {
         fail('Los metadatos de la IA son demasiado grandes.')
       }
+      const payment = purchasePaymentSummary({
+        totalCents: realTotalCents,
+        paymentCondition: payload?.paymentCondition,
+        initialPayment: payload?.initialPayment,
+        paymentMethod: payload?.paymentMethod
+      })
       const id = `pur_${sha256(`${supplierId}|${purchaseNumber}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO purchases
             (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
-             discount_cents, adjustment_cents, status, notes, ai_metadata_json, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recibida', ?, ?, ?, ?)`,
+             discount_cents, adjustment_cents, status, payment_status, payment_method, paid_cents,
+             balance_cents, due_date, notes, ai_metadata_json, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recibida', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           purchaseNumber,
           supplierId,
@@ -4595,6 +4848,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
           realTotalCents,
           discountCents,
           adjustmentCents,
+          payment.paymentStatus,
+          payment.paymentMethod,
+          payment.paidCents,
+          payment.balanceCents,
+          dueDate,
           typeof payload?.notes === 'string' ? payload.notes.slice(0, 1000) : null,
           aiMetadata,
           session.userId,
@@ -4607,8 +4865,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
           }
           db.run(
             `INSERT INTO purchase_items
-              (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, purchase_id, product_id, description, quantity, unit_price_cents, iva_rate, iva_cents,
+               supplier_sku, serial_text)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             `puri_${index}_${Date.now()}`,
             id,
             productId,
@@ -4616,9 +4875,19 @@ export async function handleRpc(command: string, payload: Payload, token: string
             item.quantity,
             item.unitCostCents,
             item.ivaRate,
-            item.ivaCents
+            item.ivaCents,
+            item.supplierSku,
+            item.serialText
           )
           if (productId) {
+            if (item.supplierSku) {
+              db.run(
+                `UPDATE products SET supplier_sku = ?
+                 WHERE id = ? AND TRIM(COALESCE(supplier_sku, '')) = ''`,
+                item.supplierSku,
+                productId
+              )
+            }
             db.run(
               'UPDATE products SET stock = stock + ?, cost_cents = ?, updated_at = ? WHERE id = ?',
               item.quantity,
@@ -4650,16 +4919,93 @@ export async function handleRpc(command: string, payload: Payload, token: string
             }
           }
         }
+        if (payment.paidCents > 0) {
+          recordSupplierPayment(db, session, {
+            purchaseId: id,
+            purchaseNumber,
+            amountCents: payment.paidCents,
+            method: payment.paymentMethod,
+            paidAt: nowIso,
+            notes:
+              payment.paymentStatus === 'parcial'
+                ? 'Abono inicial de la compra'
+                : 'Pago de la compra',
+            registerCash: true
+          })
+        }
         audit(
           db,
           session,
           'Registro de compra desde IA',
           'Compra',
-          `${purchaseNumber} · ${supplier.name} · ${prepared.length} líneas · total ${money(realTotalCents)} · ajuste ${money(adjustmentCents)}`,
+          `${purchaseNumber} · ${supplier.name} · ${prepared.length} líneas · total ${money(realTotalCents)} · ${payment.paymentStatus} · saldo ${money(payment.balanceCents)} · ajuste ${money(adjustmentCents)}`,
           id
         )
       })
       return purchaseDto(db, db.get<any>('SELECT * FROM purchases WHERE id = ?', id))
+    }
+
+    case 'purchases.addPayment': {
+      requireModuleAccess(session, 'purchases')
+      requireCap(session, 'createPurchase')
+      const purchaseId = text(payload?.purchaseId, 'Compra', 1, 80)
+      const purchase = db.get<any>('SELECT * FROM purchases WHERE id = ?', purchaseId)
+      if (!purchase) fail('Compra no encontrada', 'NOT_FOUND')
+      const balanceCents = Number(purchase.balance_cents ?? 0)
+      if (balanceCents <= 0) fail('La compra no tiene saldo pendiente.')
+      const amountCents = toCents(numberValue(payload?.amount, 'Valor del abono', { min: 0.01 }))
+      if (amountCents > balanceCents) {
+        fail(`El abono supera el saldo pendiente (${money(balanceCents)}).`)
+      }
+      const method = purchasePaymentMethod(payload?.method, 'Transferencia')
+      if (method === 'Crédito') fail('Selecciona un medio de pago para el abono.')
+      const paidAt =
+        typeof payload?.date === 'string' && payload.date.trim()
+          ? isoDate(payload.date, 'Fecha del abono')
+          : new Date().toISOString()
+      const notes =
+        typeof payload?.notes === 'string' && payload.notes.trim()
+          ? payload.notes.trim().slice(0, 1000)
+          : null
+      const nextPaid = Number(purchase.paid_cents ?? 0) + amountCents
+      const nextBalance = Math.max(0, balanceCents - amountCents)
+      const nextStatus = nextBalance <= 0 ? 'pagada' : nextPaid > 0 ? 'parcial' : 'pendiente'
+      const supplierRow = db.get<{ name: string }>(
+        'SELECT name FROM suppliers WHERE id = ?',
+        purchase.supplier_id
+      )
+      db.tx(() => {
+        recordSupplierPayment(db, session, {
+          purchaseId,
+          purchaseNumber: String(purchase.number ?? ''),
+          amountCents,
+          method,
+          paidAt,
+          notes,
+          registerCash: true
+        })
+        db.run(
+          `UPDATE purchases
+           SET paid_cents = ?, balance_cents = ?, payment_status = ?,
+               payment_method = CASE WHEN ? <= 0 THEN ? ELSE payment_method END
+           WHERE id = ?`,
+          nextPaid,
+          nextBalance,
+          nextStatus,
+          nextBalance,
+          method,
+          purchaseId
+        )
+        audit(
+          db,
+          session,
+          'Abono a compra',
+          'Compra',
+          `${purchase.number} · ${supplierRow?.name ?? 'Proveedor'} · abono ${money(amountCents)} · saldo ${money(nextBalance)} · ${method}`,
+          purchaseId
+        )
+      })
+      return purchaseDto(db, db.get<any>('SELECT * FROM purchases WHERE id = ?', purchaseId))
     }
 
     case 'reports.summary': {
@@ -5487,6 +5833,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           DELETE FROM work_order_events;
           DELETE FROM work_order_items;
           DELETE FROM work_orders;
+          DELETE FROM supplier_payments;
           DELETE FROM purchase_items;
           DELETE FROM purchases;
           DELETE FROM stock_movements;

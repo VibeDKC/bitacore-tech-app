@@ -43,6 +43,8 @@ interface PurchaseLine {
   productId: string
   quantity: string
   unitPrice: string
+  supplierSku: string
+  serialText: string
 }
 
 interface PurchaseForm {
@@ -50,10 +52,20 @@ interface PurchaseForm {
   number: string
   date: string
   status: Purchase['status']
+  paymentCondition: 'contado' | 'credito'
+  paymentMethod: string
+  initialPayment: string
+  dueDate: string
   lines: PurchaseLine[]
 }
 
-const emptyLine: PurchaseLine = { productId: '', quantity: '1', unitPrice: '' }
+const emptyLine: PurchaseLine = {
+  productId: '',
+  quantity: '1',
+  unitPrice: '',
+  supplierSku: '',
+  serialText: ''
+}
 
 function parseMoney(value: string) {
   const digits = value.replace(/\D/g, '')
@@ -88,6 +100,14 @@ export function PurchasesPage() {
   const [supplierSaving, setSupplierSaving] = useState(false)
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null)
   const [receiptTarget, setReceiptTarget] = useState<Purchase | null>(null)
+  const [paymentTarget, setPaymentTarget] = useState<Purchase | null>(null)
+  const [paymentSaving, setPaymentSaving] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    method: 'Transferencia',
+    date: new Date().toISOString().slice(0, 10),
+    notes: ''
+  })
   const [supplierForm, setSupplierForm] = useState({
     name: '',
     nit: '',
@@ -101,6 +121,10 @@ export function PurchasesPage() {
     number: '',
     date: new Date().toISOString().slice(0, 10),
     status: 'recibida',
+    paymentCondition: 'contado',
+    paymentMethod: 'Transferencia',
+    initialPayment: '',
+    dueDate: '',
     lines: [{ ...emptyLine }]
   })
 
@@ -127,7 +151,7 @@ export function PurchasesPage() {
     return {
       total: purchases.reduce((sum, purchase) => sum + purchase.total, 0),
       iva: purchases.reduce((sum, purchase) => sum + purchase.iva, 0),
-      pending: purchases.filter((purchase) => purchase.status === 'pendiente').reduce((sum, purchase) => sum + purchase.total, 0),
+      pending: purchases.reduce((sum, purchase) => sum + (purchase.balance ?? 0), 0),
       suppliers: suppliers.length
     }
   }, [purchases, suppliers])
@@ -228,10 +252,19 @@ export function PurchasesPage() {
       .map((line) => ({
         productId: line.productId,
         quantity: Number(line.quantity) || 1,
-        unitPrice: parseMoney(line.unitPrice)
+        unitPrice: parseMoney(line.unitPrice),
+        supplierSku: line.supplierSku.trim(),
+        serialText: line.serialText.trim()
       }))
     if (!lines.length) {
       toast.error('Agrega al menos una línea con producto, cantidad y valor')
+      return
+    }
+    if (
+      form.paymentCondition === 'credito' &&
+      parseMoney(form.initialPayment) > totalPreview
+    ) {
+      toast.error('El abono inicial no puede superar el total de la compra')
       return
     }
     setSaving(true)
@@ -241,6 +274,14 @@ export function PurchasesPage() {
         number: form.number.trim(),
         date: new Date(`${form.date}T12:00:00`).toISOString(),
         status: form.status,
+        paymentCondition: form.paymentCondition,
+        paymentMethod: form.paymentMethod,
+        initialPayment:
+          form.paymentCondition === 'credito' ? parseMoney(form.initialPayment) : 0,
+        dueDate:
+          form.paymentCondition === 'credito' && form.dueDate
+            ? new Date(`${form.dueDate}T12:00:00`).toISOString()
+            : null,
         items: lines
       })
       setCreateOpen(false)
@@ -249,6 +290,10 @@ export function PurchasesPage() {
         number: '',
         date: new Date().toISOString().slice(0, 10),
         status: 'recibida',
+        paymentCondition: 'contado',
+        paymentMethod: 'Transferencia',
+        initialPayment: '',
+        dueDate: '',
         lines: [{ ...emptyLine }]
       })
       toast.success('Compra registrada', {
@@ -262,9 +307,45 @@ export function PurchasesPage() {
     }
   }
 
+  function openPayment(purchase: Purchase) {
+    setPaymentTarget(purchase)
+    setPaymentForm({
+      amount: String(Math.round(purchase.balance ?? 0)),
+      method: 'Transferencia',
+      date: new Date().toISOString().slice(0, 10),
+      notes: ''
+    })
+  }
+
+  async function savePayment() {
+    if (!paymentTarget || paymentSaving) return
+    const amount = parseMoney(paymentForm.amount)
+    if (amount <= 0) {
+      toast.error('Ingresa un valor de abono')
+      return
+    }
+    setPaymentSaving(true)
+    try {
+      await api.purchases.addPayment({
+        purchaseId: paymentTarget.id,
+        amount,
+        method: paymentForm.method,
+        date: new Date(`${paymentForm.date}T12:00:00`).toISOString(),
+        notes: paymentForm.notes.trim() || undefined
+      })
+      setPaymentTarget(null)
+      toast.success('Abono registrado')
+      await reload()
+    } catch (failure) {
+      toast.error('No se pudo registrar el abono', { description: errorMessage(failure) })
+    } finally {
+      setPaymentSaving(false)
+    }
+  }
+
   function exportPurchases() {
     downloadCsv('bitacoretech-compras.csv', [
-      ['Factura', 'Proveedor', 'Fecha', 'Ítems', 'Subtotal', 'IVA', 'Total', 'Estado'],
+      ['Factura', 'Proveedor', 'Fecha', 'Ítems', 'Subtotal', 'IVA', 'Total', 'Estado', 'Pago', 'Pagado', 'Saldo'],
       ...purchases.map((purchase) => [
         purchase.number,
         purchase.supplier,
@@ -273,7 +354,10 @@ export function PurchasesPage() {
         purchase.subtotal,
         purchase.iva,
         purchase.total,
-        purchase.status
+        purchase.status,
+        purchase.paymentStatus,
+        purchase.paid,
+        purchase.balance
       ])
     ])
     toast.success('Compras exportadas', { description: 'Archivo CSV con el IVA soportado del periodo.' })
@@ -385,7 +469,7 @@ export function PurchasesPage() {
       {tab === 'compras' ? (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[940px]">
+            <table className="w-full min-w-[1080px]">
               <thead>
                 <tr className="border-b border-line bg-slate-50/60">
                   <th className="table-th pl-5 lg:pl-6">Factura / Proveedor</th>
@@ -394,7 +478,8 @@ export function PurchasesPage() {
                   <th className="table-th text-right">Subtotal</th>
                   <th className="table-th text-right">IVA</th>
                   <th className="table-th text-right">Total</th>
-                  <th className="table-th">Estado</th>
+                  <th className="table-th">Pago</th>
+                  <th className="table-th">Recepción</th>
                   <th className="table-th pr-5 text-right lg:pr-6"> </th>
                 </tr>
               </thead>
@@ -422,6 +507,22 @@ export function PurchasesPage() {
                     <td className="table-td text-right text-[11px] tabular text-slate-500">{formatCurrency(purchase.iva)}</td>
                     <td className="table-td text-right text-[12px] font-bold tabular text-ink">{formatCurrency(purchase.total)}</td>
                     <td className="table-td">
+                      <div className="space-y-1">
+                        <Badge variant={purchase.paymentStatus === 'pagada' ? 'success' : 'warning'} dot>
+                          {purchase.paymentStatus === 'pagada'
+                            ? 'Pagada'
+                            : purchase.paymentStatus === 'parcial'
+                              ? 'Abonada'
+                              : 'Crédito'}
+                        </Badge>
+                        {purchase.balance > 0 ? (
+                          <p className="text-[9px] tabular text-slate-400">
+                            Saldo {formatCurrency(purchase.balance)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="table-td">
                       <Badge variant={purchase.status === 'recibida' ? 'success' : 'warning'} dot>
                         {purchase.status === 'recibida' ? 'Recibida' : 'Pendiente'}
                       </Badge>
@@ -435,7 +536,7 @@ export function PurchasesPage() {
                 ))}
                 {!visiblePurchases.length ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-10 text-center text-[11px] text-slate-400">
+                    <td colSpan={9} className="px-6 py-10 text-center text-[11px] text-slate-400">
                       {filterSupplier
                         ? `No hay compras registradas para ${filterSupplier.name}.`
                         : 'No hay compras registradas todavía.'}
@@ -535,9 +636,16 @@ export function PurchasesPage() {
             <Button variant="secondary" onClick={() => setSelectedId(null)}>
               Cerrar
             </Button>
-            <Button onClick={() => selected && setReceiptTarget(selected)}>
-              Imprimir comprobante
-            </Button>
+            <div className="flex gap-2">
+              {selected && selected.balance > 0 ? (
+                <Button variant="secondary" onClick={() => openPayment(selected)}>
+                  Registrar abono
+                </Button>
+              ) : null}
+              <Button onClick={() => selected && setReceiptTarget(selected)}>
+                Imprimir comprobante
+              </Button>
+            </div>
           </div>
         }
       >
@@ -583,7 +691,13 @@ export function PurchasesPage() {
                         <p className="mt-0.5 text-[9px] text-slate-400">
                           {line.quantity} × {formatCurrency(line.unitPrice)} · IVA {line.ivaRate}% ·{' '}
                           {formatCurrency(line.iva)}
+                          {line.supplierSku ? ` · Ref. ${line.supplierSku}` : ''}
                         </p>
+                        {line.serialText ? (
+                          <p className="mt-0.5 break-words text-[9px] text-slate-400">
+                            Seriales: {line.serialText}
+                          </p>
+                        ) : null}
                       </div>
                       <span className="tabular shrink-0 text-[11px] font-semibold text-ink">
                         {formatCurrency(line.lineTotal)}
@@ -624,6 +738,56 @@ export function PurchasesPage() {
                 <span className="text-[12px] font-semibold text-slate-600">Total</span>
                 <span className="tabular font-display text-xl font-bold text-ink">{formatCurrency(selected.total)}</span>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-line bg-slate-50/60 p-4">
+              <div className="flex items-center justify-between">
+                <p className="field-label mb-0">Pago al proveedor</p>
+                <Badge variant={selected.paymentStatus === 'pagada' ? 'success' : 'warning'}>
+                  {selected.paymentStatus === 'pagada'
+                    ? 'Pagada'
+                    : selected.paymentStatus === 'parcial'
+                      ? 'Abonada'
+                      : 'Crédito'}
+                </Badge>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-500">
+                <span>Pagado</span>
+                <span className="tabular text-right font-semibold text-ink">
+                  {formatCurrency(selected.paid)}
+                </span>
+                <span>Saldo</span>
+                <span className="tabular text-right font-semibold text-ink">
+                  {formatCurrency(selected.balance)}
+                </span>
+                <span>Medio</span>
+                <span className="text-right font-semibold text-ink">{selected.paymentMethod}</span>
+                {selected.dueDate ? (
+                  <>
+                    <span>Vence</span>
+                    <span className="text-right font-semibold text-ink">{formatDate(selected.dueDate)}</span>
+                  </>
+                ) : null}
+              </div>
+              {selected.payments.length ? (
+                <div className="mt-3 divide-y divide-line border-t border-line pt-2">
+                  {selected.payments.map((payment) => (
+                    <div key={payment.id} className="flex items-center justify-between gap-2 py-1.5 text-[10px]">
+                      <div>
+                        <p className="font-medium text-ink">{formatCurrency(payment.amount)}</p>
+                        <p className="text-[9px] text-slate-400">
+                          {formatDate(payment.date)} · {payment.method}
+                        </p>
+                      </div>
+                      <span className="text-[9px] text-slate-400">{payment.createdByName ?? ''}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 border-t border-line pt-2 text-[9px] text-slate-400">
+                  Sin abonos registrados.
+                </p>
+              )}
             </div>
 
             <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5">
@@ -679,7 +843,7 @@ export function PurchasesPage() {
             <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} className="field" />
           </label>
           <label className="block">
-            <span className="field-label">Estado</span>
+            <span className="field-label">Recepción</span>
             <select
               value={form.status}
               onChange={(event) => setForm({ ...form, status: event.target.value as Purchase['status'] })}
@@ -689,7 +853,56 @@ export function PurchasesPage() {
               <option value="pendiente">Pendiente</option>
             </select>
           </label>
-          <div className="hidden sm:block" />
+          <label className="block">
+            <span className="field-label">Forma de pago</span>
+            <select
+              value={form.paymentCondition}
+              onChange={(event) =>
+                setForm({ ...form, paymentCondition: event.target.value as 'contado' | 'credito' })
+              }
+              className="field"
+            >
+              <option value="contado">Contado</option>
+              <option value="credito">Crédito</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">Medio de pago</span>
+            <select
+              value={form.paymentMethod}
+              onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}
+              className="field"
+            >
+              <option value="Transferencia">Transferencia</option>
+              <option value="Efectivo">Efectivo</option>
+              <option value="Tarjeta">Tarjeta</option>
+            </select>
+          </label>
+          {form.paymentCondition === 'credito' ? (
+            <>
+              <label className="block">
+                <span className="field-label">Abono inicial (opcional)</span>
+                <input
+                  value={form.initialPayment}
+                  onChange={(event) => setForm({ ...form, initialPayment: event.target.value })}
+                  inputMode="numeric"
+                  className="field text-right tabular"
+                  placeholder="0"
+                />
+              </label>
+              <label className="block">
+                <span className="field-label">Vencimiento (opcional)</span>
+                <input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(event) => setForm({ ...form, dueDate: event.target.value })}
+                  className="field"
+                />
+              </label>
+            </>
+          ) : (
+            <div className="hidden sm:block" />
+          )}
 
           <div className="sm:col-span-2">
             <div className="mb-1.5 flex items-center justify-between">
@@ -700,47 +913,64 @@ export function PurchasesPage() {
             </div>
             <div className="space-y-2">
               {form.lines.map((line, index) => (
-                <div key={index} className="grid grid-cols-[minmax(0,1fr)_64px_100px_28px] items-center gap-2">
-                  <select
-                    value={line.productId}
-                    onChange={(event) => {
-                      const product = stockProducts.find((item) => item.id === event.target.value)
-                      updateLine(index, {
-                        productId: event.target.value,
-                        unitPrice: product ? String(product.cost ?? 0) : ''
-                      })
-                    }}
-                    className="field h-9 text-[11px]"
-                  >
-                    <option value="">Selecciona producto</option>
-                    {stockProducts.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={line.quantity}
-                    onChange={(event) => updateLine(index, { quantity: event.target.value })}
-                    inputMode="numeric"
-                    placeholder="Cant"
-                    className="field h-9 text-right text-[11px] tabular"
-                  />
-                  <input
-                    value={line.unitPrice}
-                    onChange={(event) => updateLine(index, { unitPrice: event.target.value })}
-                    inputMode="numeric"
-                    placeholder="Costo unit."
-                    className="field h-9 text-right text-[11px] tabular"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeLine(index)}
-                    className="focus-ring flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition hover:bg-danger-50 hover:text-danger-500"
-                    aria-label="Quitar línea"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                <div key={index} className="rounded-xl border border-line p-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_64px_100px_28px] items-center gap-2">
+                    <select
+                      value={line.productId}
+                      onChange={(event) => {
+                        const product = stockProducts.find((item) => item.id === event.target.value)
+                        updateLine(index, {
+                          productId: event.target.value,
+                          unitPrice: product ? String(product.cost ?? 0) : '',
+                          supplierSku: product?.supplierSku ?? line.supplierSku
+                        })
+                      }}
+                      className="field h-9 text-[11px]"
+                    >
+                      <option value="">Selecciona producto</option>
+                      {stockProducts.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={line.quantity}
+                      onChange={(event) => updateLine(index, { quantity: event.target.value })}
+                      inputMode="numeric"
+                      placeholder="Cant"
+                      className="field h-9 text-right text-[11px] tabular"
+                    />
+                    <input
+                      value={line.unitPrice}
+                      onChange={(event) => updateLine(index, { unitPrice: event.target.value })}
+                      inputMode="numeric"
+                      placeholder="Costo unit."
+                      className="field h-9 text-right text-[11px] tabular"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeLine(index)}
+                      className="focus-ring flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition hover:bg-danger-50 hover:text-danger-500"
+                      aria-label="Quitar línea"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                    <input
+                      value={line.supplierSku}
+                      onChange={(event) => updateLine(index, { supplierSku: event.target.value })}
+                      placeholder="SKU / Ref. proveedor (opcional)"
+                      className="field h-8 text-[10px]"
+                    />
+                    <input
+                      value={line.serialText}
+                      onChange={(event) => updateLine(index, { serialText: event.target.value })}
+                      placeholder="Seriales (opcional, separados por coma)"
+                      className="field h-8 text-[10px]"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -761,7 +991,7 @@ export function PurchasesPage() {
             </div>
           </div>
           <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-brand-800 sm:col-span-2">
-            Las ventas no llevan IVA en esta etapa. El IVA se registra solo en compras a proveedores. Al marcar la compra como recibida se actualiza el stock y el costo unitario.
+            Las ventas no llevan IVA en esta etapa. El IVA se registra solo en compras a proveedores. Al marcar la compra como recibida se actualiza el stock y el costo unitario. Si la forma de pago es crédito, el saldo queda pendiente con el proveedor y se puede abonar desde el detalle.
           </div>
         </div>
       </Modal>
@@ -846,6 +1076,89 @@ export function PurchasesPage() {
               placeholder="310 000 0000"
             />
           </label>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(paymentTarget)}
+        onClose={() => setPaymentTarget(null)}
+        title="Registrar abono"
+        description={
+          paymentTarget
+            ? `${paymentTarget.number} · saldo ${formatCurrency(paymentTarget.balance)}`
+            : ''
+        }
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPaymentTarget(null)} disabled={paymentSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void savePayment()} loading={paymentSaving}>
+              Registrar abono
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-line bg-slate-50/60 p-3.5">
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span>Total compra</span>
+              <span className="tabular font-semibold text-ink">
+                {formatCurrency(paymentTarget?.total ?? 0)}
+              </span>
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+              <span>Saldo pendiente</span>
+              <span className="tabular font-semibold text-warning-700">
+                {formatCurrency(paymentTarget?.balance ?? 0)}
+              </span>
+            </div>
+          </div>
+          <label className="block">
+            <span className="field-label">Valor del abono</span>
+            <input
+              value={paymentForm.amount}
+              onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })}
+              inputMode="numeric"
+              className="field text-right tabular"
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="field-label">Fecha</span>
+              <input
+                type="date"
+                value={paymentForm.date}
+                onChange={(event) => setPaymentForm({ ...paymentForm, date: event.target.value })}
+                className="field"
+              />
+            </label>
+            <label className="block">
+              <span className="field-label">Medio</span>
+              <select
+                value={paymentForm.method}
+                onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}
+                className="field"
+              >
+                <option value="Transferencia">Transferencia</option>
+                <option value="Efectivo">Efectivo</option>
+                <option value="Tarjeta">Tarjeta</option>
+              </select>
+            </label>
+          </div>
+          <label className="block">
+            <span className="field-label">Notas (opcional)</span>
+            <input
+              value={paymentForm.notes}
+              onChange={(event) => setPaymentForm({ ...paymentForm, notes: event.target.value })}
+              className="field"
+              placeholder="Ej. abono acordado con el proveedor"
+            />
+          </label>
+          <p className="text-[9px] leading-relaxed text-slate-400">
+            Si el medio es efectivo, se requiere un turno de caja abierto y se registra el egreso.
+          </p>
         </div>
       </Modal>
 

@@ -68,6 +68,7 @@ export interface Product {
   name: string
   sku: string
   barcode: string
+  supplierSku: string
   /** Nombre del nodo activo de inventory_category. */
   category: string
   location: string
@@ -565,6 +566,12 @@ export interface Purchase {
   adjustment: number
   total: number
   status: 'recibida' | 'pendiente'
+  paymentStatus: 'pagada' | 'pendiente' | 'parcial'
+  paymentMethod: string
+  paid: number
+  balance: number
+  dueDate?: string | null
+  payments: SupplierPayment[]
   notes?: string | null
   ai?: {
     provider?: string
@@ -583,12 +590,25 @@ export interface Purchase {
     unitPrice: number
     ivaRate: number
     iva: number
+    unitPriceWithTax: number
+    supplierSku: string
+    serialText: string
     lineTotal: number
   }>
 }
 
+export interface SupplierPayment {
+  id: string
+  amount: number
+  method: string
+  date: string
+  notes?: string | null
+  createdByName?: string | null
+}
+
 export interface AiInvoiceCostChange {
   previousCost: number
+  previousPrice: number
   newCost: number
   marginPercent: number
   suggestedPrice: number
@@ -600,10 +620,16 @@ export interface AiInvoiceLineDraft {
   quantity: number
   unitCost: number
   ivaRate: number
+  unitCostWithTax: number
   confidence: number
   productId: string | null
   productName: string | null
   productSku: string | null
+  supplierSku: string
+  serialText: string
+  skuSugerido: string
+  skuSource: 'producto' | 'ia' | 'local' | 'ajustado' | 'sin-sku'
+  skuWarning: string | null
   matchConfidence: number
   warnings: string[]
   costChange: AiInvoiceCostChange | null
@@ -637,6 +663,8 @@ export interface AiInvoiceDraft {
     number: string
     date: string
     currency: string
+    paymentMethod?: string
+    paymentCondition?: 'contado' | 'credito'
     confidence: number
   }
   lines: AiInvoiceLineDraft[]
@@ -670,6 +698,7 @@ export interface AiInvoiceDraft {
 export interface PurchaseReviewNewProduct {
   name: string
   sku: string
+  supplierSku?: string
   category: string
   location: string
   condition?: string
@@ -685,6 +714,8 @@ export interface PurchaseReviewLineInput {
   ivaRate: number
   productId?: string | null
   newProduct?: PurchaseReviewNewProduct | null
+  supplierSku?: string
+  serialText?: string
   sellPrice?: number | null
   updatePrice?: boolean
 }
@@ -698,6 +729,10 @@ export interface PurchaseReviewInput {
   realTotal: number
   updatePrices?: boolean
   duplicateConfirmed?: boolean
+  paymentCondition?: 'contado' | 'credito'
+  paymentMethod?: string
+  initialPayment?: number
+  dueDate?: string | null
   notes?: string
   aiMetadata?: Record<string, unknown> | null
 }

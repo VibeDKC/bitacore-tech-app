@@ -448,6 +448,15 @@ export const api = {
     },
     createFromReview(input: PurchaseReviewInput) {
       return rpc<Purchase>('purchases.createFromReview', input as unknown as Record<string, unknown>)
+    },
+    addPayment(input: {
+      purchaseId: string
+      amount: number
+      method: string
+      date?: string
+      notes?: string
+    }) {
+      return rpc<Purchase>('purchases.addPayment', input)
     }
   },
   ai: {

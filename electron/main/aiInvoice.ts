@@ -7,6 +7,11 @@ export interface InvoiceExtractionLine {
   quantity: number
   unitCost: number
   ivaRate: number
+  supplierSku?: string
+  serials?: string[]
+  skuSugerido?: string
+  lineTotal?: number
+  category?: string
   confidence?: number
 }
 
@@ -27,6 +32,8 @@ export interface InvoiceExtraction {
   discount?: number
   iva?: number
   total?: number
+  paymentMethod?: string
+  paymentCondition?: string
   confidence?: number
   warnings?: string[]
 }
@@ -353,6 +360,14 @@ const invoiceSchema = {
           quantity: { type: 'NUMBER' },
           unitCost: { type: 'NUMBER' },
           ivaRate: { type: 'NUMBER' },
+          supplierSku: { type: 'STRING' },
+          serials: {
+            type: 'ARRAY',
+            items: { type: 'STRING' }
+          },
+          skuSugerido: { type: 'STRING' },
+          lineTotal: { type: 'NUMBER' },
+          category: { type: 'STRING' },
           confidence: { type: 'NUMBER' }
         },
         required: ['description', 'quantity', 'unitCost', 'ivaRate']
@@ -362,6 +377,8 @@ const invoiceSchema = {
     discount: { type: 'NUMBER' },
     iva: { type: 'NUMBER' },
     total: { type: 'NUMBER' },
+    paymentMethod: { type: 'STRING' },
+    paymentCondition: { type: 'STRING' },
     confidence: { type: 'NUMBER' },
     warnings: {
       type: 'ARRAY',
@@ -371,16 +388,35 @@ const invoiceSchema = {
   required: ['supplier', 'invoice', 'lines']
 }
 
-const prompt = `Analiza esta factura de compra de un proveedor y devuelve solo JSON válido.
+const prompt = `Analiza esta factura de compra o captura de e-commerce y devuelve solo JSON válido.
 Extrae:
 - Nombre y NIT del proveedor.
 - Número y fecha de la factura en formato YYYY-MM-DD.
-- Cada línea: descripción, cantidad, costo unitario antes de IVA, porcentaje de IVA y confianza entre 0 y 1.
+- Método y condición de pago si aparecen ("Contado" o "Crédito").
+- Cada línea: descripción limpia, cantidad, costo unitario ANTES de IVA, porcentaje de IVA, código de proveedor, seriales, SKU interno sugerido, total de la fila con impuestos y categoría.
 - Subtotal, descuento global, IVA total y total real de la factura.
 - Advertencias si algún dato no es legible o las matemáticas no coinciden.
-No inventes valores. Si un dato no aparece, usa cadena vacía, 0 o una advertencia.
-Los valores monetarios deben estar en la moneda de la factura, normalmente COP.
-No incluyas markdown ni texto fuera del JSON.`
+
+HIGIENE DEL NOMBRE:
+- Elimina del nombre los seriales (SERIAL:, S/N:, SERIE:) y devuélvelos en "serials".
+- Elimina frases de marketing/SEO como "HIFI Bass", "Hot Sale", "Fast Delivery", "2DD", "High Quality", "In-Ear Earphone".
+- En auriculares KZ/QKZ conserva modelo exacto (Castor, Castor Bass, Castor Pro, Castor Pro 2, EDX, EDX Pro, ZSN Pro), conector (3.5mm o Type-C), micrófono (con Mic / sin Mic) y color.
+- En memorias USB/MicroSD conserva marca, modelo, capacidad y versión USB (2.0, 3.0, 3.2 o Type-C).
+- En RAM y SSD conserva marca, capacidad y DDR/NVMe cuando existan.
+- No inventes variantes que no aparezcan en la imagen.
+
+SKU INTERNO:
+- "skuSugerido" es un código modular propio de BitacoreTech, en mayúsculas y sin espacios: [TIPO]-[MARCA]-[MODELO/CARACTERÍSTICA].
+- No copies el código del proveedor. Si no puedes construir uno válido, usa cadena vacía.
+- Ejemplos: Router Mercusys MW302R -> ROU-MERC-MW302R; Switch Mercusys MS105G -> SW-MERC-MS105G; Base Jaltech DZ-CP012 -> BASE-JAL-CP012; Memoria Kingston Exodia 64GB USB 3.2 -> USB-KING-EXO-64G-32; Auriculares KZ Castor Bass 3.5mm con Mic Silver -> KZ-CASB-35-MIC-SIL; RAM Kingston 8GB DDR4 -> RAM-KING-8G-DDR4; SSD Somnambulist 128GB -> SSD-SOMN-128G.
+
+IMPUESTOS Y COSTOS:
+- "unitCost" es el valor unitario ANTES de IVA, tal como aparece en la columna de valor unitario.
+- "lineTotal" es el total de la fila CON impuestos, si aparece.
+- El total real pagado debe coincidir con la suma de las filas con impuestos menos descuentos.
+- No inventes valores. Si un dato no aparece, usa cadena vacía, 0 o una advertencia.
+- Los valores monetarios deben estar en la moneda de la factura, normalmente COP.
+- No incluyas markdown ni texto fuera del JSON.`
 
 export async function scanInvoice({
   apiKey,

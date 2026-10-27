@@ -122,6 +122,7 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     name: row.name,
     sku: row.sku,
     barcode: row.barcode,
+    supplierSku: row.supplier_sku ?? '',
     category: row.category,
     location: row.location,
     condition: row.condition ?? '',

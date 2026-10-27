@@ -16,6 +16,9 @@ function receiptLines(purchase: Purchase) {
       unitPrice: purchase.subtotal,
       ivaRate: 19,
       iva: purchase.iva,
+      unitPriceWithTax: purchase.subtotal,
+      supplierSku: '',
+      serialText: '',
       lineTotal: purchase.subtotal
     }
   ]
@@ -43,9 +46,16 @@ function ReceiptBody({ purchase }: { purchase: Purchase }) {
           <p className="text-black/60">NIT {purchase.supplierNit ?? '—'}{purchase.supplierNitDv ? `-${purchase.supplierNitDv}` : ''}</p>
         </div>
         <div className="text-right">
-          <p className="text-[7px] font-semibold uppercase tracking-[0.12em] text-black/45">Estado</p>
+          <p className="text-[7px] font-semibold uppercase tracking-[0.12em] text-black/45">Recepción</p>
           <p className="mt-0.5 font-semibold">{purchase.status === 'recibida' ? 'Recibida' : 'Pendiente'}</p>
           <p className="text-black/60">{purchase.items} ítem{purchase.items === 1 ? '' : 's'}</p>
+          <p className="mt-0.5 text-black/60">
+            {purchase.paymentStatus === 'pagada'
+              ? 'Pago: Pagada'
+              : purchase.paymentStatus === 'parcial'
+                ? `Pago: Abonada · saldo ${formatCurrency(purchase.balance)}`
+                : `Pago: Crédito · saldo ${formatCurrency(purchase.balance)}`}
+          </p>
         </div>
       </div>
 
@@ -62,7 +72,17 @@ function ReceiptBody({ purchase }: { purchase: Purchase }) {
         <tbody>
           {lines.map((line) => (
             <tr key={line.id} className="border-b border-black/10">
-              <td className="py-1.5 pr-2">{line.description}</td>
+              <td className="py-1.5 pr-2">
+                <span>{line.description}</span>
+                {line.supplierSku ? (
+                  <span className="block text-[7px] text-black/50">Ref. {line.supplierSku}</span>
+                ) : null}
+                {line.serialText ? (
+                  <span className="block break-words text-[7px] text-black/50">
+                    Seriales: {line.serialText}
+                  </span>
+                ) : null}
+              </td>
               <td className="py-1.5 px-2 text-right tabular">{line.quantity}</td>
               <td className="py-1.5 px-2 text-right tabular">{formatCurrency(line.unitPrice)}</td>
               <td className="py-1.5 px-2 text-right tabular">{line.ivaRate}% · {formatCurrency(line.iva)}</td>
@@ -134,9 +154,14 @@ export function PurchaseReceiptModal({
         size="lg"
         footer={
           <div className="flex items-center justify-between gap-2">
-            <Badge variant={purchase.status === 'recibida' ? 'success' : 'warning'}>
-              {purchase.status === 'recibida' ? 'Recibida' : 'Pendiente'}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant={purchase.status === 'recibida' ? 'success' : 'warning'}>
+                {purchase.status === 'recibida' ? 'Recibida' : 'Pendiente'}
+              </Badge>
+              <Badge variant={purchase.paymentStatus === 'pagada' ? 'success' : 'warning'}>
+                {purchase.paymentStatus === 'pagada' ? 'Pagada' : 'Crédito'}
+              </Badge>
+            </div>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={onClose}>
                 Cerrar

@@ -64,6 +64,7 @@ const emptyProductForm = {
   name: '',
   sku: '',
   barcode: '',
+  supplierSku: '',
   category: 'Repuestos',
   location: 'Bodega A',
   condition: '',
@@ -154,6 +155,7 @@ export function InventoryPage() {
         product.name.toLowerCase().includes(term) ||
         product.sku.toLowerCase().includes(term) ||
         product.barcode.includes(term) ||
+        (product.supplierSku ?? '').toLowerCase().includes(term) ||
         product.serials.some((serial) => serial.toLowerCase().includes(term))
       const matchesCategory = category === 'Todas' || product.category === category
       const status = getStockStatus(product)
@@ -212,6 +214,7 @@ export function InventoryPage() {
         name: form.name.trim(),
         sku: form.sku.trim(),
         barcode: form.barcode.trim() || undefined,
+        supplierSku: form.supplierSku.trim() || undefined,
         category: form.category,
         location: form.location,
         condition: form.condition || undefined,
@@ -249,6 +252,7 @@ export function InventoryPage() {
       name: product.name,
       sku: product.sku,
       barcode: product.barcode,
+      supplierSku: product.supplierSku ?? '',
       category: product.category,
       location: product.location,
       condition: product.condition ?? '',
@@ -277,6 +281,7 @@ export function InventoryPage() {
       const updated = await api.inventory.update(selected.id, {
         name: editForm.name.trim(),
         sku: editForm.sku.trim(),
+        supplierSku: editForm.supplierSku.trim(),
         ...(editForm.barcode.trim() ? { barcode: editForm.barcode.trim() } : {}),
         category: editForm.category,
         location: editForm.location,
@@ -305,10 +310,11 @@ export function InventoryPage() {
 
   function exportInventory() {
     downloadCsv('bitacoretech-inventario.csv', [
-      ['Producto', 'SKU', 'Categoría', 'Ubicación', 'Stock', 'Stock mínimo', 'Costo', 'Precio', 'Rotación', 'Alerta', 'Estado'],
+      ['Producto', 'SKU', 'SKU proveedor', 'Categoría', 'Ubicación', 'Stock', 'Stock mínimo', 'Costo', 'Precio', 'Rotación', 'Alerta', 'Estado'],
       ...filtered.map((product) => [
         product.name,
         product.sku,
+        product.supplierSku,
         product.category,
         product.location ?? '',
         product.stock,
@@ -611,6 +617,7 @@ export function InventoryPage() {
               <div className="divide-y divide-line rounded-xl border border-line">
                 {[
                   ['SKU', selected.sku],
+                  ['SKU de proveedor', selected.supplierSku || 'Sin especificar'],
                   ['Código de barras', selected.barcode],
                   ['Categoría', selected.category],
                   ['Ubicación', selected.location],
@@ -778,6 +785,10 @@ export function InventoryPage() {
           <label className="block">
             <span className="field-label">Código de barras (opcional)</span>
             <input value={form.barcode} onChange={(event) => setForm({ ...form, barcode: event.target.value })} className="field" placeholder="Se genera si se deja vacío" />
+          </label>
+          <label className="block">
+            <span className="field-label">SKU de proveedor (opcional)</span>
+            <input value={form.supplierSku} onChange={(event) => setForm({ ...form, supplierSku: event.target.value })} className="field" placeholder="Ej. TL-WN725N" />
           </label>
           <label className="block">
             <span className="field-label">Categoría</span>
@@ -975,6 +986,10 @@ export function InventoryPage() {
           <label className="block">
             <span className="field-label">Código de barras</span>
             <input value={editForm.barcode} onChange={(event) => setEditForm({ ...editForm, barcode: event.target.value })} className="field" />
+          </label>
+          <label className="block">
+            <span className="field-label">SKU de proveedor</span>
+            <input value={editForm.supplierSku} onChange={(event) => setEditForm({ ...editForm, supplierSku: event.target.value })} className="field" />
           </label>
           <label className="block">
             <span className="field-label">Categoría</span>

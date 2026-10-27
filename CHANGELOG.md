@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.10.2 — 2026-10-27
+
+### SKU y datos de proveedor
+- Generador de SKU interno modular con reglas de tipo, marca y modelo.
+- El SKU de la IA se valida; si no cumple el formato o copia al proveedor, se genera localmente.
+- Resolución de colisiones de SKU sin duplicar productos.
+- Nuevo campo de SKU/referencia de proveedor en productos.
+- El SKU de proveedor se conserva en cada línea de compra.
+- Búsqueda y exportación de inventario incluyen el SKU de proveedor.
+
+### Higiene de facturas
+- Limpieza de seriales y frases SEO en nombres extraídos.
+- Seriales guardados como texto en la línea de compra y visibles en revisión, detalle y comprobante.
+- Normalización de variantes de auriculares, memorias, RAM y SSD.
+- Costo de la línea con IVA calculado para mostrar margen.
+- El costo del inventario se mantiene antes de IVA; la revisión muestra margen con IVA.
+
+### Crédito con proveedores
+- Compras de contado o a crédito.
+- Abono inicial opcional, vencimiento y saldo pendiente.
+- Registro de abonos con medio de pago, fecha y notas.
+- Historial de pagos en el detalle de compra.
+- Estado de pago: pagada, abonada o pendiente.
+- El efectivo exige caja abierta y registra el egreso.
+- El indicador “Pendiente por pagar” usa el saldo real, no el estado de recepción.
+- Migración 11 con backfill de pagos y saldos.
+
+### Calidad
+- Aceptación 1.10.2: 21/21.
+- Migración 11 sobre copia de la base real: OK.
+- Regresión: 1.10.1 15/15, 1.10.0 7/7, 1.9.0 9/9, 1.8.0 13/13, 1.7.0 11/11, 1.6.1 12/12, 1.6.0 14/14, 1.5.0 12/12, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Pruebas con Gemini simulado, sin consumir API real.
+- Instalador `BitacoreTech-1.10.2-x64.exe`.
+
 ## 1.10.1 — 2026-10-27
 
 ### Cuotas y modelos de IA

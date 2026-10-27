@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS products (
   name TEXT NOT NULL,
   sku TEXT NOT NULL UNIQUE,
   barcode TEXT NOT NULL,
+  supplier_sku TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL,
   location TEXT NOT NULL DEFAULT 'Bodega A',
   condition TEXT NOT NULL DEFAULT '',
@@ -216,6 +217,11 @@ CREATE TABLE IF NOT EXISTS purchases (
   discount_cents INTEGER NOT NULL DEFAULT 0,
   adjustment_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK (status IN ('recibida', 'pendiente')),
+  payment_status TEXT NOT NULL DEFAULT 'pagada',
+  payment_method TEXT NOT NULL DEFAULT 'Transferencia',
+  paid_cents INTEGER NOT NULL DEFAULT 0,
+  balance_cents INTEGER NOT NULL DEFAULT 0,
+  due_date TEXT,
   notes TEXT,
   ai_metadata_json TEXT,
   created_by TEXT,
@@ -232,8 +238,24 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   quantity REAL NOT NULL DEFAULT 1,
   unit_price_cents INTEGER NOT NULL DEFAULT 0,
   iva_rate REAL NOT NULL DEFAULT 19,
-  iva_cents INTEGER NOT NULL DEFAULT 0
+  iva_cents INTEGER NOT NULL DEFAULT 0,
+  supplier_sku TEXT NOT NULL DEFAULT '',
+  serial_text TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS supplier_payments (
+  id TEXT PRIMARY KEY,
+  purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL,
+  method TEXT NOT NULL,
+  paid_at TEXT NOT NULL,
+  notes TEXT,
+  created_by TEXT,
+  created_by_name TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_purchase ON supplier_payments(purchase_id, paid_at);
 
 CREATE TABLE IF NOT EXISTS work_orders (
   id TEXT PRIMARY KEY,

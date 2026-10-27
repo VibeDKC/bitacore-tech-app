@@ -60,6 +60,7 @@ type ScanFailure = {
 type NewProductDraft = {
   name: string
   sku: string
+  supplierSku: string
   category: string
   location: string
   condition: string
@@ -74,8 +75,14 @@ type ReviewLineState = {
   quantity: string
   unitCost: string
   ivaRate: string
+  unitCostWithTax: number
   productId: string
   newProduct: NewProductDraft | null
+  supplierSku: string
+  serialText: string
+  skuSugerido: string
+  skuSource: string
+  skuWarning: string | null
   confidence: number
   costChange: AiInvoiceCostChange | null
   sellPrice: string
@@ -173,6 +180,10 @@ export function InvoiceScanReviewModal({
   const [realTotalInput, setRealTotalInput] = useState('')
   const [differenceConfirmed, setDifferenceConfirmed] = useState(false)
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false)
+  const [paymentCondition, setPaymentCondition] = useState<'contado' | 'credito'>('contado')
+  const [paymentMethod, setPaymentMethod] = useState('Transferencia')
+  const [initialPayment, setInitialPayment] = useState('')
+  const [dueDate, setDueDate] = useState('')
   const [duplicateInfo, setDuplicateInfo] = useState<{
     duplicate: boolean
     purchaseId: string | null
@@ -201,6 +212,10 @@ export function InvoiceScanReviewModal({
     setDuplicateInfo(null)
     setDuplicateConfirmed(false)
     setDifferenceConfirmed(false)
+    setPaymentCondition('contado')
+    setPaymentMethod('Transferencia')
+    setInitialPayment('')
+    setDueDate('')
     setNewSupplierOpen(false)
     setSupplierForm({ name: '', nit: '', phone: '', category: 'Repuestos' })
     setScanError(null)
@@ -328,7 +343,8 @@ export function InvoiceScanReviewModal({
   function buildNewProduct(line: ReviewLineState): NewProductDraft {
     return {
       name: line.description,
-      sku: suggestSku(line.description),
+      sku: line.skuSugerido || suggestSku(line.description),
+      supplierSku: line.supplierSku,
       category: categoryOptions[0] ?? 'Repuestos',
       location: locationOptions[0] ?? 'Bodega A',
       condition: conditionOptions[0] ?? '',
@@ -347,6 +363,15 @@ export function InvoiceScanReviewModal({
     setRealTotalInput(moneyInput(result.realTotal))
     setDifferenceConfirmed(false)
     setDuplicateConfirmed(false)
+    setPaymentCondition(result.invoice.paymentCondition ?? 'contado')
+    setPaymentMethod(
+      result.invoice.paymentMethod &&
+        ['Efectivo', 'Transferencia', 'Tarjeta'].includes(result.invoice.paymentMethod)
+        ? result.invoice.paymentMethod
+        : 'Transferencia'
+    )
+    setInitialPayment('')
+    setDueDate('')
     setLines(
       result.lines.map((line) => ({
         id: line.id,
@@ -354,8 +379,14 @@ export function InvoiceScanReviewModal({
         quantity: String(line.quantity),
         unitCost: moneyInput(line.unitCost),
         ivaRate: String(line.ivaRate),
+        unitCostWithTax: line.unitCostWithTax,
         productId: line.productId ?? '',
         newProduct: null,
+        supplierSku: line.supplierSku ?? '',
+        serialText: line.serialText ?? '',
+        skuSugerido: line.skuSugerido ?? '',
+        skuSource: line.skuSource ?? 'sin-sku',
+        skuWarning: line.skuWarning ?? null,
         confidence: line.confidence,
         costChange: line.costChange,
         sellPrice: line.costChange ? moneyInput(line.costChange.suggestedPrice) : '',
@@ -497,6 +528,9 @@ export function InvoiceScanReviewModal({
     return true
   })
 
+  const initialPaymentValue = parseAmount(initialPayment)
+  const paymentValid =
+    paymentCondition === 'contado' || initialPaymentValue <= realTotal
   const canApprove =
     Boolean(draft) &&
     Boolean(supplierId) &&
@@ -504,6 +538,7 @@ export function InvoiceScanReviewModal({
     Boolean(invoiceDate) &&
     linesValid &&
     realTotal > 0 &&
+    paymentValid &&
     (!requiresDifferenceConfirmation || differenceConfirmed) &&
     (!duplicateInfo?.duplicate || duplicateConfirmed) &&
     !saving
@@ -541,8 +576,14 @@ export function InvoiceScanReviewModal({
         quantity: '1',
         unitCost: '',
         ivaRate: '19',
+        unitCostWithTax: 0,
         productId: '',
         newProduct: null,
+        supplierSku: '',
+        serialText: '',
+        skuSugerido: '',
+        skuSource: 'sin-sku',
+        skuWarning: null,
         confidence: 1,
         costChange: null,
         sellPrice: '',
@@ -589,10 +630,13 @@ export function InvoiceScanReviewModal({
       unitCost: parseAmount(line.unitCost),
       ivaRate: parseAmount(line.ivaRate),
       productId: line.productId || null,
+      supplierSku: line.supplierSku.trim(),
+      serialText: line.serialText.trim(),
       newProduct: line.newProduct
         ? ({
             name: line.newProduct.name.trim(),
             sku: line.newProduct.sku.trim(),
+            supplierSku: line.newProduct.supplierSku.trim(),
             category: line.newProduct.category,
             location: line.newProduct.location,
             condition: line.newProduct.condition || undefined,
@@ -615,6 +659,13 @@ export function InvoiceScanReviewModal({
         realTotal,
         updatePrices: lines.some((line) => line.updatePrice),
         duplicateConfirmed,
+        paymentCondition,
+        paymentMethod,
+        initialPayment: paymentCondition === 'credito' ? parseAmount(initialPayment) : 0,
+        dueDate:
+          paymentCondition === 'credito' && dueDate
+            ? new Date(`${dueDate}T12:00:00`).toISOString()
+            : null,
         aiMetadata: {
           ...draft.ai,
           source: draft.source,
@@ -1086,7 +1137,14 @@ export function InvoiceScanReviewModal({
                     <span className="field-label">Producto en inventario</span>
                     <select
                       value={line.productId}
-                      onChange={(event) => updateLine(index, { productId: event.target.value, newProduct: null })}
+                      onChange={(event) => {
+                        const product = products.find((item) => item.id === event.target.value)
+                        updateLine(index, {
+                          productId: event.target.value,
+                          newProduct: null,
+                          supplierSku: product?.supplierSku ?? line.supplierSku
+                        })
+                      }}
                       className="field h-9 text-[11px]"
                     >
                       <option value="">Sin producto asociado</option>
@@ -1108,6 +1166,29 @@ export function InvoiceScanReviewModal({
                     </Button>
                   </div>
                 </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="field-label">SKU / Ref. proveedor</span>
+                    <input
+                      value={line.supplierSku}
+                      onChange={(event) => updateLine(index, { supplierSku: event.target.value })}
+                      className="field h-9 font-mono text-[11px]"
+                      placeholder="Opcional"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Seriales (texto)</span>
+                    <input
+                      value={line.serialText}
+                      onChange={(event) => updateLine(index, { serialText: event.target.value })}
+                      className="field h-9 text-[11px]"
+                      placeholder="Opcional, separados por coma"
+                    />
+                  </label>
+                </div>
+                {line.skuWarning ? (
+                  <p className="mt-1 text-[9px] text-warning-700">{line.skuWarning}</p>
+                ) : null}
                 {line.newProduct ? (
                   <div className="mt-3 grid gap-2 rounded-xl border border-brand-100 bg-brand-50/40 p-3 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="block sm:col-span-2">
@@ -1119,11 +1200,22 @@ export function InvoiceScanReviewModal({
                       />
                     </label>
                     <label className="block">
-                      <span className="field-label">SKU</span>
+                      <span className="field-label">SKU interno</span>
                       <input
                         value={line.newProduct.sku}
                         onChange={(event) => updateNewProduct(index, { sku: event.target.value })}
-                        className="field h-9 text-[11px]"
+                        className="field h-9 font-mono text-[11px]"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="field-label">SKU / Ref. proveedor</span>
+                      <input
+                        value={line.newProduct.supplierSku}
+                        onChange={(event) =>
+                          updateNewProduct(index, { supplierSku: event.target.value })
+                        }
+                        className="field h-9 font-mono text-[11px]"
+                        placeholder="Opcional"
                       />
                     </label>
                     <label className="block">
@@ -1134,6 +1226,19 @@ export function InvoiceScanReviewModal({
                         inputMode="decimal"
                         className="field h-9 text-right text-[11px]"
                       />
+                      <span className="mt-1 block text-[9px] text-slate-500">
+                        Margen con IVA:{' '}
+                        <span className="font-semibold text-ink">
+                          {(() => {
+                            const price = parseAmount(line.newProduct.price)
+                            const costWithTax =
+                              parseAmount(line.unitCost) * (1 + parseAmount(line.ivaRate) / 100)
+                            return price > 0
+                              ? `${Math.round(((price - costWithTax) / price) * 100)} %`
+                              : '—'
+                          })()}
+                        </span>
+                      </span>
                     </label>
                     <label className="block">
                       <span className="field-label">Categoría</span>
@@ -1203,8 +1308,17 @@ export function InvoiceScanReviewModal({
                       {formatCurrency(line.costChange.newCost)}.
                     </p>
                     <p className="mt-0.5 text-[9px] text-warning-700">
-                      Margen actual {line.costChange.marginPercent.toFixed(1)} % · precio sugerido{' '}
-                      {formatCurrency(line.costChange.suggestedPrice)}
+                      Margen sin IVA {line.costChange.marginPercent.toFixed(1)} % · con IVA{' '}
+                      {line.costChange.previousPrice > 0
+                        ? (
+                            ((line.costChange.previousPrice -
+                              line.costChange.previousCost *
+                                (1 + parseAmount(line.ivaRate) / 100)) /
+                              line.costChange.previousPrice) *
+                            100
+                          ).toFixed(1)
+                        : '—'}{' '}
+                      % · precio sugerido {formatCurrency(line.costChange.suggestedPrice)}
                     </p>
                     <label className="mt-2 flex cursor-pointer items-center gap-2 text-[10px] text-warning-800">
                       <input
@@ -1288,6 +1402,73 @@ export function InvoiceScanReviewModal({
                     Confirmo el total real y el ajuste.
                   </label>
                 </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-line p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="field-label">Forma de pago</span>
+                <select
+                  value={paymentCondition}
+                  onChange={(event) =>
+                    setPaymentCondition(event.target.value as 'contado' | 'credito')
+                  }
+                  className="field"
+                >
+                  <option value="contado">Contado</option>
+                  <option value="credito">Crédito</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">Medio de pago</span>
+                <select
+                  value={paymentMethod}
+                  onChange={(event) => setPaymentMethod(event.target.value)}
+                  className="field"
+                >
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Tarjeta">Tarjeta</option>
+                </select>
+              </label>
+              {paymentCondition === 'credito' ? (
+                <>
+                  <label className="block">
+                    <span className="field-label">Abono inicial (opcional)</span>
+                    <input
+                      value={initialPayment}
+                      onChange={(event) => setInitialPayment(event.target.value)}
+                      inputMode="decimal"
+                      className="field text-right tabular"
+                      placeholder="0"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Vencimiento (opcional)</span>
+                    <input
+                      type="date"
+                      value={dueDate}
+                      onChange={(event) => setDueDate(event.target.value)}
+                      className="field"
+                    />
+                  </label>
+                  <p className="text-[10px] text-slate-500 sm:col-span-2">
+                    Saldo a deber:{' '}
+                    <span className="font-semibold text-ink">
+                      {formatCurrency(
+                        Math.max(0, realTotal - parseAmount(initialPayment))
+                      )}
+                    </span>
+                    . El saldo queda en cuentas por pagar con el proveedor.
+                  </p>
+                  {!paymentValid ? (
+                    <p className="text-[9px] text-danger-600 sm:col-span-2">
+                      El abono inicial no puede superar el total real de la factura.
+                    </p>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </div>

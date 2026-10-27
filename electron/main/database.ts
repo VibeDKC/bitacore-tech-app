@@ -85,6 +85,7 @@ export class Database {
     this.ensureColumn('products', 'service_type', 'TEXT')
     this.ensureColumn('products', 'condition', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'origin', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('products', 'supplier_sku', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
@@ -92,14 +93,22 @@ export class Database {
     this.ensureColumn('purchases', 'discount_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'adjustment_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'ai_metadata_json', 'TEXT')
+    this.ensureColumn('purchases', 'payment_status', "TEXT NOT NULL DEFAULT 'pagada'")
+    this.ensureColumn('purchases', 'payment_method', "TEXT NOT NULL DEFAULT 'Transferencia'")
+    this.ensureColumn('purchases', 'paid_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('purchases', 'balance_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('purchases', 'due_date', 'TEXT')
     this.ensureColumn('purchase_items', 'iva_rate', 'REAL NOT NULL DEFAULT 19')
     this.ensureColumn('purchase_items', 'iva_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('purchase_items', 'supplier_sku', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('purchase_items', 'serial_text', "TEXT NOT NULL DEFAULT ''")
     this.ensurePurchasesNumberIndex()
     this.backfillPurchaseItemIva()
+    this.backfillPurchasePayments()
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -185,6 +194,32 @@ export class Database {
          WHERE iva_cents = 0 AND unit_price_cents > 0 AND iva_rate > 0`
       )
       this.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('purchase_iva_backfill', '1')")
+    })
+  }
+
+  private backfillPurchasePayments() {
+    const done = this.get<{ value: string }>(
+      "SELECT value FROM meta WHERE key = 'purchase_payment_backfill'"
+    )
+    if (done?.value === '1') return
+    this.tx(() => {
+      this.run(
+        `UPDATE purchases
+         SET payment_status = CASE WHEN status = 'pendiente' THEN 'pendiente' ELSE 'pagada' END,
+             payment_method = CASE WHEN status = 'pendiente' THEN 'Crédito' ELSE 'Transferencia' END,
+             paid_cents = CASE WHEN status = 'pendiente' THEN 0 ELSE total_cents END,
+             balance_cents = CASE WHEN status = 'pendiente' THEN total_cents ELSE 0 END`
+      )
+      this.run(
+        `INSERT INTO supplier_payments
+          (id, purchase_id, amount_cents, method, paid_at, notes, created_by, created_by_name, created_at)
+         SELECT 'sp_mig_' || p.id, p.id, p.paid_cents, 'Transferencia', p.created_at,
+                'Pago migrado', p.created_by, 'Migración', p.created_at
+         FROM purchases p
+         WHERE p.paid_cents > 0
+           AND NOT EXISTS (SELECT 1 FROM supplier_payments sp WHERE sp.purchase_id = p.id)`
+      )
+      this.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('purchase_payment_backfill', '1')")
     })
   }
 
