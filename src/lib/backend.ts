@@ -203,6 +203,7 @@ export interface NewOrderInput {
   serial: string
   customBuild?: boolean
   alias?: string
+  credentials?: { username?: string; secret: string; note?: string }
   accessories: string
   physicalCondition: string
   reportedIssue: string
@@ -337,6 +338,32 @@ export const api = {
     },
     settle(input: SettleInput) {
       return rpc<WorkOrder>('orders.settle', input as unknown as Record<string, unknown>)
+    },
+    diagnosticReport(id: string, mode: 'initial' | 'delivery') {
+      return rpc<{
+        path: string
+        fileName: string
+        whatsappUrl: string | null
+        whatsappOpened: boolean
+        phoneFound: boolean
+        message: string
+      }>('orders.diagnosticReport', { id, mode })
+    },
+    revealCredentials(id: string) {
+      return rpc<{
+        kind: string
+        username: string
+        secret: string
+        note: string
+        updatedAt: string
+        viewCount: number
+      }>('orders.revealCredentials', { id })
+    },
+    setCredentials(id: string, input: { username?: string; secret: string; note?: string }) {
+      return rpc<WorkOrder>('orders.setCredentials', { id, ...input })
+    },
+    deleteCredentials(id: string) {
+      return rpc<WorkOrder>('orders.deleteCredentials', { id })
     }
   },
   evidence: {
@@ -434,7 +461,7 @@ export const api = {
     get() {
       return rpc<SettingsData>('settings.get')
     },
-    updateSection(section: 'print' | 'ai' | 'security' | 'business' | 'equipment', value: Record<string, unknown>) {
+    updateSection(section: 'print' | 'ai' | 'security' | 'business' | 'equipment' | 'messages', value: Record<string, unknown>) {
       return rpc<SettingsData>('settings.updateSection', { section, value })
     }
   },

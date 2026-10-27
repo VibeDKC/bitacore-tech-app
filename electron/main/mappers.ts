@@ -212,6 +212,10 @@ export function orderDto(db: Database, row: any) {
     'SELECT * FROM work_order_evidence WHERE work_order_id = ? ORDER BY captured_at ASC, rowid ASC',
     row.id
   )
+  const credentialRow = db.get<any>(
+    'SELECT updated_at, view_count FROM work_order_credentials WHERE work_order_id = ?',
+    row.id
+  )
   const activeEvidence = evidenceRows.filter((item) => item.status === 'activa')
   const evidenceBytes = activeEvidence.reduce((sum, item) => sum + Number(item.size_bytes ?? 0), 0)
   const technician = row.technician_id
@@ -238,12 +242,14 @@ export function orderDto(db: Database, row: any) {
   const itemsTotal = itemRows.reduce((sum, item) => sum + Number(item.unit_price_cents) * Number(item.quantity), 0)
   const totalCents = itemsTotal > 0 ? itemsTotal : toCents(intake?.estimate ?? 0)
   const paidCents = paymentRows.reduce((sum, payment) => sum + Number(payment.amount_cents), 0)
-  const balanceCents = Math.max(totalCents - paidCents, 0)
+  const isExceptionInvoice = Boolean(invoiceRow && String(invoiceRow.notes ?? '').startsWith('Excepción:'))
+  const isNoChargeDelivery = row.status === 'entregado' && isExceptionInvoice
+  const balanceCents = isNoChargeDelivery ? 0 : Math.max(totalCents - paidCents, 0)
   const balance = money(balanceCents)
 
   let settlement: any
   if (row.status === 'entregado') {
-    const isException = invoiceRow && Number(invoiceRow.total_cents) === 0
+    const isException = isExceptionInvoice
     const exceptionReason = isException
       ? String(invoiceRow.notes ?? '').replace(/^Excepción:\s*/i, '')
       : undefined
@@ -314,6 +320,9 @@ export function orderDto(db: Database, row: any) {
     total: money(totalCents),
     invoiceNumber: invoiceRow?.number,
     invoiceStatus: invoiceRow?.status,
+    hasCredentials: Boolean(credentialRow),
+    credentialsUpdatedAt: credentialRow?.updated_at ?? null,
+    credentialsViewCount: Number(credentialRow?.view_count ?? 0),
     evidence: evidenceRows.map(evidenceDto),
     evidenceCount: activeEvidence.length,
     evidenceBytes,

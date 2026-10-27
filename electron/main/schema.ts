@@ -251,6 +251,22 @@ CREATE TABLE IF NOT EXISTS work_order_items (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS work_order_credentials (
+  id TEXT PRIMARY KEY,
+  work_order_id TEXT NOT NULL UNIQUE REFERENCES work_orders(id) ON DELETE CASCADE,
+  payload_encrypted TEXT NOT NULL,
+  created_by TEXT,
+  created_by_name TEXT,
+  created_at TEXT NOT NULL,
+  updated_by TEXT,
+  updated_by_name TEXT,
+  updated_at TEXT NOT NULL,
+  last_viewed_at TEXT,
+  last_viewed_by TEXT,
+  last_viewed_by_name TEXT,
+  view_count INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS work_order_events (
   id TEXT PRIMARY KEY,
   work_order_id TEXT NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,

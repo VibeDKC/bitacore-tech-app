@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 
 export * from './dictionaries'
+export * from './messages'
 
 export type Role = 'superadmin' | 'admin' | 'tecnico' | 'cajero'
 
@@ -380,6 +381,9 @@ export interface WorkOrder {
   total?: number
   invoiceNumber?: string
   invoiceStatus?: string
+  hasCredentials?: boolean
+  credentialsUpdatedAt?: string | null
+  credentialsViewCount?: number
   evidence?: WorkOrderEvidence[]
   evidenceCount?: number
   evidenceBytes?: number
@@ -685,6 +689,7 @@ export interface SettingsData {
     orderPrefix: string
   }
   equipment: { qrEnabled: boolean }
+  messages: { initial: string; ready: string }
   backup: { passwordConfigured: boolean }
   rolePermissions: Array<{ role: Role; capability: Capability; allowed: boolean }>
   statuses: StatusSetting[]

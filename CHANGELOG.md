@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.7.0 — 2026-10-26
+
+### Credenciales del equipo
+- Campo de usuario y contraseña/PIN/patrón en la recepción de la OT.
+- Cifrado local con `safeStorage`; nunca se guarda en texto plano.
+- Solo puede consultarlas el técnico asignado, un administrador o el propietario.
+- Cada consulta queda auditada y aumenta el contador de vistas.
+- Se pueden actualizar o eliminar manualmente.
+- Se eliminan automáticamente al entregar la OT o cerrarla como no reparada.
+- No se imprimen en comprobantes ni reportes.
+- Se descartan al restaurar un respaldo para evitar dependencia del equipo de origen.
+
+### Mensajes y reportes
+- Nueva pestaña **Configuración → Mensajes** con dos plantillas:
+  - Ingreso / diagnóstico inicial.
+  - Equipo listo / entrega.
+- Variables para cliente, equipo, OT, estado, diagnóstico, presupuesto, total, saldo, taller, teléfono y fecha.
+- Botones **Reporte inicial** y **Reporte de entrega** en la OT.
+- Generación de PDF A4 con diagnóstico, ficha técnica, accesorios, falla, ítems, pagos y saldos según el tipo de reporte.
+- El PDF se guarda en `reports`, se revela en el Explorador y se abre WhatsApp con el mensaje configurado.
+- El reporte de entrega está disponible desde Listo para entrega.
+- El reporte no incluye credenciales.
+
+### Corrección de entrega
+- Una entrega sin cobro ya no deja saldo pendiente en la OT.
+
+### Calidad
+- Aceptación 1.7.0: 11/11.
+- Migración 7 sobre copia de la base real: OK.
+- Regresión: 1.6.1 12/12, 1.6.0 14/14, 1.5.0 12/12, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Instalador `BitacoreTech-1.7.0-x64.exe`.
+
 ## 1.6.1 — 2026-10-26
 
 ### Perfil y seguridad

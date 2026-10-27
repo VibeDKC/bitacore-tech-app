@@ -8,9 +8,12 @@ import {
   Check,
   ChevronDown,
   CircleDollarSign,
+  Eye,
+  EyeOff,
   FileText,
   Gamepad2,
   Laptop,
+  KeyRound,
   LockKeyhole,
   Monitor,
   Package,
@@ -247,6 +250,10 @@ export function NewOrderPage() {
   const [lockNote, setLockNote] = useState('')
   const [customerAuthorizesAccess, setCustomerAuthorizesAccess] = useState(false)
   const [noCredentials, setNoCredentials] = useState(false)
+  const [credentialUsername, setCredentialUsername] = useState('')
+  const [credentialSecret, setCredentialSecret] = useState('')
+  const [credentialNote, setCredentialNote] = useState('')
+  const [showCredential, setShowCredential] = useState(false)
 
   const [reportedIssue, setReportedIssue] = useState('')
   const [estimate, setEstimate] = useState('')
@@ -433,6 +440,10 @@ export function NewOrderPage() {
     setLockNote('')
     setCustomerAuthorizesAccess(false)
     setNoCredentials(false)
+    setCredentialUsername('')
+    setCredentialSecret('')
+    setCredentialNote('')
+    setShowCredential(false)
     setReportedIssue('')
     setEstimate('')
     setDiagnosticFee('')
@@ -470,6 +481,16 @@ export function NewOrderPage() {
     }
     if (needsLock && !customerAuthorizesAccess && !noCredentials) {
       toast.error('Indica si el cliente autoriza el acceso o si prefiere no suministrar credenciales')
+      return
+    }
+    if (
+      needsLock &&
+      customerAuthorizesAccess &&
+      !noCredentials &&
+      (credentialUsername.trim() || credentialNote.trim() || credentialSecret.trim()) &&
+      !credentialSecret.trim()
+    ) {
+      toast.error('Escribe la contraseña, PIN o patrón del equipo, o deja la credencial vacía')
       return
     }
     if (!legalAccepted) {
@@ -541,6 +562,14 @@ export function NewOrderPage() {
         equipmentType: selectedDevice.equipmentType,
         customBuild: customBuild && supportsCustomBuild,
         alias: customBuild && supportsCustomBuild ? customAlias.trim() : undefined,
+        credentials:
+          needsLock && customerAuthorizesAccess && !noCredentials && credentialSecret.trim()
+            ? {
+                username: credentialUsername.trim() || undefined,
+                secret: credentialSecret.trim(),
+                note: credentialNote.trim() || undefined
+              }
+            : undefined,
         brand: customBuild && supportsCustomBuild ? 'Armado' : brand.trim(),
         model: customBuild && supportsCustomBuild ? customAlias.trim() : model.trim(),
         serial: customBuild && supportsCustomBuild
@@ -1036,7 +1065,7 @@ export function NewOrderPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] font-semibold text-warning-900">Bloqueo de seguridad</p>
                     <p className="mt-0.5 text-[10px] leading-relaxed text-warning-800/80">
-                      Nunca escribas la contraseña, PIN, patrón ni código. Solo registra el tipo de bloqueo y la autorización.
+                      Si el cliente autoriza, la credencial se guarda cifrada y se elimina automáticamente al entregar. Nunca se imprime en el comprobante.
                     </p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="block">
@@ -1082,12 +1111,71 @@ export function NewOrderPage() {
                             checked={noCredentials}
                             onChange={(event) => {
                               setNoCredentials(event.target.checked)
-                              if (event.target.checked) setCustomerAuthorizesAccess(false)
+                              if (event.target.checked) {
+                                setCustomerAuthorizesAccess(false)
+                                setCredentialUsername('')
+                                setCredentialSecret('')
+                                setCredentialNote('')
+                                setShowCredential(false)
+                              }
                             }}
                             className="mt-0.5 h-3.5 w-3.5 rounded border-warning-300 text-brand-600 focus:ring-brand-200"
                           />
                           El cliente prefiere no suministrar credenciales. Se trabajará sin acceso al sistema.
                         </label>
+                        {customerAuthorizesAccess && !noCredentials ? (
+                          <div className="mt-3 rounded-xl border border-warning-200 bg-white p-3">
+                            <div className="flex items-center gap-2">
+                              <KeyRound className="h-4 w-4 text-warning-600" />
+                              <div>
+                                <p className="text-[10px] font-semibold text-ink">Credencial temporal del equipo</p>
+                                <p className="text-[9px] text-slate-400">Opcional. Se cifra localmente y se borra al entregar.</p>
+                              </div>
+                            </div>
+                            <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                              <label className="block">
+                                <span className="field-label">Usuario o cuenta</span>
+                                <input
+                                  value={credentialUsername}
+                                  onChange={(event) => setCredentialUsername(event.target.value)}
+                                  placeholder="Opcional"
+                                  className="field bg-white"
+                                  autoComplete="off"
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="field-label">Contraseña, PIN o patrón</span>
+                                <div className="relative">
+                                  <input
+                                    type={showCredential ? 'text' : 'password'}
+                                    value={credentialSecret}
+                                    onChange={(event) => setCredentialSecret(event.target.value)}
+                                    placeholder="Se guarda cifrada"
+                                    className="field bg-white pr-10"
+                                    autoComplete="new-password"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowCredential((value) => !value)}
+                                    className="focus-ring absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                    aria-label={showCredential ? 'Ocultar credencial' : 'Mostrar credencial'}
+                                  >
+                                    {showCredential ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                  </button>
+                                </div>
+                              </label>
+                              <label className="block sm:col-span-2">
+                                <span className="field-label">Nota de la credencial</span>
+                                <input
+                                  value={credentialNote}
+                                  onChange={(event) => setCredentialNote(event.target.value)}
+                                  placeholder="Ej. usuario local, patrón de 9 puntos…"
+                                  className="field bg-white"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -1389,7 +1477,7 @@ export function NewOrderPage() {
             <div className="flex items-start gap-2.5">
               <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-warning-600" />
               <p className="text-[9.5px] leading-relaxed text-warning-800">
-                No se almacenan contraseñas, PIN, patrones ni códigos. Solo el tipo de bloqueo y la autorización del cliente.
+                Si el cliente autoriza, la credencial se guarda cifrada y se elimina automáticamente al entregar. Nunca se imprime.
               </p>
             </div>
           </div>

@@ -16,6 +16,7 @@ import {
   Fingerprint,
   KeyRound,
   LockKeyhole,
+  MessageCircle,
   Minus,
   Printer,
   ReceiptText,
@@ -48,9 +49,11 @@ import { Badge } from '@/components/ui/Badge'
 import { Avatar } from '@/components/ui/Avatar'
 import { Modal } from '@/components/ui/Modal'
 import { DictionariesPanel } from '@/components/settings/DictionariesPanel'
+import { MessagesPanel } from '@/components/settings/MessagesPanel'
+import { DEFAULT_MESSAGES, type MessageTemplates } from '@/types'
 import { cn } from '@/lib/utils'
 
-type SettingsTab = 'negocio' | 'usuarios' | 'diccionarios' | 'impresion' | 'respaldos' | 'ia' | 'seguridad'
+type SettingsTab = 'negocio' | 'usuarios' | 'diccionarios' | 'impresion' | 'mensajes' | 'respaldos' | 'ia' | 'seguridad'
 type PrintFormat = 'a4' | '80mm' | '58mm'
 
 const tabs: Array<{ value: SettingsTab; label: string; description: string; icon: typeof Store }> = [
@@ -58,6 +61,7 @@ const tabs: Array<{ value: SettingsTab; label: string; description: string; icon
   { value: 'usuarios', label: 'Usuarios y roles', description: 'Equipo y permisos', icon: Users },
   { value: 'diccionarios', label: 'Diccionarios', description: 'Catálogos y desplegables', icon: BookOpen },
   { value: 'impresion', label: 'Impresión', description: 'Formatos y comprobantes', icon: Printer },
+  { value: 'mensajes', label: 'Mensajes', description: 'WhatsApp y reportes', icon: MessageCircle },
   { value: 'respaldos', label: 'Respaldos', description: 'Backup y restauración', icon: DatabaseBackup },
   { value: 'ia', label: 'IA y API', description: 'Claves y asistentes', icon: Sparkles },
   { value: 'seguridad', label: 'Seguridad', description: 'Acceso y protección', icon: ShieldCheck }
@@ -221,6 +225,7 @@ export function SettingsPage() {
     model: 'gemini-3.5-flash',
     apiKey: ''
   })
+  const [messagesDraft, setMessagesDraft] = useState<MessageTemplates>(DEFAULT_MESSAGES)
   const [securityDraft, setSecurityDraft] = useState<SecurityDraft>({ sessionHours: 12 })
   const [rolePermissionsDraft, setRolePermissionsDraft] = useState<Record<string, boolean>>({})
 
@@ -269,6 +274,7 @@ export function SettingsPage() {
       provider: current.ai.provider ?? 'gemini',
       apiKey: ''
     })
+    setMessagesDraft(current.messages ?? DEFAULT_MESSAGES)
     setSecurityDraft({
       sessionHours: current.security.sessionHours
     })
@@ -430,6 +436,27 @@ export function SettingsPage() {
       })
     } catch (failure) {
       toast.error('No se pudo guardar la matriz', { description: errorMessage(failure) })
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  async function saveMessages() {
+    if (saving) return
+    if (!messagesDraft.initial.trim() || !messagesDraft.ready.trim()) {
+      toast.error('Completa los dos mensajes antes de guardar')
+      return
+    }
+    setSaving('messages')
+    try {
+      const updated = await api.settings.updateSection('messages', messagesDraft)
+      applySettings(updated)
+      setMessagesDraft(updated.messages ?? messagesDraft)
+      toast.success('Mensajes actualizados', {
+        description: 'Se usarán en los reportes y en WhatsApp.'
+      })
+    } catch (failure) {
+      toast.error('No se pudieron guardar los mensajes', { description: errorMessage(failure) })
     } finally {
       setSaving(null)
     }
@@ -1439,6 +1466,14 @@ export function SettingsPage() {
           ) : null}
 
           {tab === 'diccionarios' ? <DictionariesPanel canManage={canDictionaries} /> : null}
+
+          {tab === 'mensajes' ? (
+            <MessagesPanel
+              value={messagesDraft}
+              saving={saving === 'messages'}
+              onSave={saveMessages}
+            />
+          ) : null}
 
           {tab === 'impresion' ? (
             <>

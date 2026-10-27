@@ -51,6 +51,7 @@ import {
 import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './security'
 import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import { runDemoSeed, type SeedOwner } from './seed'
+import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
 import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
@@ -428,6 +429,72 @@ function getOrderOrFail(db: Database, id: string) {
   return row
 }
 
+function canManageOrderCredentials(session: Session, row: any) {
+  if (session.actualRole === 'admin' || session.actualRole === 'superadmin') return true
+  return session.actualRole === 'tecnico' && row.technician_id === session.userId
+}
+
+function requireCredentialAccess(session: Session, row: any) {
+  if (!canManageOrderCredentials(session, row)) {
+    fail('Solo el técnico asignado, un administrador o el propietario pueden acceder a las credenciales.', 'FORBIDDEN')
+  }
+}
+
+function encryptCredentials(payload: any, kind: string) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    fail('El almacén seguro de Windows no está disponible; no se pueden guardar credenciales.')
+  }
+  const secret = text(payload?.secret, 'Contraseña del equipo', 1, 500)
+  const username =
+    typeof payload?.username === 'string' && payload.username.trim()
+      ? payload.username.trim().slice(0, 120)
+      : ''
+  const note =
+    typeof payload?.note === 'string' && payload.note.trim() ? payload.note.trim().slice(0, 500) : ''
+  return safeStorage.encryptString(JSON.stringify({ kind, username, secret, note })).toString('base64')
+}
+
+function writeOrderCredentials(
+  db: Database,
+  session: Session,
+  orderId: string,
+  orderNumber: string,
+  kind: string,
+  payload: any
+) {
+  const encrypted = encryptCredentials(payload, kind)
+  const now = new Date().toISOString()
+  const actorName = displayUser(session).name
+  db.run(
+    `INSERT INTO work_order_credentials
+      (id, work_order_id, payload_encrypted, created_by, created_by_name, created_at,
+       updated_by, updated_by_name, updated_at, view_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+     ON CONFLICT(work_order_id) DO UPDATE SET
+       payload_encrypted = excluded.payload_encrypted,
+       updated_by = excluded.updated_by,
+       updated_by_name = excluded.updated_by_name,
+       updated_at = excluded.updated_at`,
+    `cred_${sha256(`${orderId}|${Date.now()}`).slice(0, 20)}`,
+    orderId,
+    encrypted,
+    session.userId,
+    actorName,
+    now,
+    session.userId,
+    actorName,
+    now
+  )
+  audit(db, session, 'Credenciales de equipo guardadas', 'Orden de trabajo', `${orderNumber} · ${kind}`, orderId)
+}
+
+function purgeOrderCredentials(db: Database, session: Session, orderId: string, orderNumber: string, reason: string) {
+  const row = db.get<any>('SELECT id FROM work_order_credentials WHERE work_order_id = ?', orderId)
+  if (!row) return
+  db.run('DELETE FROM work_order_credentials WHERE work_order_id = ?', orderId)
+  audit(db, session, 'Credenciales de equipo eliminadas', 'Orden de trabajo', `${orderNumber} · ${reason}`, orderId)
+}
+
 function technicianOptions(db: Database) {
   return db.all<{ id: string; name: string }>(
     "SELECT id, name FROM users WHERE active = 1 AND role IN ('tecnico', 'admin') ORDER BY role = 'tecnico' DESC, name ASC"
@@ -610,6 +677,7 @@ function settingsData(db: Database) {
     security: db.getSetting('security_config', DEFAULT_SETTINGS.security),
     business: db.getSetting('business_config', DEFAULT_SETTINGS.business),
     equipment: db.getSetting('equipment_config', DEFAULT_SETTINGS.equipment),
+    messages: db.getSetting('messages_config', DEFAULT_SETTINGS.messages),
     backup: { passwordConfigured: backupPasswordConfigured(db) },
     rolePermissions: db
       .all<{ role: string; capability: string; allowed: number }>(
@@ -1308,6 +1376,21 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
     throw error
   }
   const restored = openDatabase(runtime.userDataPath)
+  const credentialsRestored = Number(
+    restored.get<{ count: number }>('SELECT COUNT(*) AS count FROM work_order_credentials')?.count ?? 0
+  )
+  if (credentialsRestored > 0) {
+    restored.run('DELETE FROM work_order_credentials')
+    restored.appendAudit({
+      userId: session.userId,
+      userName: displayUser(session).name,
+      role: roleLabel(session.role as any),
+      action: 'Credenciales descartadas por restauración',
+      entity: 'Respaldo',
+      entityId: backup.id,
+      detail: `${credentialsRestored} credenciales cifradas descartadas para evitar dependencia del equipo de origen.`
+    })
+  }
   restored.run(
     `INSERT OR REPLACE INTO backups
       (id, filename, path, size_bytes, sha256, format, created_by, created_by_name, created_at)
@@ -2200,6 +2283,112 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return orderDto(db, getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80)))
     }
 
+    case 'orders.diagnosticReport': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'diagnoseOrder')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      const mode = schema(payload?.mode ?? 'initial', z.enum(['initial', 'delivery'])) as ReportMode
+      if (mode === 'delivery' && !['listo', 'entregado'].includes(row.status)) {
+        fail('El reporte de entrega está disponible cuando la OT está Lista para entrega o Entregada.')
+      }
+      const generatedBy = displayUser(session).name
+      const result = await generateDiagnosticReport({
+        db,
+        userDataPath: runtime.userDataPath,
+        order: row,
+        mode,
+        generatedBy
+      })
+      audit(
+        db,
+        session,
+        mode === 'delivery' ? 'Reporte de entrega generado' : 'Reporte inicial de diagnóstico generado',
+        'Orden de trabajo',
+        `${row.number} · ${result.fileName}${result.whatsappOpened ? ' · WhatsApp abierto' : ' · sin WhatsApp'}`,
+        row.id
+      )
+      return result
+    }
+
+    case 'orders.setCredentials': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'diagnoseOrder')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada; no admite credenciales.')
+      requireCredentialAccess(session, row)
+      if (typeof payload?.secret !== 'string' || !payload.secret.trim()) {
+        fail('Escribe la contraseña, PIN o patrón del equipo.')
+      }
+      const intake = (() => {
+        try {
+          return JSON.parse(row.intake_json ?? '{}')
+        } catch {
+          return {}
+        }
+      })()
+      db.tx(() => {
+        writeOrderCredentials(db, session, row.id, row.number, String(intake.lockType ?? 'otro'), payload)
+      })
+      return orderDto(db, getOrderOrFail(db, row.id))
+    }
+
+    case 'orders.revealCredentials': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'diagnoseOrder')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      requireCredentialAccess(session, row)
+      const credential = db.get<any>('SELECT * FROM work_order_credentials WHERE work_order_id = ?', row.id)
+      if (!credential) fail('La OT no tiene credenciales guardadas.', 'NOT_FOUND')
+      let parsed: any
+      try {
+        parsed = JSON.parse(safeStorage.decryptString(Buffer.from(String(credential.payload_encrypted), 'base64')))
+      } catch {
+        fail('No se pudo descifrar la credencial. Puede pertenecer a otro equipo o usuario de Windows.')
+      }
+      const nowIso = new Date().toISOString()
+      const actorName = displayUser(session).name
+      db.tx(() => {
+        db.run(
+          `UPDATE work_order_credentials
+           SET last_viewed_at = ?, last_viewed_by = ?, last_viewed_by_name = ?, view_count = view_count + 1
+           WHERE work_order_id = ?`,
+          nowIso,
+          session.userId,
+          actorName,
+          row.id
+        )
+        audit(
+          db,
+          session,
+          'Consulta de credenciales del equipo',
+          'Orden de trabajo',
+          `${row.number} · vista ${Number(credential.view_count) + 1}`,
+          row.id
+        )
+      })
+      const updated = db.get<any>('SELECT updated_at, view_count FROM work_order_credentials WHERE work_order_id = ?', row.id)
+      return {
+        kind: String(parsed?.kind ?? 'otro'),
+        username: String(parsed?.username ?? ''),
+        secret: String(parsed?.secret ?? ''),
+        note: String(parsed?.note ?? ''),
+        updatedAt: updated?.updated_at ?? credential.updated_at,
+        viewCount: Number(updated?.view_count ?? 1)
+      }
+    }
+
+    case 'orders.deleteCredentials': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'diagnoseOrder')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      requireCredentialAccess(session, row)
+      db.tx(() => {
+        db.run('DELETE FROM work_order_credentials WHERE work_order_id = ?', row.id)
+        audit(db, session, 'Credenciales de equipo eliminadas', 'Orden de trabajo', `${row.number} · eliminación manual`, row.id)
+      })
+      return orderDto(db, getOrderOrFail(db, row.id))
+    }
+
     case 'evidence.add': {
       requireModuleAccess(session, 'orders')
       requireCap(session, 'manageEvidence')
@@ -2556,6 +2745,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
           session.userId,
           nowIso
         )
+        if (
+          payload?.credentials &&
+          typeof payload.credentials === 'object' &&
+          typeof payload.credentials.secret === 'string' &&
+          payload.credentials.secret.trim()
+        ) {
+          writeOrderCredentials(db, session, id, number, String(intake.lockType ?? 'otro'), payload.credentials)
+        }
         db.run(
           `INSERT INTO work_order_events
             (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
@@ -2724,6 +2921,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             new Date().toISOString()
           )
           db.run("UPDATE work_orders SET status = 'no_reparado', updated_at = ? WHERE id = ?", new Date().toISOString(), row.id)
+          purgeOrderCredentials(db, session, row.id, row.number, 'Cierre como No reparado')
           audit(db, session, 'Cambio de estado OT', 'Orden de trabajo', `${row.number} · ${row.status} → No reparado · ${reason}`, row.id)
         })
         return orderDto(db, getOrderOrFail(db, row.id))
@@ -3004,6 +3202,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           nowIso,
           row.id
         )
+        purgeOrderCredentials(db, session, row.id, row.number, 'Entrega al cliente')
         audit(
           db,
           session,
@@ -3841,7 +4040,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'settings.updateSection': {
       requireModuleAccess(session, 'settings')
-      const section = schema(payload?.section, z.enum(['print', 'ai', 'security', 'business', 'equipment']))
+      const section = schema(payload?.section, z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages']))
       if (section === 'ai') requireCap(session, 'configureAI')
       if (section === 'equipment') requireCap(session, 'manageStaff')
       if (section === 'ai' && payload?.value && typeof payload.value === 'object' && 'apiKey' in payload.value) {

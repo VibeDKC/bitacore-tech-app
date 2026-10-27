@@ -1,3 +1,5 @@
+import { DEFAULT_MESSAGES } from '@shared/index'
+
 export interface LegalConfig {
   businessName: string
   nit: string
@@ -73,7 +75,8 @@ export const DEFAULT_SETTINGS = {
   },
   equipment: {
     qrEnabled: false
-  }
+  },
+  messages: DEFAULT_MESSAGES
 }
 
 export const STATUS_CONFIG = [

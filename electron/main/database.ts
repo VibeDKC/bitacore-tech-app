@@ -87,7 +87,7 @@ export class Database {
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }

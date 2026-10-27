@@ -8,6 +8,10 @@ import {
   Camera,
   CheckCircle2,
   ClipboardList,
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
   CreditCard,
   FileText,
   Landmark,
@@ -25,6 +29,7 @@ import {
   Sparkles,
   Stethoscope,
   Tag,
+  Trash2,
   UserRound,
   Wallet,
   Wrench
@@ -95,7 +100,7 @@ function parseMoney(value: string) {
 export function OrderDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
-  const { role } = useAuth()
+  const { role, user } = useAuth()
 
   const { data, loading, error, reload, setData } = useApi(async () => {
     const order = await api.orders.get(id)
@@ -122,6 +127,22 @@ export function OrderDetailPage() {
   const [documentOpen, setDocumentOpen] = useState(false)
   const [evidenceModal, setEvidenceModal] = useState(false)
   const [techModal, setTechModal] = useState(false)
+  const [credentialsOpen, setCredentialsOpen] = useState(false)
+  const [credentialsMode, setCredentialsMode] = useState<'view' | 'edit'>('view')
+  const [credentialsLoading, setCredentialsLoading] = useState(false)
+  const [credentialsSaving, setCredentialsSaving] = useState(false)
+  const [reportLoading, setReportLoading] = useState<'initial' | 'delivery' | null>(null)
+  const [credentialsDeleteOpen, setCredentialsDeleteOpen] = useState(false)
+  const [credentialsData, setCredentialsData] = useState<{
+    kind: string
+    username: string
+    secret: string
+    note: string
+    updatedAt: string
+    viewCount: number
+  } | null>(null)
+  const [credentialForm, setCredentialForm] = useState({ username: '', secret: '', note: '' })
+  const [showCredentialSecret, setShowCredentialSecret] = useState(false)
   const [techOptions, setTechOptions] = useState<TechnicianOption[]>([])
   const [techId, setTechId] = useState('')
   const [techReason, setTechReason] = useState('')
@@ -190,7 +211,12 @@ export function OrderDetailPage() {
   const canAdvance = Boolean(next) && (next === 'entregado' ? can(role, 'settleOrder') : can(role, 'diagnoseOrder'))
   const canAddItem = can(role, 'diagnoseOrder') || can(role, 'createOrder')
   const canBill = status === 'listo' && can(role, 'settleOrder')
-  const canDeposit = can(role, 'settleOrder') && !['entregado', 'no_reparado'].includes(status) && total > 0 && balance > 0
+  const orderTerminal = ['entregado', 'no_reparado'].includes(status)
+  const canManageCredentials =
+    Boolean(order) &&
+    !orderTerminal &&
+    (role === 'admin' || role === 'superadmin' || (role === 'tecnico' && order?.technicianId === user?.id))
+  const canDeposit = can(role, 'settleOrder') && !orderTerminal && total > 0 && balance > 0
   const canAuthorizeNoCharge = can(role, 'authorizeNoCharge')
   const canReassignTechnician =
     can(role, 'assignTechnician') && !['entregado', 'no_reparado'].includes(status)
@@ -256,6 +282,87 @@ export function OrderDetailPage() {
       toast.error('No se pudo reasignar la OT', { description: errorMessage(failure) })
     } finally {
       setTechSaving(false)
+    }
+  }
+
+  async function generateReport(mode: 'initial' | 'delivery') {
+    if (!order || reportLoading) return
+    setReportLoading(mode)
+    try {
+      const result = await api.orders.diagnosticReport(order.id, mode)
+      toast.success(mode === 'delivery' ? 'Reporte de entrega generado' : 'Reporte inicial generado', {
+        description: result.phoneFound
+          ? 'PDF revelado en la carpeta de reportes y WhatsApp abierto.'
+          : 'PDF revelado en la carpeta de reportes. El cliente no tiene teléfono registrado.'
+      })
+    } catch (failure) {
+      toast.error('No se pudo generar el reporte', { description: errorMessage(failure) })
+    } finally {
+      setReportLoading(null)
+    }
+  }
+
+  async function viewCredentials() {
+    if (!order) return
+    setCredentialsLoading(true)
+    try {
+      const data = await api.orders.revealCredentials(order.id)
+      setCredentialsData(data)
+      setCredentialsMode('view')
+      setCredentialsOpen(true)
+    } catch (failure) {
+      toast.error('No se pudieron consultar las credenciales', { description: errorMessage(failure) })
+    } finally {
+      setCredentialsLoading(false)
+    }
+  }
+
+  function openCredentialsEditor() {
+    setCredentialForm({ username: '', secret: '', note: '' })
+    setShowCredentialSecret(false)
+    setCredentialsData(null)
+    setCredentialsMode('edit')
+    setCredentialsOpen(true)
+  }
+
+  async function saveCredentials() {
+    if (!order || credentialsSaving) return
+    if (!credentialForm.secret.trim()) {
+      toast.error('Escribe la contraseña, PIN o patrón')
+      return
+    }
+    setCredentialsSaving(true)
+    try {
+      const updated = await api.orders.setCredentials(order.id, {
+        username: credentialForm.username.trim() || undefined,
+        secret: credentialForm.secret.trim(),
+        note: credentialForm.note.trim() || undefined
+      })
+      applyOrder(updated)
+      setCredentialsOpen(false)
+      toast.success(order.hasCredentials ? 'Credencial actualizada' : 'Credencial guardada', {
+        description: 'Se eliminará automáticamente al entregar la OT.'
+      })
+    } catch (failure) {
+      toast.error('No se pudo guardar la credencial', { description: errorMessage(failure) })
+    } finally {
+      setCredentialsSaving(false)
+    }
+  }
+
+  async function deleteCredentials() {
+    if (!order) return
+    setCredentialsSaving(true)
+    try {
+      const updated = await api.orders.deleteCredentials(order.id)
+      applyOrder(updated)
+      setCredentialsDeleteOpen(false)
+      setCredentialsOpen(false)
+      toast.success('Credencial eliminada')
+    } catch (failure) {
+      toast.error('No se pudo eliminar la credencial', { description: errorMessage(failure) })
+    } finally {
+      setCredentialsSaving(false)
     }
   }
 
@@ -835,7 +942,86 @@ export function OrderDetailPage() {
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{order.notes}</p>
               </div>
             ) : null}
+
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void generateReport('initial')}
+                loading={reportLoading === 'initial'}
+                leftIcon={<FileText className="h-3.5 w-3.5" />}
+              >
+                Reporte inicial
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void generateReport('delivery')}
+                loading={reportLoading === 'delivery'}
+                disabled={!['listo', 'entregado'].includes(status)}
+                leftIcon={<FileText className="h-3.5 w-3.5" />}
+              >
+                Reporte de entrega
+              </Button>
+            </div>
           </div>
+
+          {canManageCredentials ? (
+            <div className="card p-5 lg:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-warning-50 text-warning-600">
+                    <KeyRound className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Credenciales del equipo</h2>
+                    <p className="mt-0.5 text-[10px] text-slate-400">Temporales, cifradas y restringidas al técnico asignado.</p>
+                  </div>
+                </div>
+                <Badge variant={order.hasCredentials ? 'success' : 'neutral'}>
+                  {order.hasCredentials ? 'Guardada' : 'Sin guardar'}
+                </Badge>
+              </div>
+
+              {order.hasCredentials ? (
+                <div className="mt-4 rounded-xl border border-line bg-slate-50/60 p-3.5">
+                  <p className="text-[10px] text-slate-500">
+                    Guardada {order.credentialsUpdatedAt ? formatDateTime(order.credentialsUpdatedAt) : 'en esta OT'} ·{' '}
+                    {order.credentialsViewCount ?? 0} consulta{(order.credentialsViewCount ?? 0) === 1 ? '' : 's'}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void viewCredentials()}
+                      loading={credentialsLoading}
+                      leftIcon={<Eye className="h-3.5 w-3.5" />}
+                    >
+                      Ver credencial
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={openCredentialsEditor}>
+                      Actualizar
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setCredentialsDeleteOpen(true)} leftIcon={<Trash2 className="h-3.5 w-3.5" />}>
+                      Eliminar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-xl border border-dashed border-line px-3.5 py-3 sm:flex-row sm:items-center">
+                  <p className="text-[10px] leading-relaxed text-slate-500">
+                    No hay credencial guardada. Si el cliente la suministra, puedes guardarla aquí.
+                  </p>
+                  <Button variant="secondary" size="sm" onClick={openCredentialsEditor} leftIcon={<KeyRound className="h-3.5 w-3.5" />}>
+                    Agregar credencial
+                  </Button>
+                </div>
+              )}
+              <p className="mt-3 text-[9px] leading-relaxed text-slate-400">
+                Se elimina automáticamente al entregar o cerrar como no reparado. No se imprime ni se incluye en reportes.
+              </p>
+            </div>
+          ) : null}
 
           <div className="card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4 lg:px-6">
@@ -1615,6 +1801,161 @@ export function OrderDetailPage() {
             La asignación anterior y el motivo quedan en la auditoría y en la trazabilidad de la OT. No se permite reasignar una OT entregada o cerrada.
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={credentialsOpen}
+        onClose={() => setCredentialsOpen(false)}
+        title={credentialsMode === 'view' ? 'Credencial del equipo' : 'Guardar credencial'}
+        description={order ? `${order.number} · ${credentialsMode === 'view' ? 'consulta auditada' : 'reemplaza la credencial anterior'}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            {credentialsMode === 'view' && order?.hasCredentials ? (
+              <Button variant="ghost" onClick={openCredentialsEditor}>
+                Actualizar
+              </Button>
+            ) : null}
+            {credentialsMode === 'view' ? (
+              <Button variant="secondary" onClick={() => setCredentialsOpen(false)}>
+                Cerrar
+              </Button>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={() => setCredentialsOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={() => void saveCredentials()} loading={credentialsSaving} leftIcon={<KeyRound className="h-4 w-4" />}>
+                  Guardar credencial
+                </Button>
+              </>
+            )}
+          </div>
+        }
+      >
+        {credentialsMode === 'view' && credentialsData ? (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-line bg-slate-50/60 p-3">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400">Tipo de bloqueo</p>
+              <p className="mt-1 text-[12px] font-semibold text-ink">
+                {lockLabels[credentialsData.kind as LockType] ?? credentialsData.kind}
+              </p>
+            </div>
+            {credentialsData.username ? (
+              <div className="rounded-xl border border-line p-3">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400">Usuario o cuenta</p>
+                <p className="mt-1 select-all font-mono text-[12px] text-ink">{credentialsData.username}</p>
+              </div>
+            ) : null}
+            <div className="rounded-xl border border-line p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400">Contraseña, PIN o patrón</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(credentialsData.secret)
+                      toast.success('Credencial copiada')
+                    } catch {
+                      toast.error('No se pudo copiar la credencial')
+                    }
+                  }}
+                  className="focus-ring inline-flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                >
+                  <Copy className="h-3 w-3" /> Copiar
+                </button>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <p className="min-w-0 flex-1 select-all break-all font-mono text-[12px] text-ink">
+                  {showCredentialSecret ? credentialsData.secret : '••••••••••••'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowCredentialSecret((value) => !value)}
+                  className="focus-ring flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                  aria-label={showCredentialSecret ? 'Ocultar credencial' : 'Mostrar credencial'}
+                >
+                  {showCredentialSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+            {credentialsData.note ? (
+              <div className="rounded-xl border border-line p-3">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400">Nota</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{credentialsData.note}</p>
+              </div>
+            ) : null}
+            <p className="text-[9px] leading-relaxed text-slate-400">
+              Consulta registrada en auditoría · {credentialsData.viewCount} vista{credentialsData.viewCount === 1 ? '' : 's'} · actualizada {formatDateTime(credentialsData.updatedAt)}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-warning-100 bg-warning-50/70 px-3.5 py-2.5 text-[10px] leading-relaxed text-warning-800">
+              Esta credencial reemplaza la anterior si ya existe. Se guarda cifrada y se elimina automáticamente al entregar la OT.
+            </div>
+            <label className="block">
+              <span className="field-label">Usuario o cuenta (opcional)</span>
+              <input
+                value={credentialForm.username}
+                onChange={(event) => setCredentialForm({ ...credentialForm, username: event.target.value })}
+                className="field"
+                autoComplete="off"
+              />
+            </label>
+            <label className="block">
+              <span className="field-label">Contraseña, PIN o patrón *</span>
+              <div className="relative">
+                <input
+                  type={showCredentialSecret ? 'text' : 'password'}
+                  value={credentialForm.secret}
+                  onChange={(event) => setCredentialForm({ ...credentialForm, secret: event.target.value })}
+                  className="field pr-10"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCredentialSecret((value) => !value)}
+                  className="focus-ring absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  aria-label={showCredentialSecret ? 'Ocultar credencial' : 'Mostrar credencial'}
+                >
+                  {showCredentialSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </label>
+            <label className="block">
+              <span className="field-label">Nota (opcional)</span>
+              <input
+                value={credentialForm.note}
+                onChange={(event) => setCredentialForm({ ...credentialForm, note: event.target.value })}
+                className="field"
+                placeholder="Ej. usuario local, patrón de 9 puntos…"
+              />
+            </label>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={credentialsDeleteOpen}
+        onClose={() => setCredentialsDeleteOpen(false)}
+        title="Eliminar credenciales"
+        description={order ? order.number : undefined}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCredentialsDeleteOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={() => void deleteCredentials()} loading={credentialsSaving} leftIcon={<Trash2 className="h-4 w-4" />}>
+              Eliminar credencial
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-[11px] leading-relaxed text-slate-600">
+          La credencial se eliminará de la OT y no podrá recuperarse. La consulta y la eliminación quedan en auditoría.
+        </p>
       </Modal>
 
       <DocumentPreviewModal
