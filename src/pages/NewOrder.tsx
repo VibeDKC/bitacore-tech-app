@@ -50,6 +50,8 @@ import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig, resolveLegalClause } from '@/lib/legalConfig'
 import { activeDictionaryNodes } from '@/lib/dictionaries'
+import { customerDocumentLabel, customerPrimaryPhone, customerSearchText } from '@/lib/customers'
+import { CustomerPhonesEditor } from '@/components/customers/CustomerPhonesEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -117,7 +119,7 @@ const emptyCustomerForm = {
   documentType: 'CC' as Customer['documentType'],
   document: '',
   name: '',
-  phone: '',
+  phones: [{ phone: '', label: 'Principal', isPrimary: true }],
   email: '',
   address: ''
 }
@@ -317,10 +319,10 @@ export function NewOrderPage() {
       .filter((item) => !item.isFinalConsumer)
       .filter((item) => {
         if (!term) return item.purchases >= 5
+        const digits = term.replace(/\D/g, '')
         return (
-          item.name.toLowerCase().includes(term) ||
-          item.document.toLowerCase().includes(term) ||
-          item.phone.replace(/\D/g, '').includes(term.replace(/\D/g, ''))
+          customerSearchText(item).includes(term) ||
+          (Boolean(digits) && customerSearchText(item).replace(/\D/g, '').includes(digits))
         )
       })
       .slice(0, 6)
@@ -364,14 +366,24 @@ export function NewOrderPage() {
   }
 
   async function createCustomer() {
-    if (!customerForm.name.trim() || !customerForm.document.trim()) {
-      toast.error('El nombre y el documento son obligatorios')
+    const phones = customerForm.phones.filter((item) => item.phone.trim())
+    if (!customerForm.name.trim()) {
+      toast.error('El nombre es obligatorio')
       return
     }
-    const existing = customerList.find(
-      (item) =>
-        item.document.replace(/\D/g, '') === customerForm.document.replace(/\D/g, '') && !item.isFinalConsumer
-    )
+    if (!phones.length || !phones.some((item) => item.isPrimary)) {
+      toast.error('Agrega al menos un teléfono principal')
+      return
+    }
+    const document = customerForm.document.trim()
+    const existing = document
+      ? customerList.find(
+          (item) =>
+            !item.documentMissing &&
+            item.document.replace(/\D/g, '') === document.replace(/\D/g, '') &&
+            !item.isFinalConsumer
+        )
+      : null
     if (existing) {
       selectCustomer(existing)
       setNewCustomerOpen(false)
@@ -383,18 +395,26 @@ export function NewOrderPage() {
       const customer = await api.customers.create({
         name: customerForm.name.trim(),
         documentType: customerForm.documentType,
-        document: customerForm.document.trim(),
-        phone: customerForm.phone.trim() || '—',
+        document,
+        phones: phones.map((item) => ({
+          phone: item.phone.trim(),
+          label: item.label,
+          isPrimary: item.isPrimary
+        })),
         email: customerForm.email.trim() || '—',
         address: customerForm.address.trim() || 'Sin dirección'
       })
       setCustomerList((current) => [...current, customer])
       selectCustomer(customer)
       setNewCustomerOpen(false)
-      setCustomerForm(emptyCustomerForm)
-      toast.success('Cliente creado y seleccionado', {
-        description: 'El equipo que estabas registrando se conserva.'
-      })
+      setCustomerForm({ ...emptyCustomerForm, phones: [{ phone: '', label: 'Principal', isPrimary: true }] })
+      if (customer.phoneWarning) {
+        toast.warning('Cliente creado con teléfono compartido', { description: customer.phoneWarning })
+      } else {
+        toast.success('Cliente creado y seleccionado', {
+          description: 'El equipo que estabas registrando se conserva.'
+        })
+      }
     } catch (failure) {
       toast.error('No se pudo crear el cliente', { description: errorMessage(failure) })
     } finally {
@@ -630,12 +650,13 @@ export function NewOrderPage() {
 
   function sendWhatsApp(order: WorkOrder) {
     const customer = customerList.find((item) => item.id === order.customerId)
-    if (!customer?.phone || customer.phone === '—') {
+    const phone = customerPrimaryPhone(customer)
+    if (!customer || !phone || phone === '—') {
       toast.error('El cliente no tiene teléfono registrado')
       return
     }
     const message = `Hola ${customer.name}, confirmamos el ingreso de tu ${order.equipmentType.toLowerCase()} al taller con la Orden de Servicio ${order.number}. Motivo: ${order.reportedIssue}. Puedes consultar el avance con este número. ¡Gracias por confiar en ${legalConfig.businessName}!`
-    window.open(`https://wa.me/57${customer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank')
+    window.open(`https://wa.me/57${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`, '_blank')
   }
 
   if (bootLoading) {
@@ -695,10 +716,12 @@ export function NewOrderPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <p className="truncate text-[13px] font-bold text-ink">{selectedCustomer.name}</p>
-                      <Badge variant="brand">{selectedCustomer.documentType}</Badge>
+                      <Badge variant="brand">
+                        {selectedCustomer.documentMissing ? 'Sin documento' : selectedCustomer.documentType}
+                      </Badge>
                     </div>
                     <p className="mt-0.5 truncate text-[10px] text-slate-500">
-                      {selectedCustomer.document} · {selectedCustomer.phone} · {selectedCustomer.email}
+                      {customerDocumentLabel(selectedCustomer)} · {customerPrimaryPhone(selectedCustomer)} · {selectedCustomer.email}
                     </p>
                     <p className="mt-0.5 truncate text-[9px] text-slate-400">
                       {selectedCustomer.address} · {selectedCustomer.orders} OTs históricas
@@ -746,7 +769,7 @@ export function NewOrderPage() {
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[12px] font-semibold text-ink">{customer.name}</span>
                             <span className="block truncate text-[9px] text-slate-400">
-                              {customer.documentType} {customer.document} · {customer.phone}
+                              {customerDocumentLabel(customer)} · {customerPrimaryPhone(customer)}
                             </span>
                           </span>
                           <span className="text-[9px] text-slate-400">{customer.orders} OTs</span>
@@ -1430,7 +1453,7 @@ export function NewOrderPage() {
                   <div className="mt-1.5">
                     <p className="text-[12px] font-bold text-ink">{selectedCustomer.name}</p>
                     <p className="mt-0.5 text-[10px] text-slate-500">
-                      {selectedCustomer.documentType} {selectedCustomer.document} · {selectedCustomer.phone}
+                      {customerDocumentLabel(selectedCustomer)} · {customerPrimaryPhone(selectedCustomer)}
                     </p>
                   </div>
                 ) : (
@@ -1547,7 +1570,7 @@ export function NewOrderPage() {
             </div>
           </label>
           <label className="block">
-            <span className="field-label">Documento *</span>
+            <span className="field-label">Documento (opcional)</span>
             <input
               value={customerForm.document}
               onChange={(event) => setCustomerForm({ ...customerForm, document: event.target.value })}
@@ -1564,15 +1587,17 @@ export function NewOrderPage() {
               className="field"
             />
           </label>
-          <label className="block">
-            <span className="field-label">Teléfono</span>
-            <input
-              value={customerForm.phone}
-              onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })}
-              placeholder="310 000 0000"
-              className="field"
+          <div className="block sm:col-span-2">
+            <span className="field-label">Teléfonos</span>
+            <CustomerPhonesEditor
+              value={customerForm.phones}
+              onChange={(phones) => setCustomerForm({ ...customerForm, phones })}
+              disabled={customerSaving}
             />
-          </label>
+            <span className="mt-1 block text-[9px] text-slate-400">
+              El principal se usará para WhatsApp y documentos.
+            </span>
+          </div>
           <label className="block">
             <span className="field-label">Correo</span>
             <input

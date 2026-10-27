@@ -261,9 +261,10 @@ export const api = {
     },
     create(input: {
       name: string
-      document: string
+      document?: string
       documentType: string
       phone?: string
+      phones?: Array<{ phone: string; label: string; isPrimary: boolean }>
       email?: string
       address?: string
       isForeignDocument?: boolean

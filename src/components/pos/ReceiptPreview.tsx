@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { FileText, Printer, ReceiptText, Scissors, X } from 'lucide-react'
 import type { Customer, Invoice, LegalConfig, SaleReceipt } from '@/types'
 import { formatCurrency, formatDateTime } from '@/lib/format'
+import { customerDocumentLabel, customerPrimaryPhone } from '@/lib/customers'
 import { defaultLegalConfig } from '@/lib/legalConfig'
 import { cn } from '@/lib/utils'
 import { Barcode } from '@/components/orders/Barcode'
@@ -53,7 +54,8 @@ function ReceiptCopy({
           <p className="font-semibold">Comprobante interno de venta</p>
           <p>{invoice.number} · {formatDateTime(invoice.date)}</p>
           <p>Cliente: {receipt.customerName}</p>
-          {customer && customer.document !== '222222222222' ? <p>{customer.documentType} {customer.document}</p> : null}
+          {customer && !customer.isFinalConsumer ? <p>{customerDocumentLabel(customer)}</p> : null}
+          {customer && customerPrimaryPhone(customer) !== '—' ? <p>Tel. {customerPrimaryPhone(customer)}</p> : null}
         </div>
         <div className="text-right">
           <p className="font-semibold">{receipt.method}</p>

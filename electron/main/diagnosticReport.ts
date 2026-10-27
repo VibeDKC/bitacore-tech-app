@@ -86,6 +86,7 @@ function technicalEntries(sheet: any): Array<[string, string]> {
   else if (disks.length) entries.push(['Almacenamiento', disks.join(' · ')])
   if (sheet.batteryNotVisible) entries.push(['Batería', 'N/A'])
   else if (sheet.battery) entries.push(['Batería', String(sheet.battery)])
+  if (sheet.other) entries.push(['Otro', String(sheet.other)])
   if (sheet.notes) entries.push(['Observaciones', String(sheet.notes)])
   if (sheet.legacy?.cpu) entries.push(['CPU · ficha anterior', String(sheet.legacy.cpu)])
   if (sheet.legacy?.gpu) entries.push(['GPU · ficha anterior', String(sheet.legacy.gpu)])

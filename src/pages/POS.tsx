@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import type { CartLine, Customer, Invoice, PaymentMethod, SaleReceipt } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
+import { customerDocumentLabel, customerPhones, customerPrimaryPhone } from '@/lib/customers'
 import { formatCurrency } from '@/lib/format'
 import { getStockStatus } from '@/lib/status'
 import { api, errorMessage } from '@/lib/backend'
@@ -434,14 +435,15 @@ export function POSPage() {
                 >
                   {customers.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name} {item.document !== '222222222222' ? `· ${item.document}` : ''}
+                      {item.name} {item.isFinalConsumer ? '' : `· ${customerDocumentLabel(item)}`}
+                      {customerPhones(item).length ? ` · ${customerPhones(item).map((phone) => phone.phone).join(' / ')}` : ''}
                     </option>
                   ))}
                 </Select>
               </div>
             </label>
             <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-[10px] text-slate-500">
-              <span>{customer && customer.phone !== '—' ? customer.phone : 'Venta de mostrador'}</span>
+              <span>{customer && customerPrimaryPhone(customer) !== '—' ? customerPrimaryPhone(customer) : 'Venta de mostrador'}</span>
               <span>{customer?.purchases ?? 0} compras</span>
             </div>
           </div>

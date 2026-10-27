@@ -77,12 +77,61 @@ export function ensureReferenceData(db: Database) {
   })
 }
 
+function ensureSupplementalDictionaries(db: Database) {
+  const done = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'supplemental_dictionaries_seeded'")
+  if (done?.value === '1') return
+  const nowIso = now()
+  const insert = (type: string, name: string, sort: number) => {
+    const existing = db.get<{ id: string }>(
+      "SELECT id FROM dictionary_nodes WHERE type = ? AND parent_id IS NULL AND name = ? COLLATE NOCASE",
+      type,
+      name
+    )
+    if (existing) return
+    db.run(
+      `INSERT INTO dictionary_nodes
+        (id, parent_id, type, code, name, sort_order, active, system, created_at, updated_at)
+       VALUES (?, NULL, ?, NULL, ?, ?, 1, 1, ?, ?)`,
+      `dict_${sha256(`${type}||${name.toLowerCase()}`).slice(0, 20)}`,
+      type,
+      name,
+      sort,
+      nowIso,
+      nowIso
+    )
+  }
+  db.tx(() => {
+    ;['Nuevo', 'Usado', 'Reacondicionado', 'Para repuesto', 'Otro'].forEach((name, index) =>
+      insert('inventory_condition', name, index + 1)
+    )
+    ;['Compra local', 'Importado', 'Devolución', 'Cliente', 'Otro'].forEach((name, index) =>
+      insert('inventory_origin', name, index + 1)
+    )
+    ;[
+      'Kingston',
+      'Corsair',
+      'Crucial',
+      'Samsung',
+      'Western Digital',
+      'Seagate',
+      'ADATA',
+      'TeamGroup',
+      'G.Skill',
+      'Gigabyte',
+      'ASUS',
+      'Otro'
+    ].forEach((name, index) => insert('component_brand', name, index + 1))
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('supplemental_dictionaries_seeded', '1')")
+  })
+}
+
 /**
  * Diccionarios editables. Se siembran una sola vez por base; después el
  * propietario o un administrador pueden crear, ordenar, activar o renombrar
  * nodos desde Configuración → Diccionarios.
  */
 export function ensureDictionaries(db: Database) {
+  ensureSupplementalDictionaries(db)
   const done = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'dictionaries_seeded'")
   if (done?.value === '1') return
   const nowIso = now()
@@ -187,6 +236,22 @@ export function ensureDictionaries(db: Database) {
       'Herramientas e insumos'
     ])
     seedRoots('inventory_location', ['Bodega A', 'Bodega B', 'Mostrador', 'Taller', 'Caja de despiece', 'Estante A'])
+    seedRoots('inventory_condition', ['Nuevo', 'Usado', 'Reacondicionado', 'Para repuesto', 'Otro'])
+    seedRoots('inventory_origin', ['Compra local', 'Importado', 'Devolución', 'Cliente', 'Otro'])
+    seedRoots('component_brand', [
+      'Kingston',
+      'Corsair',
+      'Crucial',
+      'Samsung',
+      'Western Digital',
+      'Seagate',
+      'ADATA',
+      'TeamGroup',
+      'G.Skill',
+      'Gigabyte',
+      'ASUS',
+      'Otro'
+    ])
     seedRoots('supplier_category', ['Repuestos', 'Tecnología', 'Consumibles', 'Servicios', 'Papelería', 'Otro'])
     seedRoots('service_type', [
       'Mantenimiento preventivo',

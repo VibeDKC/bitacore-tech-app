@@ -90,7 +90,7 @@ Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. Las 
 
 - Dashboard por rol, alertas de stock y estado del taller.
 - Recepción dinámica de equipos por tipo (portátil, PC, consola, impresora, otro), accesorios, checklist, estado de encendido, bloqueo, motivo de ingreso y presupuesto.
-- Alta rápida de clientes y autocompletado por documento, teléfono o correo.
+- Alta rápida de clientes con teléfono principal, múltiples teléfonos y documento opcional; búsqueda por documento, teléfono o correo.
 - Evidencias fotográficas del estado del equipo al ingreso y durante la reparación, con verificación de integridad y exportación ZIP.
 - Órdenes de trabajo con repuestos, servicios, anticipos, descuentos, notas, estados e historial.
 - Motivo de ingreso condicional: **Falla de equipo** con descripción libre o un servicio de mantenimiento tomado del diccionario.
@@ -111,7 +111,7 @@ Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. Las 
 - Historial de cliente con acceso directo a la factura y a la OT seleccionadas.
 - Caja con apertura, movimientos, arqueo por denominaciones y cierre de turno.
 - Reportes de ventas, compras, margen bruto, utilidad neta restringida y estadísticas por técnico.
-- Inventario con SKU, código de barras Code128, seriales, ubicaciones, stock mínimo y exportación CSV.
+- Inventario con SKU, código de barras Code128, seriales, ubicaciones, condición, origen, stock mínimo y exportación CSV.
 - Configuración de negocio, usuarios, permisos, impresión, respaldos completos, cláusulas legales, IA/API y seguridad.
 - Cláusulas legales versionadas con snapshot inmutable por orden de trabajo.
 
@@ -142,10 +142,12 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.6.1` | Perfil propio, propietario invisible, equipos armados, orden del formulario y N/A. |
 | `npm run test:acceptance:1.7.0` | Credenciales cifradas, borrado automático, mensajes y reportes PDF. |
 | `npm run test:acceptance:1.8.0` | Permisos de admin, negocio, salud %, garantía de inventario y falla/mantenimiento. |
+| `npm run test:acceptance:1.9.0` | Teléfonos múltiples, documento opcional, condición/origen y ficha “Otro”. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
 | `npm run test:migration:1.8.0` | Migración 8, garantía por repuesto y nuevas capacidades. |
+| `npm run test:migration:1.9.0` | Migración 9, teléfonos y diccionarios de inventario/componentes. |
 
 ## Pruebas de aceptación
 
@@ -161,13 +163,15 @@ npm run test:acceptance:1.6.0
 npm run test:acceptance:1.6.1
 npm run test:acceptance:1.7.0
 npm run test:acceptance:1.8.0
+npm run test:acceptance:1.9.0
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
 npm run test:migration:1.7.0
 npm run test:migration:1.8.0
+npm run test:migration:1.9.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK` y `13/13 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK`, `13/13 OK` y `9/9 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -175,7 +179,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.8.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.9.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -190,8 +194,10 @@ El instalador queda en `release/` como `BitacoreTech-1.8.0-x64.exe`. La configur
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
 - El inventario permite editar referencias solo a administradores y propietario; el stock se mueve mediante ajustes auditados.
 - Las alertas de stock son opcionales por referencia y las referencias de prueba pueden quedar sin aviso.
-- Los diccionarios alimentan la ficha técnica, las categorías y ubicaciones de inventario, las categorías de proveedor y los motivos de ingreso de la OT.
-- La ficha técnica estructurada se guarda como snapshot en cada OT; las OT anteriores conservan su texto original.
+- Los clientes tienen teléfono principal, múltiples teléfonos y documento opcional; se pueden buscar por cualquiera de sus teléfonos.
+- Los diccionarios alimentan la ficha técnica, las categorías, ubicaciones, condiciones y orígenes de inventario, las categorías de proveedor, las marcas de componentes y los motivos de ingreso de la OT.
+- La ficha técnica estructurada se guarda en el intake y se copia al snapshot legal de cada OT; las OT anteriores conservan su texto original.
+- La ficha incluye un campo “Otro” para modelos o componentes que no estén en los diccionarios.
 - El propietario es invisible para los demás usuarios en Configuración y respaldos; su cuenta se administra desde Mi perfil.
 - Las torres y equipos “Otro” pueden registrarse como armados por partes con alias y código interno.
 - La ficha técnica admite N/A por componente cuando no es visible y la salud del disco se registra como porcentaje del benchmark o N/A.

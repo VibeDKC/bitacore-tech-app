@@ -39,7 +39,8 @@ export function emptyTechnicalSheet(): TechnicalSheet {
     ramModules: [],
     storageDrives: [],
     battery: '',
-    notes: ''
+    notes: '',
+    other: ''
   }
 }
 
@@ -152,6 +153,7 @@ export function normalizeTechnicalSheet(value: unknown): TechnicalSheet {
     battery: text(source.battery),
     batteryNotVisible: Boolean(source.batteryNotVisible),
     notes: text(source.notes),
+    other: text(source.other),
     ...(hasLegacy ? { legacy } : {})
   }
 }
@@ -224,6 +226,7 @@ export function sanitizeTechnicalSheet(value: TechnicalSheet): TechnicalSheet {
     battery: value.battery?.trim() ?? '',
     batteryNotVisible: Boolean(value.batteryNotVisible),
     notes: value.notes?.trim() ?? '',
+    other: value.other?.trim() ?? '',
     ...(value.legacy ? { legacy: value.legacy } : {})
   }
 }
@@ -265,6 +268,7 @@ export function technicalSheetEntries(value: unknown): Array<[string, string]> {
   else if (storageRows.length) entries.push(['Almacenamiento', storageRows.join(' · ')])
   if (sheet.batteryNotVisible) entries.push(['Batería', 'N/A'])
   else if (sheet.battery) entries.push(['Batería', sheet.battery])
+  if (sheet.other) entries.push(['Otro', sheet.other])
   if (sheet.notes) entries.push(['Observaciones', sheet.notes])
   if (sheet.legacy?.cpu) entries.push(['CPU · ficha anterior', sheet.legacy.cpu])
   if (sheet.legacy?.gpu) entries.push(['GPU · ficha anterior', sheet.legacy.gpu])

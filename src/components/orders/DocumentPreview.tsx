@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import type { Customer, IntakeConditionKey, LegalConfig, LockType, PowerState, TechnicalSheet, WorkOrder } from '@/types'
 import { defaultLegalConfig, resolveLegalClause } from '@/lib/legalConfig'
+import { customerDocumentLabel, customerPrimaryPhone } from '@/lib/customers'
 import { formatCurrency, formatDateTime } from '@/lib/format'
 import { technicalSheetEntries } from '@/lib/technicalSheet'
 import { cn } from '@/lib/utils'
@@ -119,8 +120,8 @@ function buildData(order: WorkOrder, customer: Customer | null, legal: LegalConf
     city: config.city,
     email: config.email,
     customerName: order.customerName,
-    customerDocument: customer ? `${customer.documentType} ${customer.document}` : '—',
-    customerPhone: customer?.phone ?? '—',
+    customerDocument: customer ? customerDocumentLabel(customer) : '—',
+    customerPhone: customerPrimaryPhone(customer) || '—',
     serial: order.serial,
     accessories: intake?.accessories.length
       ? intake.accessories.join(', ')

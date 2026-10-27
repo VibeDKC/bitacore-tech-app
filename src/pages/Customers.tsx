@@ -27,6 +27,8 @@ import { api, errorMessage, type CustomerDetail } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { calculateNitDv, normalizeNit } from '@/lib/nit'
+import { customerDocumentLabel, customerPhones, customerPrimaryPhone, customerSearchText } from '@/lib/customers'
+import { CustomerPhonesEditor, type CustomerPhoneDraft } from '@/components/customers/CustomerPhonesEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -38,11 +40,13 @@ import { WorkOrderStatusBadge } from '@/components/ui/StatusBadge'
 import { EquipmentQr } from '@/components/equipment/EquipmentQr'
 import { cn } from '@/lib/utils'
 
+const emptyPhone = (): CustomerPhoneDraft => ({ phone: '', label: 'Principal', isPrimary: true })
+
 const emptyForm = {
   name: '',
   documentType: 'CC' as Customer['documentType'],
   document: '',
-  phone: '',
+  phones: [emptyPhone()] as CustomerPhoneDraft[],
   email: '',
   address: '',
   isForeignDocument: false
@@ -144,13 +148,12 @@ export function CustomersPage() {
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase()
+    const digits = term.replace(/\D/g, '')
     return items.filter((item) => {
       const matchesQuery =
         !term ||
-        item.name.toLowerCase().includes(term) ||
-        item.document.toLowerCase().includes(term) ||
-        item.phone.includes(term) ||
-        item.email.toLowerCase().includes(term)
+        customerSearchText(item).includes(term) ||
+        (Boolean(digits) && customerSearchText(item).replace(/\D/g, '').includes(digits))
       const matchesFilter =
         filter === 'todos' ||
         (filter === 'recurrentes' && item.purchases >= 5) ||
@@ -160,25 +163,36 @@ export function CustomersPage() {
   }, [items, query, filter])
 
   function openWhatsApp(customer: Customer) {
-    if (!customer.phone || customer.phone === '—') {
+    const phone = customerPrimaryPhone(customer)
+    if (!phone || phone === '—') {
       toast.error('Sin teléfono registrado')
       return
     }
     window.open(
-      `https://wa.me/57${customer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+      `https://wa.me/57${phone.replace(/\D/g, '')}?text=${encodeURIComponent(
         `Hola ${customer.name}, te escribimos de BitacoreTech.`
       )}`,
       '_blank'
     )
   }
 
+  function openCreateCustomer() {
+    setForm({ ...emptyForm, phones: [emptyPhone()] })
+    setCreateOpen(true)
+  }
+
   async function createCustomer() {
-    if (!form.name.trim() || !form.document.trim()) {
-      toast.error('Nombre y documento son obligatorios')
+    const phones = form.phones.filter((item) => item.phone.trim())
+    if (!form.name.trim()) {
+      toast.error('El nombre es obligatorio')
+      return
+    }
+    if (!phones.length || !phones.some((item) => item.isPrimary)) {
+      toast.error('Agrega al menos un teléfono principal')
       return
     }
     const document = form.document.trim()
-    if (form.documentType === 'NIT' && !form.isForeignDocument) {
+    if (document && form.documentType === 'NIT' && !form.isForeignDocument) {
       const digits = normalizeNit(document)
       if (digits !== document) {
         toast.error('El NIT debe contener solo números, sin puntos ni espacios')
@@ -191,17 +205,27 @@ export function CustomersPage() {
         name: form.name.trim(),
         documentType: form.documentType,
         document,
-        phone: form.phone.trim() || '—',
+        phones: phones.map((item) => ({
+          phone: item.phone.trim(),
+          label: item.label,
+          isPrimary: item.isPrimary
+        })),
         email: form.email.trim() || '—',
         address: form.address.trim() || 'Sin dirección',
         isForeignDocument: form.isForeignDocument,
         documentDv:
-          form.documentType === 'NIT' && !form.isForeignDocument ? calculateNitDv(document) : undefined
+          document && form.documentType === 'NIT' && !form.isForeignDocument
+            ? calculateNitDv(document)
+            : undefined
       })
       setData((current) => (current ? [customer, ...current] : [customer]))
       setCreateOpen(false)
-      setForm(emptyForm)
-      toast.success('Cliente creado', { description: `${customer.name} · ${customer.document}` })
+      setForm({ ...emptyForm, phones: [emptyPhone()] })
+      if (customer.phoneWarning) {
+        toast.warning('Cliente creado con teléfono compartido', { description: customer.phoneWarning })
+      } else {
+        toast.success('Cliente creado', { description: `${customer.name} · ${customerDocumentLabel(customer)}` })
+      }
     } catch (failure) {
       toast.error('No se pudo crear el cliente', { description: errorMessage(failure) })
     } finally {
@@ -221,11 +245,14 @@ export function CustomersPage() {
 
   function openEditCustomer() {
     if (!selected) return
+    const phones = customerPhones(selected)
     setEditForm({
       name: selected.name,
       documentType: selected.documentType,
-      document: selected.document,
-      phone: selected.phone === '—' ? '' : selected.phone,
+      document: selected.documentMissing ? '' : selected.document,
+      phones: phones.length
+        ? phones.map((item) => ({ phone: item.phone, label: item.label, isPrimary: item.isPrimary }))
+        : [emptyPhone()],
       email: selected.email === '—' ? '' : selected.email,
       address: selected.address === 'Sin dirección' ? '' : selected.address,
       isForeignDocument: Boolean(selected.isForeignDocument),
@@ -240,12 +267,17 @@ export function CustomersPage() {
 
   async function saveCustomerEdit() {
     if (!selected || editSaving) return
-    if (!editForm.name.trim() || !editForm.document.trim()) {
-      toast.error('Nombre y documento son obligatorios')
+    const phones = editForm.phones.filter((item) => item.phone.trim())
+    if (!editForm.name.trim()) {
+      toast.error('El nombre es obligatorio')
+      return
+    }
+    if (!selected.isFinalConsumer && (!phones.length || !phones.some((item) => item.isPrimary))) {
+      toast.error('Agrega al menos un teléfono principal')
       return
     }
     const document = editForm.document.trim()
-    if (editForm.documentType === 'NIT' && !editForm.isForeignDocument) {
+    if (document && editForm.documentType === 'NIT' && !editForm.isForeignDocument) {
       const digits = normalizeNit(document)
       if (digits !== document) {
         toast.error('El NIT debe contener solo números, sin puntos ni espacios')
@@ -260,8 +292,14 @@ export function CustomersPage() {
         document,
         isForeignDocument: editForm.isForeignDocument,
         documentDv:
-          editForm.documentType === 'NIT' && !editForm.isForeignDocument ? calculateNitDv(document) : undefined,
-        phone: editForm.phone.trim(),
+          document && editForm.documentType === 'NIT' && !editForm.isForeignDocument
+            ? calculateNitDv(document)
+            : undefined,
+        phones: phones.map((item) => ({
+          phone: item.phone.trim(),
+          label: item.label,
+          isPrimary: item.isPrimary
+        })),
         email: editForm.email.trim(),
         address: editForm.address.trim()
       }
@@ -278,7 +316,11 @@ export function CustomersPage() {
       )
       setDetail((current) => (current ? { ...current, customer: updated } : current))
       setEditOpen(false)
-      toast.success('Cliente actualizado')
+      if (updated.phoneWarning) {
+        toast.warning('Cliente actualizado con teléfono compartido', { description: updated.phoneWarning })
+      } else {
+        toast.success('Cliente actualizado')
+      }
     } catch (failure) {
       toast.error('No se pudo actualizar el cliente', { description: errorMessage(failure) })
     } finally {
@@ -377,7 +419,7 @@ export function CustomersPage() {
         description="Historial de compras, equipos y contacto directo por WhatsApp."
         actions={
           canManage ? (
-            <Button onClick={() => setCreateOpen(true)} leftIcon={<UserPlus className="h-4 w-4" />}>
+            <Button onClick={openCreateCustomer} leftIcon={<UserPlus className="h-4 w-4" />}>
               Nuevo cliente
             </Button>
           ) : null
@@ -464,14 +506,18 @@ export function CustomersPage() {
                         <div className="min-w-0">
                           <p className="truncate text-[12px] font-semibold text-ink">{customer.name}</p>
                           <p className="mt-0.5 truncate text-[9px] text-slate-400">
-                            {customer.documentType} {customer.document}
+                            {customerDocumentLabel(customer)}
                           </p>
                         </div>
                       </div>
                     </td>
                     <td className="table-td">
-                      <p className="truncate text-[11px] text-slate-600">{customer.phone}</p>
-                      <p className="mt-0.5 truncate text-[9px] text-slate-400">{customer.email}</p>
+                      <p className="truncate text-[11px] text-slate-600">{customerPrimaryPhone(customer)}</p>
+                      <p className="mt-0.5 truncate text-[9px] text-slate-400">
+                        {customerPhones(customer).length > 1
+                          ? `${customerPhones(customer).length} teléfonos · ${customer.email}`
+                          : customer.email}
+                      </p>
                     </td>
                     <td className="table-td text-center">
                       <p className="tabular text-[10px] font-semibold text-slate-600">{customer.purchases} compras</p>
@@ -506,7 +552,7 @@ export function CustomersPage() {
             <div className="flex flex-col items-center justify-center px-6 py-14 text-center">
               <Search className="h-6 w-6 text-slate-300" />
               <p className="mt-3 text-sm font-semibold text-ink">Sin clientes encontrados</p>
-              <p className="mt-1 text-xs text-slate-500">Prueba con otro nombre o documento.</p>
+              <p className="mt-1 text-xs text-slate-500">Prueba con otro nombre, documento o teléfono.</p>
             </div>
           ) : null}
         </div>
@@ -555,7 +601,7 @@ export function CustomersPage() {
         open={Boolean(selected)}
         onClose={() => setSelectedId(null)}
         title={selected?.name ?? 'Cliente'}
-        description={selected ? `${selected.documentType} ${selected.document}${selected.documentDv ? `-${selected.documentDv}` : ''}` : ''}
+        description={selected ? customerDocumentLabel(selected) : ''}
         width="md"
         footer={
           <div className="flex items-center justify-between gap-2">
@@ -572,7 +618,7 @@ export function CustomersPage() {
             <Button
               onClick={() => selected && openWhatsApp(selected)}
               leftIcon={<MessageCircle className="h-4 w-4" />}
-              disabled={!selected || selected.phone === '—'}
+              disabled={!selected || customerPrimaryPhone(selected) === '—'}
             >
               Escribir por WhatsApp
             </Button>
@@ -611,7 +657,13 @@ export function CustomersPage() {
 
             <div className="divide-y divide-line rounded-xl border border-line">
               {[
-                [Phone, 'Teléfono', selected.phone],
+                [
+                  Phone,
+                  'Teléfonos',
+                  customerPhones(selected)
+                    .map((item) => `${item.phone}${item.isPrimary ? ' (principal)' : ''}`)
+                    .join(' · ') || '—'
+                ],
                 [Mail, 'Correo', selected.email],
                 [MapPin, 'Dirección', selected.address],
                 [CalendarDays, 'Última visita', formatDate(selected.lastVisit)]
@@ -782,11 +834,13 @@ export function CustomersPage() {
             </select>
           </label>
           <label className="block">
-            <span className="field-label">Documento</span>
-            <input value={form.document} onChange={(event) => setForm({ ...form, document: event.target.value })} className="field" placeholder="Número" />
-            {form.documentType === 'NIT' && !form.isForeignDocument && /^\d+$/.test(form.document) ? (
+            <span className="field-label">Documento (opcional)</span>
+            <input value={form.document} onChange={(event) => setForm({ ...form, document: event.target.value })} className="field" placeholder="Número o déjalo vacío" />
+            {form.document && form.documentType === 'NIT' && !form.isForeignDocument && /^\d+$/.test(form.document) ? (
               <span className="mt-1 block text-[9px] text-slate-400">DV calculado: {calculateNitDv(form.document)}</span>
-            ) : null}
+            ) : (
+              <span className="mt-1 block text-[9px] text-slate-400">Si no lo tienes, se guardará como “Sin documento”.</span>
+            )}
           </label>
           {form.documentType === 'NIT' ? (
             <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5 sm:col-span-2">
@@ -799,10 +853,17 @@ export function CustomersPage() {
               <span className="text-[11px] text-slate-600">NIT extranjero (sin DV colombiano)</span>
             </label>
           ) : null}
-          <label className="block">
-            <span className="field-label">Teléfono / WhatsApp</span>
-            <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="field" placeholder="310 000 0000" />
-          </label>
+          <div className="block sm:col-span-2">
+            <span className="field-label">Teléfonos</span>
+            <CustomerPhonesEditor
+              value={form.phones}
+              onChange={(phones) => setForm({ ...form, phones })}
+              disabled={saving}
+            />
+            <span className="mt-1 block text-[9px] text-slate-400">
+              El principal se usa para WhatsApp, facturas y reportes. Puedes agregar más de uno.
+            </span>
+          </div>
           <label className="block">
             <span className="field-label">Correo</span>
             <input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="field" placeholder="cliente@correo.com" type="email" />
@@ -818,7 +879,7 @@ export function CustomersPage() {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         title="Editar cliente"
-        description={selected ? `${selected.name} · ${selected.documentType} ${selected.document}` : ''}
+        description={selected ? `${selected.name} · ${customerDocumentLabel(selected)}` : ''}
         size="lg"
         footer={
           <div className="flex justify-end gap-2">
@@ -849,11 +910,13 @@ export function CustomersPage() {
             </select>
           </label>
           <label className="block">
-            <span className="field-label">Documento</span>
-            <input value={editForm.document} onChange={(event) => setEditForm({ ...editForm, document: event.target.value })} className="field" />
-            {editForm.documentType === 'NIT' && !editForm.isForeignDocument && /^\d+$/.test(editForm.document) ? (
+            <span className="field-label">Documento (opcional)</span>
+            <input value={editForm.document} onChange={(event) => setEditForm({ ...editForm, document: event.target.value })} className="field" placeholder="Número o déjalo vacío" />
+            {editForm.document && editForm.documentType === 'NIT' && !editForm.isForeignDocument && /^\d+$/.test(editForm.document) ? (
               <span className="mt-1 block text-[9px] text-slate-400">DV calculado: {calculateNitDv(editForm.document)}</span>
-            ) : null}
+            ) : (
+              <span className="mt-1 block text-[9px] text-slate-400">Si no lo tienes, se guardará como “Sin documento”.</span>
+            )}
           </label>
           {editForm.documentType === 'NIT' ? (
             <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5 sm:col-span-2">
@@ -866,10 +929,17 @@ export function CustomersPage() {
               <span className="text-[11px] text-slate-600">NIT extranjero (sin DV colombiano)</span>
             </label>
           ) : null}
-          <label className="block">
-            <span className="field-label">Teléfono</span>
-            <input value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })} className="field" />
-          </label>
+          <div className="block sm:col-span-2">
+            <span className="field-label">Teléfonos</span>
+            <CustomerPhonesEditor
+              value={editForm.phones}
+              onChange={(phones) => setEditForm({ ...editForm, phones })}
+              disabled={editSaving}
+            />
+            <span className="mt-1 block text-[9px] text-slate-400">
+              El principal se usa para WhatsApp, facturas y reportes.
+            </span>
+          </div>
           <label className="block">
             <span className="field-label">Correo</span>
             <input value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} className="field" type="email" />

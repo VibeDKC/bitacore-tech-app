@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.0 — 2026-10-26
+
+### Clientes y teléfonos
+- El teléfono principal es obligatorio en la interfaz; el documento pasa a ser opcional.
+- Nuevos clientes sin documento se guardan como “Sin documento” con un identificador interno único.
+- Nueva tabla `customer_phones` para varios teléfonos por cliente, con etiqueta y principal.
+- Migración 9: el teléfono existente se convierte en el principal.
+- Búsqueda de clientes por nombre, documento, correo o cualquiera de sus teléfonos.
+- Aviso de teléfono compartido entre clientes, sin bloquear el guardado.
+- WhatsApp, comprobantes, OT y reportes usan el teléfono principal.
+- La ficha del cliente muestra todos sus teléfonos.
+
+### Inventario
+- Nuevos diccionarios `inventory_condition` e `inventory_origin`.
+- Los productos guardan condición y origen, visibles en la ficha de inventario.
+- Nuevo diccionario `component_brand` para marcas de RAM, almacenamiento y componentes.
+- Migración 9 agrega `products.condition` y `products.origin`.
+
+### Ficha técnica
+- Nuevo campo libre **Otro / componentes no listados**.
+- La marca de RAM se selecciona desde el diccionario de marcas de componentes, con opción de escribir otra.
+- La ficha se copia al snapshot legal de la OT, además de conservarse en `intake_json`.
+- La ficha se sigue mostrando en OT, comprobante A4 y reporte PDF.
+
+### Calidad
+- Aceptación 1.9.0: 9/9.
+- Migración 9 sobre copia de la base real: OK.
+- Regresión: 1.8.0 13/13, 1.7.0 11/11, 1.6.1 12/12, 1.6.0 14/14, 1.5.0 12/12, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Instalador `BitacoreTech-1.9.0-x64.exe`.
+
 ## 1.8.0 — 2026-10-26
 
 ### Permisos y negocio

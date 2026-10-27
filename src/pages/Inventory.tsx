@@ -66,6 +66,8 @@ const emptyProductForm = {
   barcode: '',
   category: 'Repuestos',
   location: 'Bodega A',
+  condition: '',
+  origin: '',
   stock: '0',
   minStock: '2',
   cost: '',
@@ -95,6 +97,8 @@ export function InventoryPage() {
     return names.length ? names : defaultLocations
   }, [dictionaries])
   const serviceTypeOptions = useMemo(() => dictionaryValues(dictionaries, 'service_type'), [dictionaries])
+  const conditionOptions = useMemo(() => dictionaryValues(dictionaries, 'inventory_condition'), [dictionaries])
+  const originOptions = useMemo(() => dictionaryValues(dictionaries, 'inventory_origin'), [dictionaries])
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const [category, setCategory] = useState('Todas')
   const [stockFilter, setStockFilter] = useState<'todos' | StockStatus>('todos')
@@ -187,7 +191,13 @@ export function InventoryPage() {
 
   function openCreate() {
     const firstCategory = categoryOptions.find((item) => item !== 'Todas') ?? 'Repuestos'
-    setForm({ ...emptyProductForm, category: firstCategory, location: locationOptions[0] ?? 'Bodega A' })
+    setForm({
+      ...emptyProductForm,
+      category: firstCategory,
+      location: locationOptions[0] ?? 'Bodega A',
+      condition: conditionOptions[0] ?? '',
+      origin: originOptions[0] ?? ''
+    })
     setCreateOpen(true)
   }
 
@@ -204,6 +214,8 @@ export function InventoryPage() {
         barcode: form.barcode.trim() || undefined,
         category: form.category,
         location: form.location,
+        condition: form.condition || undefined,
+        origin: form.origin || undefined,
         stock: Number(form.stock) || 0,
         minStock: Number(form.minStock) || 0,
         cost: Number(form.cost) || 0,
@@ -216,7 +228,13 @@ export function InventoryPage() {
       })
       setData((current) => (current ? { ...current, products: [product, ...current.products] } : current))
       setCreateOpen(false)
-      setForm({ ...emptyProductForm, category: categoryOptions.find((item) => item !== 'Todas') ?? 'Repuestos', location: locationOptions[0] ?? 'Bodega A' })
+      setForm({
+        ...emptyProductForm,
+        category: categoryOptions.find((item) => item !== 'Todas') ?? 'Repuestos',
+        location: locationOptions[0] ?? 'Bodega A',
+        condition: conditionOptions[0] ?? '',
+        origin: originOptions[0] ?? ''
+      })
       toast.success('Producto creado', { description: `${product.name} · ${product.sku}` })
     } catch (failure) {
       toast.error('No se pudo crear el producto', { description: errorMessage(failure) })
@@ -233,6 +251,8 @@ export function InventoryPage() {
       barcode: product.barcode,
       category: product.category,
       location: product.location,
+      condition: product.condition ?? '',
+      origin: product.origin ?? '',
       stock: String(product.stock),
       minStock: String(product.minStock),
       cost: String(product.cost ?? 0),
@@ -260,6 +280,8 @@ export function InventoryPage() {
         ...(editForm.barcode.trim() ? { barcode: editForm.barcode.trim() } : {}),
         category: editForm.category,
         location: editForm.location,
+        condition: editForm.condition,
+        origin: editForm.origin,
         minStock: Number(editForm.minStock) || 0,
         cost: Number(editForm.cost) || 0,
         price: Number(editForm.price),
@@ -592,6 +614,8 @@ export function InventoryPage() {
                   ['Código de barras', selected.barcode],
                   ['Categoría', selected.category],
                   ['Ubicación', selected.location],
+                  ['Condición', selected.condition || 'Sin especificar'],
+                  ['Origen', selected.origin || 'Sin especificar'],
                   ...(selected.service ? [['Tipo de servicio', selected.serviceType || 'No definido']] : []),
                   ['Garantía', `${selected.warrantyDays} días`]
                 ].map(([label, value]) => (
@@ -779,6 +803,36 @@ export function InventoryPage() {
               ))}
             </select>
           </label>
+          <label className="block">
+            <span className="field-label">Condición</span>
+            <select
+              value={form.condition}
+              onChange={(event) => setForm({ ...form, condition: event.target.value })}
+              className="field"
+            >
+              <option value="">Sin especificar</option>
+              {conditionOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">Origen</span>
+            <select
+              value={form.origin}
+              onChange={(event) => setForm({ ...form, origin: event.target.value })}
+              className="field"
+            >
+              <option value="">Sin especificar</option>
+              {originOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex items-end">
             <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
               <input
@@ -944,6 +998,36 @@ export function InventoryPage() {
               className="field"
             >
               {[...new Set([...locationOptions, editForm.location].filter(Boolean))].map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">Condición</span>
+            <select
+              value={editForm.condition}
+              onChange={(event) => setEditForm({ ...editForm, condition: event.target.value })}
+              className="field"
+            >
+              <option value="">Sin especificar</option>
+              {[...new Set([...conditionOptions, editForm.condition].filter(Boolean))].map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">Origen</span>
+            <select
+              value={editForm.origin}
+              onChange={(event) => setEditForm({ ...editForm, origin: event.target.value })}
+              className="field"
+            >
+              <option value="">Sin especificar</option>
+              {[...new Set([...originOptions, editForm.origin].filter(Boolean))].map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>

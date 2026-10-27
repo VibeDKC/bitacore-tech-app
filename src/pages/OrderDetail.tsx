@@ -44,6 +44,7 @@ import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig } from '@/lib/legalConfig'
+import { customerDocumentLabel, customerPrimaryPhone } from '@/lib/customers'
 import { technicalSheetEntries } from '@/lib/technicalSheet'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -593,12 +594,13 @@ export function OrderDetailPage() {
 
   function openWhatsApp() {
     if (!order) return
-    if (!customer?.phone || customer.phone === '—') {
+    const phone = customerPrimaryPhone(customer)
+    if (!customer || !phone || phone === '—') {
       toast.error('El cliente no tiene teléfono registrado')
       return
     }
     const text = `Hola ${customer.name}, te escribimos de BitacoreTech por tu orden ${order.number} (${order.brand} ${order.model}). Estado: ${workOrderStatusConfig[status].label}.`
-    window.open(`https://wa.me/57${customer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank')
+    window.open(`https://wa.me/57${phone.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank')
   }
 
   if (loading && !data) {
@@ -1123,13 +1125,13 @@ export function OrderDetailPage() {
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-bold text-ink">{order.customerName}</p>
                 <p className="text-[10px] text-slate-400">
-                  {customer?.documentType ?? 'CC'} {customer?.document ?? '—'}
+                  {customerDocumentLabel(customer)}
                 </p>
               </div>
             </div>
             <div className="mt-4 space-y-2.5">
               <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                <Phone className="h-3.5 w-3.5 text-slate-400" /> {customer?.phone ?? 'Sin teléfono'}
+                <Phone className="h-3.5 w-3.5 text-slate-400" /> {customerPrimaryPhone(customer) || 'Sin teléfono'}
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-500">
                 <Mail className="h-3.5 w-3.5 text-slate-400" /> {customer?.email ?? 'Sin correo'}

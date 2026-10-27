@@ -48,6 +48,7 @@ export class Database {
     this.migrate()
     ensureReferenceData(this)
     ensureDictionaries(this)
+    this.backfillCustomerPhones()
   }
 
   private configure() {
@@ -71,6 +72,7 @@ export class Database {
     this.ensureColumn('users', 'photo_path', 'TEXT')
     this.ensureColumn('users', 'photo_thumb_path', 'TEXT')
     this.ensureColumn('customers', 'is_foreign_document', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('customers', 'document_missing', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('customers', 'loyalty_active', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('customers', 'loyalty_discount_type', "TEXT NOT NULL DEFAULT 'percent'")
     this.ensureColumn('customers', 'loyalty_discount_value', 'REAL NOT NULL DEFAULT 0')
@@ -81,6 +83,8 @@ export class Database {
     this.ensureColumn('invoices', 'discount_type', "TEXT NOT NULL DEFAULT 'percent'")
     this.ensureColumn('invoices', 'discount_value', 'REAL NOT NULL DEFAULT 0')
     this.ensureColumn('products', 'service_type', 'TEXT')
+    this.ensureColumn('products', 'condition', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('products', 'origin', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
@@ -88,7 +92,7 @@ export class Database {
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -98,6 +102,31 @@ export class Database {
     if (!columns.some((item) => item.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
     }
+  }
+
+  private backfillCustomerPhones() {
+    const rows = this.all<any>(
+      `SELECT c.id, c.phone
+       FROM customers c
+       WHERE c.phone IS NOT NULL
+         AND TRIM(c.phone) <> ''
+         AND c.phone <> '—'
+         AND NOT EXISTS (SELECT 1 FROM customer_phones p WHERE p.customer_id = c.id)`
+    )
+    if (!rows.length) return
+    const now = new Date().toISOString()
+    this.tx(() => {
+      for (const row of rows) {
+        this.run(
+          `INSERT OR IGNORE INTO customer_phones (id, customer_id, phone, label, is_primary, created_at)
+           VALUES (?, ?, ?, 'Principal', 1, ?)`,
+          `cph_${sha256(`${row.id}|${row.phone}`).slice(0, 20)}`,
+          row.id,
+          row.phone,
+          now
+        )
+      }
+    })
   }
 
   private ensureRolePermissions() {
@@ -193,6 +222,7 @@ export class Database {
     this.migrate()
     ensureReferenceData(this)
     ensureDictionaries(this)
+    this.backfillCustomerPhones()
   }
 
   get<T = Row>(sql: string, ...params: Bound[]): T | undefined {

@@ -40,6 +40,21 @@ export const DICTIONARY_TYPES = [
     description: 'Bodegas, estantes, taller y mostrador.'
   },
   {
+    value: 'inventory_condition',
+    label: 'Condiciones de inventario',
+    description: 'Nuevo, usado, reacondicionado o para repuesto.'
+  },
+  {
+    value: 'inventory_origin',
+    label: 'Orígenes de inventario',
+    description: 'Compra local, importado, devolución o aportado por el cliente.'
+  },
+  {
+    value: 'component_brand',
+    label: 'Marcas de componentes',
+    description: 'Marcas de RAM, almacenamiento y otros componentes.'
+  },
+  {
     value: 'supplier_category',
     label: 'Categorías de proveedor',
     description: 'Agrupación de proveedores para compras.'

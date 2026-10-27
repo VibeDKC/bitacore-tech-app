@@ -29,14 +29,50 @@ export function customerDto(db: Database, row: any) {
     row.id
   )?.date
   const lastVisit = [row.updated_at, lastInvoice, lastOrder].filter(Boolean).sort().pop() ?? row.updated_at
+  const phoneRows = db.all<any>(
+    'SELECT id, phone, label, is_primary FROM customer_phones WHERE customer_id = ? ORDER BY is_primary DESC, created_at ASC',
+    row.id
+  )
+  const phones = phoneRows.map((item) => ({
+    id: item.id,
+    phone: item.phone,
+    label: item.label,
+    isPrimary: bool(item.is_primary)
+  }))
+  if (!phones.length && row.phone && row.phone !== '—') {
+    phones.push({ id: undefined, phone: row.phone, label: 'Principal', isPrimary: true })
+  }
+  const primaryPhone = phones.find((item) => item.isPrimary)?.phone ?? row.phone
+  let phoneWarning: string | undefined
+  if (phones.length) {
+    const placeholders = phones.map(() => '?').join(', ')
+    const duplicates = db.all<any>(
+      `SELECT DISTINCT c.name, p.phone
+       FROM customer_phones p JOIN customers c ON c.id = p.customer_id
+       WHERE p.phone IN (${placeholders}) AND p.customer_id <> ?`,
+      ...phones.map((item) => item.phone),
+      row.id
+    )
+    if (duplicates.length) {
+      phoneWarning = `Teléfono también registrado en: ${duplicates
+        .map((item) => `${item.name} (${item.phone})`)
+        .join(', ')}`
+    }
+  }
 
   return {
     id: row.id,
     name: row.name,
     documentType: row.document_type,
     document: row.document,
-    documentDv: row.document_type === 'NIT' && !bool(row.is_foreign_document) ? calculateNitDv(row.document) : undefined,
-    phone: row.phone,
+    documentMissing: bool(row.document_missing),
+    documentDv:
+      row.document_type === 'NIT' && !bool(row.is_foreign_document) && !bool(row.document_missing)
+        ? calculateNitDv(row.document)
+        : undefined,
+    phone: primaryPhone,
+    phones,
+    phoneWarning,
     email: row.email,
     address: row.address,
     purchases: Number(purchases),
@@ -88,6 +124,8 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     barcode: row.barcode,
     category: row.category,
     location: row.location,
+    condition: row.condition ?? '',
+    origin: row.origin ?? '',
     stock: Number(row.stock),
     minStock: Number(row.min_stock),
     ...(includeCost ? { cost: money(row.cost_cents) } : {}),

@@ -245,6 +245,10 @@ export function TechnicalSheetForm({
   const gpuBrands = useMemo(() => activeDictionaryNodes(nodes, 'gpu_brand').map((node) => node.name), [nodes])
   const ramTypes = useMemo(() => activeDictionaryNodes(nodes, 'ram_type').map((node) => node.name), [nodes])
   const storageTypes = useMemo(() => activeDictionaryNodes(nodes, 'storage_type').map((node) => node.name), [nodes])
+  const componentBrands = useMemo(
+    () => activeDictionaryNodes(nodes, 'component_brand').map((node) => node.name),
+    [nodes]
+  )
   const cpuFamilyOptions = useMemo(() => {
     const brandNode = nodes.find((node) => node.type === 'cpu_brand' && node.name === value.cpu?.brand)
     return brandNode ? dictionaryChildren(nodes, 'cpu_brand', brandNode.id).filter((node) => node.active).map((node) => node.name) : []
@@ -508,7 +512,13 @@ export function TechnicalSheetForm({
                   </label>
                   <label className="block">
                     <span className="field-label">Marca</span>
-                    <input value={row.brand ?? ''} onChange={(event) => patchRam(index, { brand: event.target.value })} disabled={disabled} className="field h-9 text-[11px]" placeholder="Kingston" />
+                    <SelectOrCustom
+                      value={row.brand}
+                      options={componentBrands}
+                      onChange={(brand) => patchRam(index, { brand })}
+                      disabled={disabled}
+                      customLabel="Otra marca"
+                    />
                   </label>
                 </div>
               </RowShell>
@@ -597,6 +607,17 @@ export function TechnicalSheetForm({
         </div>
         )}
       </div>
+
+      <label className="block">
+        <span className="field-label">Otro / componentes no listados</span>
+        <input
+          value={value.other ?? ''}
+          onChange={(event) => onChange({ ...value, other: event.target.value })}
+          disabled={disabled}
+          className="field h-9 text-[11px]"
+          placeholder="Ej. tarjeta capturadora, fuente modular, adaptador especial…"
+        />
+      </label>
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
         <label className="block">

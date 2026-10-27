@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { workOrderTotal } from '@/lib/orders'
 import { formatCurrency, formatShortDate } from '@/lib/format'
+import { customerPrimaryPhone } from '@/lib/customers'
 import { downloadCsv } from '@/lib/download'
 import { api } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
@@ -266,7 +267,7 @@ export function OrdersPage() {
                     </td>
                     <td className="table-td">
                       <p className="truncate text-[12px] font-semibold text-ink">{order.customerName}</p>
-                      <p className="mt-0.5 text-[10px] text-slate-400">{customer?.phone ?? '—'}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-400">{customerPrimaryPhone(customer) || '—'}</p>
                     </td>
                     <td className="table-td truncate text-[11px]">{order.technician}</td>
                     <td className="table-td">
@@ -288,8 +289,9 @@ export function OrdersPage() {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation()
-                            if (customer?.phone && customer.phone !== '—') {
-                              const digits = customer.phone.replace(/\D/g, '')
+                            const phone = customerPrimaryPhone(customer)
+                            if (customer && phone && phone !== '—') {
+                              const digits = phone.replace(/\D/g, '')
                               window.open(
                                 `https://wa.me/57${digits}?text=${encodeURIComponent(
                                   `Hola ${customer.name}, te escribimos de BitacoreTech por tu orden ${order.number}.`

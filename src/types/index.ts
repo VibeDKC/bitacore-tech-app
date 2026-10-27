@@ -71,6 +71,8 @@ export interface Product {
   /** Nombre del nodo activo de inventory_category. */
   category: string
   location: string
+  condition?: string
+  origin?: string
   stock: number
   minStock: number
   /** El backend lo omite para roles sin permiso de costos. */
@@ -89,13 +91,23 @@ export interface Product {
 
 export type StockStatus = 'in' | 'low' | 'out'
 
+export interface CustomerPhone {
+  id?: string
+  phone: string
+  label: string
+  isPrimary: boolean
+}
+
 export interface Customer {
   id: string
   name: string
   documentType: 'CC' | 'NIT' | 'Pasaporte'
   document: string
   documentDv?: string
+  documentMissing?: boolean
   phone: string
+  phones?: CustomerPhone[]
+  phoneWarning?: string
   email: string
   address: string
   purchases: number
@@ -212,6 +224,8 @@ export interface TechnicalSheet {
   battery?: string
   batteryNotVisible?: boolean
   notes?: string
+  /** Modelos o componentes que no aparecen en los diccionarios. */
+  other?: string
   /** Datos de las OT creadas antes de 1.6.0. */
   legacy?: TechnicalSheetLegacy
 }
@@ -223,6 +237,8 @@ export interface LegalSnapshot {
   warrantyDays: number
   shortClauses: string[]
   fullClauses: string[]
+  /** Copia histórica de la ficha técnica aceptada al ingreso. */
+  technicalSheet?: TechnicalSheet
 }
 
 export interface WorkOrderIntake {

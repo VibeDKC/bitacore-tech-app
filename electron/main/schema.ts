@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS customers (
   address TEXT NOT NULL DEFAULT 'Sin dirección',
   is_final_consumer INTEGER NOT NULL DEFAULT 0,
   is_foreign_document INTEGER NOT NULL DEFAULT 0,
+  document_missing INTEGER NOT NULL DEFAULT 0,
   loyalty_active INTEGER NOT NULL DEFAULT 0,
   loyalty_discount_type TEXT NOT NULL DEFAULT 'percent',
   loyalty_discount_value REAL NOT NULL DEFAULT 0,
@@ -102,6 +103,19 @@ CREATE TABLE IF NOT EXISTS customers (
   created_by TEXT,
   UNIQUE (document)
 );
+
+CREATE TABLE IF NOT EXISTS customer_phones (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT 'Principal',
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE (customer_id, phone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_phones_customer ON customer_phones(customer_id);
+CREATE INDEX IF NOT EXISTS idx_customer_phones_phone ON customer_phones(phone);
 
 CREATE TABLE IF NOT EXISTS equipment (
   id TEXT PRIMARY KEY,
@@ -129,6 +143,8 @@ CREATE TABLE IF NOT EXISTS products (
   barcode TEXT NOT NULL,
   category TEXT NOT NULL,
   location TEXT NOT NULL DEFAULT 'Bodega A',
+  condition TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT '',
   stock REAL NOT NULL DEFAULT 0,
   min_stock REAL NOT NULL DEFAULT 0,
   cost_cents INTEGER NOT NULL DEFAULT 0,

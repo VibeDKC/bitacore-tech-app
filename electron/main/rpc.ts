@@ -153,7 +153,7 @@ function validateTechnicalSheet(value: unknown) {
   }
 }
 
-function createSnapshot(db: Database, acceptedAt: string) {
+function createSnapshot(db: Database, acceptedAt: string, technicalSheet?: unknown) {
   const config = getLegal(db)
   return {
     version: config.version,
@@ -161,8 +161,71 @@ function createSnapshot(db: Database, acceptedAt: string) {
     abandonmentDays: config.abandonmentDays,
     warrantyDays: config.warrantyDays,
     shortClauses: config.shortClauses.map((clause) => resolveClause(clause, config)),
-    fullClauses: config.fullClauses.map((clause) => resolveClause(clause, config))
+    fullClauses: config.fullClauses.map((clause) => resolveClause(clause, config)),
+    ...(technicalSheet && typeof technicalSheet === 'object' ? { technicalSheet } : {})
   }
+}
+
+function normalizeCustomerPhones(payload: any, fallbackPhone?: string) {
+  const raw = Array.isArray(payload?.phones) ? payload.phones : []
+  const rows: Array<{ phone: string; label: string; isPrimary: boolean }> = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item.phone !== 'string') continue
+    const phone = item.phone.trim().slice(0, 80)
+    if (!phone || phone === '—') continue
+    const key = phone.replace(/\s+/g, '').toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    rows.push({
+      phone,
+      label:
+        typeof item.label === 'string' && item.label.trim() ? item.label.trim().slice(0, 40) : 'Teléfono',
+      isPrimary: Boolean(item.isPrimary)
+    })
+  }
+  if (
+    !rows.length &&
+    typeof fallbackPhone === 'string' &&
+    fallbackPhone.trim() &&
+    fallbackPhone.trim() !== '—'
+  ) {
+    rows.push({ phone: fallbackPhone.trim().slice(0, 80), label: 'Principal', isPrimary: true })
+  }
+  if (rows.length && !rows.some((item) => item.isPrimary)) rows[0].isPrimary = true
+  let primarySeen = false
+  for (const row of rows) {
+    if (row.isPrimary && primarySeen) row.isPrimary = false
+    else if (row.isPrimary) primarySeen = true
+  }
+  return rows
+}
+
+function saveCustomerPhones(
+  db: Database,
+  customerId: string,
+  phones: Array<{ phone: string; label: string; isPrimary: boolean }>,
+  createdAt: string
+) {
+  db.run('DELETE FROM customer_phones WHERE customer_id = ?', customerId)
+  const primary = phones.find((item) => item.isPrimary) ?? phones[0]
+  for (const entry of phones) {
+    db.run(
+      `INSERT INTO customer_phones (id, customer_id, phone, label, is_primary, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      `cph_${sha256(`${customerId}|${entry.phone}`).slice(0, 20)}`,
+      customerId,
+      entry.phone,
+      entry.label,
+      entry.isPrimary ? 1 : 0,
+      createdAt
+    )
+  }
+  db.run('UPDATE customers SET phone = ? WHERE id = ?', primary?.phone ?? '—', customerId)
+}
+
+function customerPlaceholderDocument(id: string) {
+  return `SD-${id.replace(/^cust_/, '')}`
 }
 
 function baseSession(db: Database, row: any) {
@@ -1709,43 +1772,54 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const name = text(payload?.name, 'Nombre', 2, 160)
       const documentType = schema(payload?.documentType ?? 'CC', z.enum(['CC', 'NIT', 'Pasaporte']))
       const isForeignDocument = Boolean(payload?.isForeignDocument)
-      let document = text(payload?.document, 'Documento', 3, 40)
-      if (documentType === 'NIT' && !isForeignDocument) {
+      const id = `cust_${sha256(`${name}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
+      const rawDocument = typeof payload?.document === 'string' ? payload.document.trim().slice(0, 40) : ''
+      const documentMissing = !rawDocument
+      let document = documentMissing ? customerPlaceholderDocument(id) : rawDocument
+      if (!documentMissing && documentType === 'NIT' && !isForeignDocument) {
         const digits = normalizeNit(document)
         if (document !== digits) fail('El NIT debe contener solo números, sin puntos ni espacios.')
         const dv = typeof payload?.documentDv === 'string' ? payload.documentDv.trim() : calculateNitDv(digits)
         if (!isValidNit(digits, dv)) fail('El dígito de verificación del NIT no es válido.')
         document = digits
       }
-      const existing = db.get<any>('SELECT id, name FROM customers WHERE document = ?', document)
-      if (existing) fail(`Ya existe un cliente con ese documento: ${existing.name}`, 'DUPLICATE')
-      const id = `cust_${sha256(`${document}|${Date.now()}`).slice(0, 20)}`
+      if (!documentMissing) {
+        const existing = db.get<any>('SELECT id, name FROM customers WHERE document = ?', document)
+        if (existing) fail(`Ya existe un cliente con ese documento: ${existing.name}`, 'DUPLICATE')
+      }
+      const phones = normalizeCustomerPhones(payload, payload?.phone)
+      if ((payload?.phones !== undefined || payload?.phone !== undefined) && !phones.length) {
+        fail('El cliente debe tener al menos un teléfono principal.')
+      }
+      const primaryPhone = phones.find((item) => item.isPrimary)?.phone ?? '—'
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO customers
             (id, name, document_type, document, phone, email, address, is_final_consumer, is_foreign_document,
-             loyalty_active, loyalty_discount_type, loyalty_discount_value, loyalty_valid_until, loyalty_notes,
-             created_at, updated_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?)`,
+             document_missing, loyalty_active, loyalty_discount_type, loyalty_discount_value, loyalty_valid_until,
+             loyalty_notes, created_at, updated_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?)`,
           id,
           name,
           documentType,
           document,
-          text(payload?.phone ?? '—', 'Teléfono', 1, 80) || '—',
+          primaryPhone,
           text(payload?.email ?? '—', 'Correo', 1, 160) || '—',
           text(payload?.address ?? 'Sin dirección', 'Dirección', 1, 240) || 'Sin dirección',
           isForeignDocument ? 1 : 0,
+          documentMissing ? 1 : 0,
           nowIso,
           nowIso,
           session.userId
         )
+        saveCustomerPhones(db, id, phones, nowIso)
         audit(
           db,
           session,
           'Creación de cliente',
           'Cliente',
-          `${name} · ${documentType} ${document}${isForeignDocument ? ' · documento extranjero' : ''}`,
+          `${name} · ${documentMissing ? 'sin documento' : `${documentType} ${document}`}${isForeignDocument ? ' · documento extranjero' : ''} · ${primaryPhone}`,
           id
         )
       })
@@ -1759,13 +1833,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (!row) fail('Cliente no encontrado', 'NOT_FOUND')
       const updates: string[] = []
       const params: any[] = []
+      const phonesTouched = Array.isArray(payload?.phones) || typeof payload?.phone === 'string'
+      const phones = phonesTouched ? normalizeCustomerPhones(payload, payload?.phone) : []
+      if (phonesTouched && !phones.length && !Boolean(row.is_final_consumer)) {
+        fail('El cliente debe tener al menos un teléfono.')
+      }
       if (typeof payload?.name === 'string') {
         updates.push('name = ?')
         params.push(text(payload.name, 'Nombre', 2, 160))
-      }
-      if (typeof payload?.phone === 'string') {
-        updates.push('phone = ?')
-        params.push(payload.phone.trim() || '—')
       }
       if (typeof payload?.email === 'string') {
         updates.push('email = ?')
@@ -1781,18 +1856,31 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const isForeignDocument =
         payload?.isForeignDocument === undefined ? Boolean(row.is_foreign_document) : Boolean(payload.isForeignDocument)
       if (payload?.documentType !== undefined || payload?.document !== undefined || payload?.isForeignDocument !== undefined) {
-        let document = typeof payload?.document === 'string' ? payload.document.trim() : row.document
-        if (documentType === 'NIT' && !isForeignDocument) {
+        const rawDocument =
+          typeof payload?.document === 'string'
+            ? payload.document.trim().slice(0, 40)
+            : row.document_missing
+              ? ''
+              : String(row.document ?? '')
+        const documentMissing = !rawDocument
+        let document = documentMissing
+          ? row.document_missing
+            ? row.document
+            : customerPlaceholderDocument(id)
+          : rawDocument
+        if (!documentMissing && documentType === 'NIT' && !isForeignDocument) {
           const digits = normalizeNit(document)
           if (document !== digits) fail('El NIT debe contener solo números, sin puntos ni espacios.')
           const dv = typeof payload?.documentDv === 'string' ? payload.documentDv.trim() : calculateNitDv(digits)
           if (!isValidNit(digits, dv)) fail('El dígito de verificación del NIT no es válido.')
           document = digits
         }
-        const duplicate = db.get<any>('SELECT id, name FROM customers WHERE document = ? AND id <> ?', document, id)
-        if (duplicate) fail(`Ya existe un cliente con ese documento: ${duplicate.name}`, 'DUPLICATE')
-        updates.push('document_type = ?', 'document = ?', 'is_foreign_document = ?')
-        params.push(documentType, document, isForeignDocument ? 1 : 0)
+        if (!documentMissing) {
+          const duplicate = db.get<any>('SELECT id, name FROM customers WHERE document = ? AND id <> ?', document, id)
+          if (duplicate) fail(`Ya existe un cliente con ese documento: ${duplicate.name}`, 'DUPLICATE')
+        }
+        updates.push('document_type = ?', 'document = ?', 'is_foreign_document = ?', 'document_missing = ?')
+        params.push(documentType, document, isForeignDocument ? 1 : 0, documentMissing ? 1 : 0)
       }
       const loyaltyFields = [
         'loyaltyActive',
@@ -1834,11 +1922,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
           params.push(typeof payload.loyaltyNotes === 'string' ? payload.loyaltyNotes.slice(0, 500) : null)
         }
       }
-      if (!updates.length) fail('No hay cambios para guardar')
+      if (!updates.length && !phonesTouched) fail('No hay cambios para guardar')
+      const nowIso = new Date().toISOString()
       updates.push('updated_at = ?')
-      params.push(new Date().toISOString(), id)
+      params.push(nowIso, id)
       db.tx(() => {
         db.run(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, ...params)
+        if (phonesTouched) saveCustomerPhones(db, id, phones, nowIso)
         audit(
           db,
           session,
@@ -1846,7 +1936,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           'Cliente',
           touchesLoyalty
             ? `${row.name} · fidelidad ${payload?.loyaltyActive === false ? 'desactivada' : 'actualizada'}`
-            : `${row.name} actualizado`,
+            : `${row.name} actualizado${phonesTouched ? ' · teléfonos' : ''}`,
           id
         )
       })
@@ -2078,15 +2168,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
       db.tx(() => {
         db.run(
           `INSERT INTO products
-            (id, name, sku, barcode, category, location, stock, min_stock, cost_cents, price_cents,
+            (id, name, sku, barcode, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
              warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           id,
           name,
           sku,
           barcode,
           text(payload?.category ?? 'Repuestos', 'Categoría', 2, 80),
           text(payload?.location ?? 'Bodega A', 'Ubicación', 2, 80),
+          typeof payload?.condition === 'string' ? payload.condition.trim().slice(0, 80) : '',
+          typeof payload?.origin === 'string' ? payload.origin.trim().slice(0, 80) : '',
           stock,
           minStock,
           toCents(cost),
@@ -2158,6 +2250,16 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('location = ?')
         params.push(text(payload.location, 'Ubicación', 2, 80))
         changed.push('ubicación')
+      }
+      if (payload?.condition !== undefined) {
+        updates.push('condition = ?')
+        params.push(typeof payload.condition === 'string' ? payload.condition.trim().slice(0, 80) : '')
+        changed.push('condición')
+      }
+      if (payload?.origin !== undefined) {
+        updates.push('origin = ?')
+        params.push(typeof payload.origin === 'string' ? payload.origin.trim().slice(0, 80) : '')
+        changed.push('origen')
       }
       if (payload?.minStock !== undefined) {
         updates.push('min_stock = ?')
@@ -2673,7 +2775,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             : undefined,
         receivedBy: displayUser(session).name,
         receivedAt: nowIso,
-        legal: createSnapshot(db, nowIso)
+        legal: createSnapshot(db, nowIso, intakeInput.technicalSheet)
       }
       const physicalCondition = text(payload?.physicalCondition ?? 'Sin observaciones', 'Condición física', 1, 3000)
       const accessories = text(payload?.accessories ?? 'Sin accesorios', 'Accesorios', 1, 1000)
