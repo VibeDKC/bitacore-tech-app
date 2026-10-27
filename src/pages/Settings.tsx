@@ -236,6 +236,8 @@ export function SettingsPage() {
   const canRestore = can(role, 'restoreBackup')
   const canPurge = can(role, 'purgeData')
   const canLegal = can(role, 'configureLegal')
+  const canBusiness = can(role, 'configureBusiness')
+  const canPermissions = can(role, 'managePermissions')
   const canAI = can(role, 'configureAI')
   const isSuperadmin = role === 'superadmin'
 
@@ -307,22 +309,24 @@ export function SettingsPage() {
     setData((current) => (current ? { ...current, settings: updated } : current))
   }
 
-  async function saveBusiness() {    if (saving) return
+  async function saveBusiness() {
+    if (saving) return
+    if (!canBusiness) {
+      toast.error('Tu rol no puede modificar los datos del negocio')
+      return
+    }
     setSaving('negocio')
     try {
-      let legalConfig = settings?.legal ?? defaultLegalConfig
-      if (canLegal) {
-        legalConfig = await api.legal.update({
-          businessName: businessDraft.businessName.trim(),
-          nit: normalizeNit(businessDraft.nit),
-          nitDv: businessDraft.nitDv,
-          foreignNit: businessDraft.foreignNit.trim(),
-          phone: businessDraft.phone.trim(),
-          email: businessDraft.email.trim(),
-          address: businessDraft.address.trim(),
-          city: businessDraft.city.trim()
-        })
-      }
+      const legalConfig = await api.business.update({
+        businessName: businessDraft.businessName.trim(),
+        nit: normalizeNit(businessDraft.nit),
+        nitDv: businessDraft.nitDv,
+        foreignNit: businessDraft.foreignNit.trim(),
+        phone: businessDraft.phone.trim(),
+        email: businessDraft.email.trim(),
+        address: businessDraft.address.trim(),
+        city: businessDraft.city.trim()
+      })
       const updated = await api.settings.updateSection('business', {
         currency: businessDraft.currency,
         timezone: businessDraft.timezone
@@ -330,9 +334,7 @@ export function SettingsPage() {
       applySettings({ ...updated, legal: legalConfig })
       setLegalDraft(toLegalDraft(legalConfig))
       toast.success('Datos del negocio actualizados', {
-        description: canLegal
-          ? 'La identidad se guardó en la configuración legal versionada.'
-          : 'La configuración regional se guardó. La identidad legal es editable solo por el propietario.'
+        description: 'La identidad quedó auditada; las cláusulas legales se versionan por separado.'
       })
     } catch (failure) {
       toast.error('No se pudieron guardar los datos del negocio', { description: errorMessage(failure) })
@@ -417,17 +419,25 @@ export function SettingsPage() {
   }
 
   async function saveRolePermissions() {
-    if (actualRole !== 'superadmin' || saving) return
+    if (!canPermissions || saving) return
     setSaving('permisos')
     try {
       let updated = null as Awaited<ReturnType<typeof api.permissions.updateRole>> | null
       for (const role of ['admin', 'tecnico', 'cajero'] as const) {
-        const items = allCapabilities.map((capability) => ({
-          capability,
-          allowed: rootOnlyCapabilities.includes(capability)
-            ? false
-            : Boolean(rolePermissionsDraft[`${role}:${capability}`])
-        }))
+        const items = allCapabilities
+          .filter((capability) => {
+            if (isSuperadmin) return true
+            if (rootOnlyCapabilities.includes(capability)) return false
+            if (role === 'admin' && capability === 'managePermissions') return false
+            return can(role, capability)
+          })
+          .map((capability) => ({
+            capability,
+            allowed:
+              isSuperadmin && rootOnlyCapabilities.includes(capability)
+                ? false
+                : Boolean(rolePermissionsDraft[`${role}:${capability}`])
+          }))
         updated = await api.permissions.updateRole(role, items)
       }
       if (updated) applySettings(updated)
@@ -500,31 +510,12 @@ export function SettingsPage() {
     setSaving('legal')
     try {
       const saved = await api.legal.update({
-        businessName: legalDraft.businessName,
-        nit: normalizeNit(legalDraft.nit),
-        nitDv: legalDraft.nitDv,
-        foreignNit: legalDraft.foreignNit ?? '',
-        phone: legalDraft.phone,
-        address: legalDraft.address,
-        city: legalDraft.city,
-        email: legalDraft.email,
         abandonmentDays: legalDraft.abandonmentDays,
         warrantyDays: legalDraft.warrantyDays,
         shortClauses: splitClauses(legalDraft.shortText),
         fullClauses: splitClauses(legalDraft.fullText)
       })
       setLegalDraft(toLegalDraft(saved))
-      setBusinessDraft((current) => ({
-        ...current,
-        businessName: saved.businessName,
-        nit: saved.nit,
-        nitDv: saved.nitDv ?? calculateNitDv(saved.nit),
-        foreignNit: saved.foreignNit ?? '',
-        phone: saved.phone,
-        email: saved.email,
-        address: saved.address,
-        city: saved.city
-      }))
       if (settings) applySettings({ ...settings, legal: saved })
       toast.success(`Cláusulas legales actualizadas · ${saved.version}`, {
         description: `Abandono a los ${saved.abandonmentDays} días y garantía de ${saved.warrantyDays} días. Las OTs nuevas guardarán un snapshot inmutable.`
@@ -992,10 +983,10 @@ export function SettingsPage() {
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-[12px] font-semibold text-ink">Identidad del negocio</p>
-                      <Badge variant={canLegal ? 'warning' : 'neutral'}>{canLegal ? 'Editable' : 'Solo lectura'}</Badge>
+                      <Badge variant={canBusiness ? 'warning' : 'neutral'}>{canBusiness ? 'Editable' : 'Solo lectura'}</Badge>
                     </div>
                     <p className="mt-0.5 text-[10px] text-slate-400">
-                      La razón social, el NIT y los datos de contacto se versionan junto con las cláusulas legales.
+                      La razón social, el NIT y los datos de contacto quedan auditados. Las cláusulas legales se versionan por separado.
                     </p>
                   </div>
                 </div>
@@ -1025,7 +1016,7 @@ export function SettingsPage() {
                             setBusinessDraft({ ...businessDraft, [field.key]: event.target.value })
                           }
                         }}
-                        disabled={!canLegal}
+                        disabled={!canBusiness}
                         className="field disabled:bg-slate-50 disabled:text-slate-500"
                       />
                     </label>
@@ -1042,7 +1033,7 @@ export function SettingsPage() {
                     <input
                       value={businessDraft.foreignNit}
                       onChange={(event) => setBusinessDraft({ ...businessDraft, foreignNit: event.target.value })}
-                      disabled={!canLegal}
+                      disabled={!canBusiness}
                       className="field disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="Solo si el negocio factura con NIT extranjero"
                     />
@@ -1056,7 +1047,8 @@ export function SettingsPage() {
                       <select
                         value={businessDraft.currency}
                         onChange={(event) => setBusinessDraft({ ...businessDraft, currency: event.target.value })}
-                        className="field pr-9"
+                        disabled={!canBusiness}
+                        className="field pr-9 disabled:bg-slate-50 disabled:text-slate-500"
                       >
                         <option value="COP">COP · Peso colombiano</option>
                         <option value="USD">USD · Dólar</option>
@@ -1070,7 +1062,8 @@ export function SettingsPage() {
                       <select
                         value={businessDraft.timezone}
                         onChange={(event) => setBusinessDraft({ ...businessDraft, timezone: event.target.value })}
-                        className="field pr-9"
+                        disabled={!canBusiness}
+                        className="field pr-9 disabled:bg-slate-50 disabled:text-slate-500"
                       >
                         <option value="America/Bogota">América/Bogotá (GMT−5)</option>
                         <option value="America/Panama">América/Panamá (GMT−5)</option>
@@ -1081,15 +1074,20 @@ export function SettingsPage() {
                 </div>
 
                 <div className="mt-5 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-                  {!canLegal ? (
+                  {!canBusiness ? (
                     <p className="flex items-center gap-1.5 text-[9px] text-slate-400">
                       <LockKeyhole className="h-3 w-3" />
-                      La identidad legal es editable solo por el propietario.
+                      Tu rol no puede modificar la identidad del negocio.
                     </p>
                   ) : (
                     <span className="text-[9px] text-slate-400">Configuración legal vigente: {legalDraft.version}</span>
                   )}
-                  <Button onClick={() => void saveBusiness()} loading={saving === 'negocio'} leftIcon={<Save className="h-4 w-4" />}>
+                  <Button
+                    onClick={() => void saveBusiness()}
+                    loading={saving === 'negocio'}
+                    disabled={!canBusiness}
+                    leftIcon={<Save className="h-4 w-4" />}
+                  >
                     Guardar cambios
                   </Button>
                 </div>
@@ -1144,7 +1142,7 @@ export function SettingsPage() {
                       className="field text-right tabular"
                     />
                     <span className="mt-1 block text-[9px] text-slate-400">
-                      Mano de obra y repuestos suministrados por el taller.
+                      Mano de obra y repuestos suministrados por el taller. Cada repuesto de inventario conserva su propia garantía.
                     </span>
                   </label>
                 </div>
@@ -1397,8 +1395,8 @@ export function SettingsPage() {
                       Estos son los permisos base de cada rol. Luego puedes permitir o denegar acciones a un usuario específico desde su ficha.
                     </p>
                   </div>
-                  <Badge variant={actualRole === 'superadmin' ? 'warning' : 'neutral'}>
-                    {actualRole === 'superadmin' ? 'Editable' : 'Solo propietario'}
+                  <Badge variant={canPermissions ? 'warning' : 'neutral'}>
+                    {canPermissions ? 'Editable' : 'Solo lectura'}
                   </Badge>
                 </div>
 
@@ -1423,12 +1421,26 @@ export function SettingsPage() {
                               <p className="text-[11px] text-slate-600">{capabilityLabels[capability]}</p>
                               {rootOnly ? <p className="text-[8px] text-slate-400">Exclusivo del propietario</p> : null}
                             </td>
-                            {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => (
+                            {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => {
+                              const lockedAdminPermission =
+                                !isSuperadmin && roleItem === 'admin' && capability === 'managePermissions'
+                              return (
                               <td key={roleItem} className="table-td text-center">
                                 <input
                                   type="checkbox"
                                   checked={Boolean(rolePermissionsDraft[`${roleItem}:${capability}`])}
-                                  disabled={actualRole !== 'superadmin' || rootOnly || saving === 'permisos'}
+                                  disabled={
+                                    !canPermissions ||
+                                    rootOnly ||
+                                    lockedAdminPermission ||
+                                    (!isSuperadmin && !can(role, capability)) ||
+                                    saving === 'permisos'
+                                  }
+                                  title={
+                                    lockedAdminPermission
+                                      ? 'Solo el propietario puede retirar este permiso al rol Administrador.'
+                                      : undefined
+                                  }
                                   onChange={(event) =>
                                     setRolePermissionsDraft((current) => ({
                                       ...current,
@@ -1438,7 +1450,8 @@ export function SettingsPage() {
                                   className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
                                 />
                               </td>
-                            ))}
+                              )
+                            })}
                           </tr>
                         )
                       })}
@@ -1448,9 +1461,12 @@ export function SettingsPage() {
 
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-[9px] leading-relaxed text-slate-400">
-                    Los permisos exclusivos del propietario no se pueden delegar. Los cambios quedan auditados.
+                    Los permisos exclusivos del propietario no se pueden delegar. Un administrador solo puede
+                    conceder permisos que su propia cuenta ya tiene. Los cambios en la columna Administrador
+                    afectan a todas las cuentas admin y pueden retirarte acceso; el propietario puede restaurarlo.
+                    Todo queda auditado.
                   </p>
-                  {actualRole === 'superadmin' ? (
+                  {canPermissions ? (
                     <Button
                       variant="secondary"
                       onClick={() => void saveRolePermissions()}
@@ -1782,7 +1798,7 @@ export function SettingsPage() {
                   ))}
                 </div>
                 <p className="mt-2 text-[9px] text-slate-400">
-                  La identidad del negocio se edita en la pestaña Negocio y queda versionada con las cláusulas.
+                  La identidad del negocio se edita en la pestaña Negocio y queda auditada; las cláusulas se versionan por separado.
                 </p>
 
                 <div className="mt-5 divide-y divide-line rounded-xl border border-line">
@@ -1840,7 +1856,7 @@ export function SettingsPage() {
                       className="field text-right tabular"
                     />
                     <span className="mt-1 block text-[9px] text-slate-400">
-                      Mano de obra y repuestos suministrados por el taller.
+                      Mano de obra y repuestos suministrados por el taller. Cada repuesto de inventario conserva su propia garantía.
                     </span>
                   </label>
                 </div>
@@ -2290,7 +2306,8 @@ export function SettingsPage() {
             <div className="mt-1.5 max-h-72 overflow-y-auto rounded-xl border border-line">
               {allCapabilities.map((capability) => {
                 const rootOnly = rootOnlyCapabilities.includes(capability)
-                const disabled = rootOnly && actualRole !== 'superadmin'
+                const actorCanGrant = isSuperadmin || can(role, capability)
+                const disabled = rootOnly ? actualRole !== 'superadmin' : !actorCanGrant
                 return (
                   <div
                     key={capability}

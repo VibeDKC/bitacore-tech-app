@@ -139,6 +139,20 @@ function resolveClause(value: string, config: LegalConfig) {
   return value.replace(/\{\{dias\}\}/g, String(config.abandonmentDays)).replace(/\{\{garantia\}\}/g, String(config.warrantyDays))
 }
 
+function validateTechnicalSheet(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return
+  const drives = (value as any).storageDrives
+  if (!Array.isArray(drives)) return
+  for (const drive of drives) {
+    if (!drive || typeof drive !== 'object' || drive.healthNotApplicable) continue
+    if (drive.healthPercent === undefined || drive.healthPercent === null || drive.healthPercent === '') continue
+    const percent = Number(drive.healthPercent)
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      fail('La salud del disco debe ser un porcentaje entre 0 y 100, o N/A.')
+    }
+  }
+}
+
 function createSnapshot(db: Database, acceptedAt: string) {
   const config = getLegal(db)
   return {
@@ -634,8 +648,8 @@ function createOrderInvoice(
     for (const item of items) {
       db.run(
         `INSERT INTO invoice_items
-          (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         `ii_${sha256(`${id}|${item.id}`).slice(0, 20)}`,
         id,
         item.product_id,
@@ -644,7 +658,10 @@ function createOrderInvoice(
         item.unit_price_cents,
         item.unit_cost_cents,
         Math.round(item.unit_price_cents * item.quantity),
-        item.type
+        item.type,
+        item.type === 'repuesto' && Number(item.warranty_days ?? 0) > 0
+          ? `Garantía: ${Number(item.warranty_days)} días`
+          : null
       )
     }
   } else if (totalCents > 0) {
@@ -1877,6 +1894,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         )
         if (duplicate) fail('Ya existe un equipo con ese serial para este cliente.', 'DUPLICATE')
       }
+      validateTechnicalSheet(payload?.technicalSheet)
       const id = `eq_${sha256(`${customerId}|${serial}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       const technicalSheet =
@@ -1960,6 +1978,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
       }
       if (payload?.technicalSheet !== undefined) {
+        validateTechnicalSheet(payload.technicalSheet)
         updates.push('technical_sheet_json = ?')
         params.push(payload.technicalSheet && typeof payload.technicalSheet === 'object' ? JSON.stringify(payload.technicalSheet) : null)
       }
@@ -2594,6 +2613,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', customerId)
       if (!customer) fail('Selecciona un cliente válido')
       const intakeInput = payload?.intake && typeof payload.intake === 'object' ? payload.intake : {}
+      validateTechnicalSheet(intakeInput.technicalSheet)
       const category = text(payload?.deviceCategory ?? intakeInput.category ?? 'otro', 'Categoría', 2, 40)
       const categoryLabel = text(payload?.categoryLabel ?? intakeInput.categoryLabel ?? 'Equipo', 'Tipo de equipo', 2, 80)
       const equipmentType = text(payload?.equipmentType ?? categoryLabel, 'Tipo de equipo', 2, 80)
@@ -2604,7 +2624,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const alias = customBuild ? text(payload?.alias ?? intakeInput.alias, 'Alias del equipo', 2, 120) : null
       const brand = customBuild ? 'Armado' : text(payload?.brand, 'Marca', 1, 80)
       const model = customBuild ? String(alias) : text(payload?.model, 'Modelo', 1, 120)
-      const reportedIssue = text(payload?.reportedIssue, 'Falla reportada', 4, 3000)
+      const reportedIssue = text(payload?.reportedIssue, 'Motivo de ingreso', 4, 3000)
       const nowIso = new Date().toISOString()
       const technicianName = typeof payload?.technician === 'string' ? payload.technician : ''
       const requestedTechnicianId = typeof payload?.technicianId === 'string' ? payload.technicianId : ''
@@ -2642,6 +2662,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
         estimate: Math.max(0, numberValue(intakeInput.estimate ?? 0, 'Presupuesto', { min: 0 })),
         diagnosticFee: Math.max(0, numberValue(intakeInput.diagnosticFee ?? 0, 'Diagnóstico', { min: 0 })),
         accessories: Array.isArray(intakeInput.accessories) ? intakeInput.accessories.slice(0, 40) : [],
+        serviceKind: intakeInput.serviceKind === 'mantenimiento' ? 'mantenimiento' : 'falla',
+        serviceType:
+          typeof intakeInput.serviceType === 'string' && intakeInput.serviceType.trim()
+            ? intakeInput.serviceType.trim().slice(0, 120)
+            : undefined,
+        serviceDetail:
+          typeof intakeInput.serviceDetail === 'string' && intakeInput.serviceDetail.trim()
+            ? intakeInput.serviceDetail.trim().slice(0, 1000)
+            : undefined,
         receivedBy: displayUser(session).name,
         receivedAt: nowIso,
         legal: createSnapshot(db, nowIso)
@@ -2985,13 +3014,24 @@ export async function handleRpc(command: string, payload: Payload, token: string
         unitCost = Number(product.cost_cents)
         if (!product.is_service && Number(product.stock) < quantity) fail(`Stock insuficiente de ${product.name}. Disponible: ${product.stock}`)
       }
+      const requestedWarranty =
+        payload?.warrantyDays !== undefined && payload?.warrantyDays !== null && payload?.warrantyDays !== ''
+          ? Math.round(numberValue(payload.warrantyDays, 'Garantía del repuesto', { min: 0, max: 3650 }))
+          : null
+      const canCarryWarranty = type === 'repuesto' && Boolean(product) && !product?.is_service
+      if (!canCarryWarranty && requestedWarranty && requestedWarranty > 0) {
+        fail('La garantía solo aplica a repuestos vinculados a un producto del inventario.')
+      }
+      const warrantyDays = canCarryWarranty
+        ? requestedWarranty ?? Math.max(0, Math.min(3650, Number(product?.warranty_days ?? 0)))
+        : 0
       const nowIso = new Date().toISOString()
       const itemId = `woi_${Date.now()}`
       db.tx(() => {
         db.run(
           `INSERT INTO work_order_items
-            (id, work_order_id, type, description, quantity, unit_price_cents, product_id, unit_cost_cents, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, work_order_id, type, description, quantity, unit_price_cents, product_id, unit_cost_cents, warranty_days, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           itemId,
           row.id,
           type,
@@ -3000,6 +3040,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           toCents(unitPrice),
           productId,
           unitCost,
+          warrantyDays,
           nowIso
         )
         if (product && !product.is_service) {
@@ -3025,7 +3066,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           session,
           'Ítem agregado a OT',
           'Orden de trabajo',
-          `${row.number} · ${description} × ${quantity} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(unitPrice)}`,
+          `${row.number} · ${description} × ${quantity} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(unitPrice)}${warrantyDays > 0 ? ` · garantía ${warrantyDays} días` : ''}`,
           row.id
         )
       })
@@ -3737,11 +3778,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'permissions.updateRole': {
       requireModuleAccess(session, 'settings')
-      requireCap(session, 'configureLegal')
+      requireCap(session, 'managePermissions')
       const role = schema(payload?.role, z.enum(['admin', 'tecnico', 'cajero']))
       const items = schema(
         payload?.permissions,
         z.array(z.object({ capability: z.string().min(1), allowed: z.boolean() }))
+      )
+      const actorCapabilities = new Set(
+        effectiveCapabilities(db, session.userId, session.role, session.role !== session.actualRole)
       )
       const now = new Date().toISOString()
       db.tx(() => {
@@ -3750,6 +3794,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
           if (!ALL_CAPABILITIES.includes(capability)) fail(`Permiso desconocido: ${capability}`)
           if (item.allowed && ROOT_ONLY_CAPABILITIES.includes(capability)) {
             fail(`${capability} es exclusivo del propietario y no puede delegarse al rol ${role}.`, 'FORBIDDEN')
+          }
+          if (session.actualRole !== 'superadmin') {
+            if (item.allowed && !actorCapabilities.has(capability)) {
+              fail('No puedes conceder un permiso que tu propia cuenta no tiene.', 'FORBIDDEN')
+            }
+            if (role === 'admin' && capability === 'managePermissions' && !item.allowed) {
+              fail('Solo el propietario puede retirar la configuración de permisos al rol Administrador.', 'FORBIDDEN')
+            }
           }
           db.run(
             `INSERT INTO role_permissions (role, capability, allowed, updated_at)
@@ -3975,6 +4027,45 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return legalPublic(db)
     }
 
+    case 'business.update': {
+      requireModuleAccess(session, 'settings')
+      requireCap(session, 'configureBusiness')
+      const current = getLegal(db)
+      const rawNit = payload?.nit !== undefined ? text(payload.nit, 'NIT', 3, 40) : String(current.nit ?? '')
+      const nit = normalizeNit(rawNit)
+      if (payload?.nit !== undefined && rawNit !== nit) {
+        fail('El NIT debe contener solo números, sin puntos ni espacios.')
+      }
+      const nitDv = String(payload?.nitDv ?? current.nitDv ?? calculateNitDv(nit)).trim()
+      if (!isValidNit(nit, nitDv)) fail('El dígito de verificación del NIT no es válido.')
+      const next: LegalConfig = {
+        ...current,
+        businessName: text(payload?.businessName ?? current.businessName, 'Nombre del negocio', 2, 160),
+        nit,
+        nitDv,
+        foreignNit:
+          typeof payload?.foreignNit === 'string'
+            ? payload.foreignNit.trim().slice(0, 40)
+            : current.foreignNit ?? '',
+        phone: text(payload?.phone ?? current.phone, 'Teléfono', 3, 80),
+        address: text(payload?.address ?? current.address, 'Dirección', 3, 200),
+        city: text(payload?.city ?? current.city, 'Ciudad', 2, 120),
+        email: text(payload?.email ?? current.email, 'Correo', 3, 160)
+      }
+      db.tx(() => {
+        db.setSetting('legal_config', next)
+        audit(
+          db,
+          session,
+          'Actualización de datos del negocio',
+          'Configuración',
+          `${next.businessName} · NIT ${next.nit}-${next.nitDv} · ${next.phone}`,
+          'business'
+        )
+      })
+      return next
+    }
+
     case 'legal.update': {
       requireCap(session, 'configureLegal')
       const current = getLegal(db)
@@ -4043,6 +4134,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const section = schema(payload?.section, z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages']))
       if (section === 'ai') requireCap(session, 'configureAI')
       if (section === 'equipment') requireCap(session, 'manageStaff')
+      if (section === 'business') requireCap(session, 'configureBusiness')
       if (section === 'ai' && payload?.value && typeof payload.value === 'object' && 'apiKey' in payload.value) {
         // La clave nunca se devuelve al renderer ni se guarda en texto plano en la base.
         const value = { ...payload.value }

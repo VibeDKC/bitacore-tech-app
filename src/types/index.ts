@@ -27,6 +27,8 @@ export type Capability =
   | 'restoreBackup'
   | 'purgeData'
   | 'configureLegal'
+  | 'configureBusiness'
+  | 'managePermissions'
   | 'configureAI'
   | 'manageDictionaries'
   | 'annulInvoice'
@@ -174,7 +176,6 @@ export interface TechnicalSheetRamModule {
   capacity?: string
   speed?: string
   brand?: string
-  warranty?: string
 }
 
 export interface TechnicalSheetStorageDrive {
@@ -183,8 +184,11 @@ export interface TechnicalSheetStorageDrive {
   capacity?: string
   speed?: string
   model?: string
+  /** Valores anteriores a 1.8.0: Bueno, Regular, Crítico o No evaluado. */
   health?: string
-  warranty?: string
+  /** Salud medida por benchmark, entre 0 y 100. */
+  healthPercent?: number
+  healthNotApplicable?: boolean
 }
 
 export interface TechnicalSheetLegacy {
@@ -230,8 +234,13 @@ export interface WorkOrderIntake {
   conditions: IntakeConditions
   conditionNotes: string
   screenCondition?: string
+  /** Campo legado de OTs anteriores a 1.8.0; ya no se captura. */
   internalComponents?: string
   includesExternalDrives?: boolean
+  /** Motivo de ingreso: falla puntual o un servicio de mantenimiento. */
+  serviceKind?: 'falla' | 'mantenimiento'
+  serviceType?: string
+  serviceDetail?: string
   accessories: string[]
   accessoriesNote?: string
   lockType: LockType
@@ -319,6 +328,8 @@ export interface WorkOrderItem {
   description: string
   quantity: number
   unitPrice: number
+  /** Solo aplica a repuestos vinculados a un producto del inventario. */
+  warrantyDays: number
 }
 
 export interface TimelineEvent {

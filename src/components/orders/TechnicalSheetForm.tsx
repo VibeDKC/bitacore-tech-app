@@ -20,7 +20,72 @@ const gpuKinds: Array<{ value: GpuKind; label: string }> = [
   { value: 'dedicated', label: 'Dedicada' }
 ]
 
-const healthOptions = ['', 'Bueno', 'Regular', 'Crítico', 'No evaluado']
+function StorageHealthField({
+  row,
+  onChange,
+  disabled
+}: {
+  row: TechnicalSheetStorageDrive
+  onChange: (patch: Partial<TechnicalSheetStorageDrive>) => void
+  disabled?: boolean
+}) {
+  const legacy =
+    !row.healthNotApplicable && typeof row.healthPercent !== 'number' ? row.health?.trim() ?? '' : ''
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        <div className="relative min-w-0 flex-1">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={typeof row.healthPercent === 'number' ? row.healthPercent : ''}
+            onChange={(event) => {
+              const raw = event.target.value
+              if (raw === '') {
+                onChange({ healthPercent: undefined, health: '', healthNotApplicable: false })
+                return
+              }
+              const parsed = Number(raw)
+              onChange({
+                healthPercent: Number.isFinite(parsed)
+                  ? Math.max(0, Math.min(100, Math.round(parsed)))
+                  : undefined,
+                health: '',
+                healthNotApplicable: false
+              })
+            }}
+            disabled={disabled || row.healthNotApplicable}
+            className="field h-9 pr-7 text-[11px] disabled:bg-slate-50 disabled:text-slate-400"
+            placeholder="0–100"
+            aria-label="Salud del disco en porcentaje"
+          />
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">
+            %
+          </span>
+        </div>
+        <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[9px] font-semibold text-slate-400">
+          <input
+            type="checkbox"
+            checked={Boolean(row.healthNotApplicable)}
+            onChange={(event) =>
+              onChange({
+                healthNotApplicable: event.target.checked,
+                healthPercent: undefined,
+                health: ''
+              })
+            }
+            disabled={disabled}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+            aria-label="Salud del disco N/A"
+          />
+          N/A
+        </label>
+      </div>
+      {legacy ? <p className="mt-1 text-[8px] text-slate-400">Valor anterior: {legacy}</p> : null}
+    </div>
+  )
+}
 
 function SelectOrCustom({
   value,
@@ -393,7 +458,7 @@ export function TechnicalSheetForm({
             </span>
             <div>
               <p className="text-[11px] font-bold text-ink">Memoria RAM</p>
-              <p className="text-[9px] text-slate-400">Añade un módulo por cada instalación.</p>
+              <p className="text-[9px] text-slate-400">Añade un módulo por cada instalación. Sin garantía: es un componente del cliente.</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -428,7 +493,7 @@ export function TechnicalSheetForm({
                 onRemove={() => onChange({ ...value, ramModules: ramModules.filter((_, rowIndex) => rowIndex !== index) })}
                 disabled={disabled}
               >
-                <div className="grid gap-2 sm:grid-cols-5">
+                <div className="grid gap-2 sm:grid-cols-4">
                   <label className="block">
                     <span className="field-label">Tipo</span>
                     <DictionarySelect value={row.type} options={ramTypes} onChange={(type) => patchRam(index, { type })} disabled={disabled} />
@@ -444,10 +509,6 @@ export function TechnicalSheetForm({
                   <label className="block">
                     <span className="field-label">Marca</span>
                     <input value={row.brand ?? ''} onChange={(event) => patchRam(index, { brand: event.target.value })} disabled={disabled} className="field h-9 text-[11px]" placeholder="Kingston" />
-                  </label>
-                  <label className="block">
-                    <span className="field-label">Garantía</span>
-                    <input value={row.warranty ?? ''} onChange={(event) => patchRam(index, { warranty: event.target.value })} disabled={disabled} className="field h-9 text-[11px]" placeholder="12 meses" />
                   </label>
                 </div>
               </RowShell>
@@ -467,7 +528,7 @@ export function TechnicalSheetForm({
             </span>
             <div>
               <p className="text-[11px] font-bold text-ink">Almacenamiento</p>
-              <p className="text-[9px] text-slate-400">Añade un disco por cada unidad instalada.</p>
+              <p className="text-[9px] text-slate-400">Añade un disco por cada unidad instalada. La salud se toma del benchmark.</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -502,7 +563,7 @@ export function TechnicalSheetForm({
                 onRemove={() => onChange({ ...value, storageDrives: storageDrives.filter((_, rowIndex) => rowIndex !== index) })}
                 disabled={disabled}
               >
-                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
                   <label className="block">
                     <span className="field-label">Tipo</span>
                     <DictionarySelect value={row.type} options={storageTypes} onChange={(type) => patchStorage(index, { type })} disabled={disabled} />
@@ -519,20 +580,14 @@ export function TechnicalSheetForm({
                     <span className="field-label">Modelo</span>
                     <input value={row.model ?? ''} onChange={(event) => patchStorage(index, { model: event.target.value })} disabled={disabled} className="field h-9 text-[11px]" placeholder="Kingston NV2" />
                   </label>
-                  <label className="block">
-                    <span className="field-label">Salud</span>
-                    <select value={row.health ?? ''} onChange={(event) => patchStorage(index, { health: event.target.value })} disabled={disabled} className="field h-9 text-[11px]">
-                      {healthOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option || 'Sin especificar'}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
-                    <span className="field-label">Garantía</span>
-                    <input value={row.warranty ?? ''} onChange={(event) => patchStorage(index, { warranty: event.target.value })} disabled={disabled} className="field h-9 text-[11px]" placeholder="12 meses" />
-                  </label>
+                  <div>
+                    <span className="field-label">Salud del disco</span>
+                    <StorageHealthField
+                      row={row}
+                      onChange={(patch) => patchStorage(index, patch)}
+                      disabled={disabled}
+                    />
+                  </div>
                 </div>
               </RowShell>
             ))

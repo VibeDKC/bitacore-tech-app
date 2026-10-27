@@ -244,7 +244,6 @@ export function NewOrderPage() {
   const [conditions, setConditions] = useState<Partial<Record<IntakeConditionKey, boolean>>>({})
   const [conditionNotes, setConditionNotes] = useState('')
   const [screenCondition, setScreenCondition] = useState('Sin rayones')
-  const [internalComponents, setInternalComponents] = useState('')
   const [includesExternalDrives, setIncludesExternalDrives] = useState(false)
   const [lockType, setLockType] = useState<LockType>('sin_bloqueo')
   const [lockNote, setLockNote] = useState('')
@@ -256,6 +255,8 @@ export function NewOrderPage() {
   const [showCredential, setShowCredential] = useState(false)
 
   const [reportedIssue, setReportedIssue] = useState('')
+  const [serviceReason, setServiceReason] = useState('__falla__')
+  const [serviceDetail, setServiceDetail] = useState('')
   const [estimate, setEstimate] = useState('')
   const [diagnosticFee, setDiagnosticFee] = useState('')
   const [technicianId, setTechnicianId] = useState('')
@@ -294,6 +295,10 @@ export function NewOrderPage() {
     }))
   }, [dictionaries])
 
+  const serviceTypeOptions = useMemo(
+    () => activeDictionaryNodes(dictionaries, 'service_type').map((node) => node.name),
+    [dictionaries]
+  )
   const selectedCustomer = customerList.find((item) => item.id === customerId) ?? null
   const selectedEquipment = equipmentList.find((item) => item.id === equipmentId) ?? null
   const selectedDevice =
@@ -434,7 +439,6 @@ export function NewOrderPage() {
     setConditions({})
     setConditionNotes('')
     setScreenCondition('Sin rayones')
-    setInternalComponents('')
     setIncludesExternalDrives(false)
     setLockType('sin_bloqueo')
     setLockNote('')
@@ -445,6 +449,8 @@ export function NewOrderPage() {
     setCredentialNote('')
     setShowCredential(false)
     setReportedIssue('')
+    setServiceReason('__falla__')
+    setServiceDetail('')
     setEstimate('')
     setDiagnosticFee('')
     setTechnicianId(technicians[0]?.id ?? '')
@@ -475,8 +481,12 @@ export function NewOrderPage() {
       toast.error('Completa la marca y el modelo del equipo')
       return
     }
-    if (!reportedIssue.trim()) {
+    if (serviceReason === '__falla__' && !reportedIssue.trim()) {
       toast.error('Describe la falla con las palabras del cliente')
+      return
+    }
+    if (serviceReason !== '__falla__' && !serviceReason.trim()) {
+      toast.error('Selecciona el tipo de servicio o mantenimiento')
       return
     }
     if (needsLock && !customerAuthorizesAccess && !noCredentials) {
@@ -502,6 +512,10 @@ export function NewOrderPage() {
       return
     }
 
+    const isFaultIntake = serviceReason === '__falla__'
+    const issueText = isFaultIntake
+      ? reportedIssue.trim()
+      : `${serviceReason}${serviceDetail.trim() ? ` · ${serviceDetail.trim()}` : ''}`
     setSaving(true)
     const now = new Date().toISOString()
     const visibleConditionKeys = new Set(conditionOptions.map((item) => item.key))
@@ -515,7 +529,6 @@ export function NewOrderPage() {
       [
         conditionFlags.join(', '),
         screenCondition && showScreen ? `Pantalla: ${screenCondition}` : '',
-        internalComponents.trim() ? `Interior: ${internalComponents.trim()}` : '',
         includesExternalDrives ? 'Incluye discos o periféricos externos' : '',
         conditionNotes.trim()
       ]
@@ -531,8 +544,10 @@ export function NewOrderPage() {
       conditions: normalizedConditions,
       conditionNotes: conditionNotes.trim(),
       screenCondition: showScreen ? screenCondition : undefined,
-      internalComponents: showInternal ? internalComponents.trim() : undefined,
       includesExternalDrives: showExternal ? includesExternalDrives : undefined,
+      serviceKind: isFaultIntake ? 'falla' : 'mantenimiento',
+      serviceType: isFaultIntake ? undefined : serviceReason,
+      serviceDetail: isFaultIntake ? undefined : serviceDetail.trim() || undefined,
       accessories,
       accessoriesNote: customAccessories.join(', ') || undefined,
       lockType: showLock ? lockType : 'sin_bloqueo',
@@ -579,7 +594,7 @@ export function NewOrderPage() {
             : serial.trim() || 'Sin serial',
         accessories: accessories.join(', ') || 'Sin accesorios',
         physicalCondition,
-        reportedIssue: reportedIssue.trim(),
+        reportedIssue: issueText,
         technicianId,
         equipmentId: equipmentId || undefined,
         promisedAt: new Date(`${promisedAt}T17:00:00`).toISOString(),
@@ -984,32 +999,7 @@ export function NewOrderPage() {
               </div>
             ) : null}
 
-            {showInternal ? (
-              <div className="mt-5 grid gap-3 rounded-xl border border-line bg-slate-50/60 p-3.5 sm:grid-cols-2">
-                <label className="block">
-                  <span className="field-label">Componentes internos visibles</span>
-                  <input
-                    value={internalComponents}
-                    onChange={(event) => setInternalComponents(event.target.value)}
-                    placeholder="GPU, RAM, fuente, estado del gabinete..."
-                    className="field bg-white"
-                  />
-                </label>
-                <label className="flex items-end pb-2.5">
-                  <span className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-500">
-                    <input
-                      type="checkbox"
-                      checked={includesExternalDrives}
-                      onChange={(event) => setIncludesExternalDrives(event.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
-                    />
-                    Incluye discos o periféricos externos
-                  </span>
-                </label>
-              </div>
-            ) : null}
-
-            {showExternal && !showInternal ? (
+            {showExternal ? (
               <label className="mt-4 flex cursor-pointer items-center gap-2 text-[11px] text-slate-500">
                 <input
                   type="checkbox"
@@ -1017,7 +1007,9 @@ export function NewOrderPage() {
                   onChange={(event) => setIncludesExternalDrives(event.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
                 />
-                El cliente dejó discos, controles u otros periféricos adicionales
+                {showInternal
+                  ? 'Incluye discos o periféricos externos'
+                  : 'El cliente dejó discos, controles u otros periféricos adicionales'}
               </label>
             ) : null}
 
@@ -1294,20 +1286,58 @@ export function NewOrderPage() {
               step="6"
               icon={Wrench}
               title="Falla y presupuesto"
-              description="Usa las palabras exactas del cliente. El diagnóstico se completa después."
+              description="Elige si es una falla puntual o un servicio de mantenimiento. El diagnóstico se completa después."
             />
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="block sm:col-span-2">
-                <span className="field-label">Falla reportada por el cliente *</span>
-                <textarea
-                  value={reportedIssue}
-                  onChange={(event) => setReportedIssue(event.target.value)}
-                  rows={3}
-                  placeholder="Ej. “Se apagó al derramar café y no volvió a encender...”"
-                  className="field resize-none"
-                />
+                <span className="field-label">Motivo de ingreso *</span>
+                <div className="relative">
+                  <Select
+                    value={serviceReason}
+                    onChange={(event) => {
+                      setServiceReason(event.target.value)
+                      if (event.target.value === '__falla__') setServiceDetail('')
+                    }}
+                    className="bg-white"
+                  >
+                    <option value="__falla__">Falla de equipo</option>
+                    {serviceTypeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                </div>
+                <span className="mt-1 block text-[9px] text-slate-400">
+                  Los servicios de mantenimiento se administran en Configuración → Diccionarios.
+                </span>
               </label>
+
+              {serviceReason === '__falla__' ? (
+                <label className="block sm:col-span-2">
+                  <span className="field-label">Falla reportada por el cliente *</span>
+                  <textarea
+                    value={reportedIssue}
+                    onChange={(event) => setReportedIssue(event.target.value)}
+                    rows={3}
+                    placeholder="Ej. “Se apagó al derramar café y no volvió a encender...”"
+                    className="field resize-none"
+                  />
+                </label>
+              ) : (
+                <label className="block sm:col-span-2">
+                  <span className="field-label">Detalle del servicio (opcional)</span>
+                  <textarea
+                    value={serviceDetail}
+                    onChange={(event) => setServiceDetail(event.target.value)}
+                    rows={3}
+                    placeholder="Ej. limpieza interna, cambio de pasta térmica, revisión de ventilación..."
+                    className="field resize-none"
+                  />
+                </label>
+              )}
               <label className="block">
                 <span className="field-label">Presupuesto estimado</span>
                 <div className="relative">

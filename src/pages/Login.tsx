@@ -203,7 +203,7 @@ export function LoginPage() {
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Logo />
               <span className="rounded-full border border-line bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                v1.7.0
+                v1.8.0
               </span>
             </div>
 

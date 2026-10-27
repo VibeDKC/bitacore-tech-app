@@ -65,12 +65,22 @@ function technicalEntries(sheet: any): Array<[string, string]> {
   if (sheet.gpu?.notVisible) entries.push(['GPU', 'N/A'])
   else if (gpu) entries.push(['GPU', gpu])
   const ram = (Array.isArray(sheet.ramModules) ? sheet.ramModules : [])
-    .map((row: any) => [row.type, row.capacity, row.speed, row.brand, row.warranty].filter(Boolean).join(' '))
+    .map((row: any) => [row.type, row.capacity, row.speed, row.brand].filter(Boolean).join(' '))
     .filter(Boolean)
   if (sheet.ramNotVisible) entries.push(['RAM', 'N/A'])
   else if (ram.length) entries.push(['RAM', ram.join(' · ')])
   const disks = (Array.isArray(sheet.storageDrives) ? sheet.storageDrives : [])
-    .map((row: any) => [row.type, row.capacity, row.speed, row.model, row.health, row.warranty].filter(Boolean).join(' '))
+    .map((row: any) => {
+      const health =
+        row.healthNotApplicable
+          ? 'N/A'
+          : typeof row.healthPercent === 'number' && Number.isFinite(row.healthPercent)
+            ? `${Math.max(0, Math.min(100, Math.round(row.healthPercent)))}%`
+            : row.health
+      return [row.type, row.capacity, row.speed, row.model, health ? `Salud: ${health}` : '']
+        .filter(Boolean)
+        .join(' ')
+    })
     .filter(Boolean)
   if (sheet.storageNotVisible) entries.push(['Almacenamiento', 'N/A'])
   else if (disks.length) entries.push(['Almacenamiento', disks.join(' · ')])
@@ -109,6 +119,7 @@ function buildReportData(db: Database, row: any) {
     row.status === 'entregado' && Boolean(invoice) && String(invoice?.notes ?? '').startsWith('Excepción:')
   const balanceCents = isNoChargeDelivery ? 0 : Math.max(totalCents - paidCents, 0)
   const equipment = intake.customBuild ? `Equipo armado · ${intake.alias ?? row.model}` : `${row.brand} ${row.model}`
+  const serviceKind = intake.serviceKind === 'mantenimiento' ? 'mantenimiento' : 'falla'
   const values = {
     cliente: row.customer_name,
     equipo: row.equipment_type,
@@ -136,6 +147,7 @@ function buildReportData(db: Database, row: any) {
     values,
     equipment,
     technicianName,
+    serviceKind,
     statusLabel: status?.label ?? row.status,
     totalCents,
     paidCents,
@@ -149,10 +161,13 @@ function reportHtml(db: Database, row: any, mode: ReportMode, generatedBy: strin
   const isDelivery = mode === 'delivery'
   const title = isDelivery ? 'Reporte de entrega' : 'Reporte inicial de diagnóstico'
   const itemRows = data.items
-    .map(
-      (item) =>
-        `<tr><td>${escapeHtml(item.description)}</td><td class="right">${escapeHtml(item.quantity)}</td><td class="right">${money(Number(item.unit_price_cents) / 100)}</td><td class="right">${money((Number(item.unit_price_cents) * Number(item.quantity)) / 100)}</td></tr>`
-    )
+    .map((item) => {
+      const warranty =
+        item.type === 'repuesto' && Number(item.warranty_days ?? 0) > 0
+          ? `${Number(item.warranty_days)} días`
+          : '—'
+      return `<tr><td>${escapeHtml(item.description)}</td><td class="right">${escapeHtml(item.quantity)}</td><td class="right">${money(Number(item.unit_price_cents) / 100)}</td><td class="right">${money((Number(item.unit_price_cents) * Number(item.quantity)) / 100)}</td><td class="right">${escapeHtml(warranty)}</td></tr>`
+    })
     .join('')
   const technicalRows = data.technical
     .map(
@@ -228,7 +243,7 @@ function reportHtml(db: Database, row: any, mode: ReportMode, generatedBy: strin
 
   <h2>${isDelivery ? 'Trabajo realizado' : 'Diagnóstico inicial'}</h2>
   <div class="box">
-    <span class="muted">Falla reportada por el cliente</span>
+    <span class="muted">${data.serviceKind === 'mantenimiento' ? 'Servicio solicitado' : 'Falla reportada por el cliente'}</span>
     <p><strong>${escapeHtml(row.reported_issue)}</strong></p>
     <span class="muted">Diagnóstico del técnico</span>
     <p>${escapeHtml(row.diagnosis || 'Pendiente de diagnóstico')}</p>
@@ -238,8 +253,8 @@ function reportHtml(db: Database, row: any, mode: ReportMode, generatedBy: strin
   ${
     isDelivery
       ? `<h2>Ítems y repuestos</h2>
-         <table><thead><tr><th>Descripción</th><th class="right">Cant.</th><th class="right">Valor unit.</th><th class="right">Total</th></tr></thead>
-         <tbody>${itemRows || '<tr><td colspan="4" class="muted">Sin ítems registrados.</td></tr>'}</tbody></table>
+         <table><thead><tr><th>Descripción</th><th class="right">Cant.</th><th class="right">Valor unit.</th><th class="right">Total</th><th class="right">Garantía</th></tr></thead>
+         <tbody>${itemRows || '<tr><td colspan="5" class="muted">Sin ítems registrados.</td></tr>'}</tbody></table>
          <h2>Pagos</h2>
          <table><thead><tr><th>Método</th><th>Fecha</th><th class="right">Valor</th></tr></thead>
          <tbody>${paymentRows || '<tr><td colspan="3" class="muted">Sin pagos registrados.</td></tr>'}</tbody></table>
@@ -247,7 +262,7 @@ function reportHtml(db: Database, row: any, mode: ReportMode, generatedBy: strin
            <div class="field"><span>Total</span><strong class="total">${money(data.totalCents / 100)}</strong></div>
            <div class="field"><span>Pagado</span><strong>${money(data.paidCents / 100)}</strong></div>
            <div class="field"><span>Saldo</span><strong>${money(data.balanceCents / 100)}</strong></div>
-           <div class="field"><span>Garantía</span><strong>${escapeHtml(data.intake?.legal?.warrantyDays ?? data.legal.warrantyDays)} días</strong></div>
+           <div class="field"><span>Garantía de mano de obra</span><strong>${escapeHtml(data.intake?.legal?.warrantyDays ?? data.legal.warrantyDays)} días</strong></div>
          </div>`
       : `<h2>Cotización inicial</h2>
          <div class="box">

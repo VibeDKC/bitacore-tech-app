@@ -236,7 +236,8 @@ export function orderDto(db: Database, row: any) {
     type: item.type,
     description: item.description,
     quantity: Number(item.quantity),
-    unitPrice: money(item.unit_price_cents)
+    unitPrice: money(item.unit_price_cents),
+    warrantyDays: Number(item.warranty_days ?? 0)
   }))
   const payments = paymentRows.map(paymentDto)
   const itemsTotal = itemRows.reduce((sum, item) => sum + Number(item.unit_price_cents) * Number(item.quantity), 0)

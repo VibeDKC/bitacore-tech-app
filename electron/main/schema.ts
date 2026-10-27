@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS work_order_items (
   unit_price_cents INTEGER NOT NULL DEFAULT 0,
   product_id TEXT REFERENCES products(id),
   unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+  warranty_days INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 

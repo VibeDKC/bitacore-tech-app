@@ -46,8 +46,8 @@ export const DICTIONARY_TYPES = [
   },
   {
     value: 'service_type',
-    label: 'Tipos de servicio',
-    description: 'Catálogo de servicios técnicos del taller.'
+    label: 'Tipos de servicio y mantenimiento',
+    description: 'Servicios que aparecen como motivo de ingreso en la OT y en el inventario.'
   }
 ] as const
 

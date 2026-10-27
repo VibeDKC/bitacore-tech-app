@@ -16,11 +16,19 @@ function makeId(prefix: string) {
 }
 
 export function newRamModule(): TechnicalSheetRamModule {
-  return { id: makeId('ram'), type: '', capacity: '', speed: '', brand: '', warranty: '' }
+  return { id: makeId('ram'), type: '', capacity: '', speed: '', brand: '' }
 }
 
 export function newStorageDrive(): TechnicalSheetStorageDrive {
-  return { id: makeId('disk'), type: '', capacity: '', speed: '', model: '', health: '', warranty: '' }
+  return {
+    id: makeId('disk'),
+    type: '',
+    capacity: '',
+    speed: '',
+    model: '',
+    health: '',
+    healthNotApplicable: false
+  }
 }
 
 export function emptyTechnicalSheet(): TechnicalSheet {
@@ -37,6 +45,22 @@ export function emptyTechnicalSheet(): TechnicalSheet {
 
 function text(value: unknown) {
   return typeof value === 'string' ? value : ''
+}
+
+export function normalizeHealthPercent(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const parsed =
+    typeof value === 'number' ? value : Number(String(value).replace('%', '').replace(',', '.').trim())
+  if (!Number.isFinite(parsed)) return undefined
+  return Math.max(0, Math.min(100, Math.round(parsed)))
+}
+
+export function formatStorageHealth(row: TechnicalSheetStorageDrive) {
+  if (row.healthNotApplicable) return 'N/A'
+  if (typeof row.healthPercent === 'number' && Number.isFinite(row.healthPercent)) {
+    return `${Math.max(0, Math.min(100, Math.round(row.healthPercent)))}%`
+  }
+  return row.health?.trim() ?? ''
 }
 
 function normalizeCpu(value: unknown): TechnicalSheetCpu {
@@ -73,8 +97,7 @@ function normalizeRamRows(value: unknown): TechnicalSheetRamModule[] {
       type: text(item.type),
       capacity: text(item.capacity),
       speed: text(item.speed),
-      brand: text(item.brand),
-      warranty: text(item.warranty)
+      brand: text(item.brand)
     }))
 }
 
@@ -82,15 +105,23 @@ function normalizeStorageRows(value: unknown): TechnicalSheetStorageDrive[] {
   if (!Array.isArray(value)) return []
   return value
     .filter((item) => item && typeof item === 'object')
-    .map((item: any, index) => ({
-      id: typeof item.id === 'string' && item.id ? item.id : `disk_legacy_${index}`,
-      type: text(item.type),
-      capacity: text(item.capacity),
-      speed: text(item.speed),
-      model: text(item.model),
-      health: text(item.health),
-      warranty: text(item.warranty)
-    }))
+    .map((item: any, index) => {
+      const healthText = text(item.health)
+      const healthNotApplicable =
+        Boolean(item.healthNotApplicable) || healthText.trim().toUpperCase() === 'N/A'
+      const healthPercent =
+        normalizeHealthPercent(item.healthPercent) ?? normalizeHealthPercent(healthText)
+      return {
+        id: typeof item.id === 'string' && item.id ? item.id : `disk_legacy_${index}`,
+        type: text(item.type),
+        capacity: text(item.capacity),
+        speed: text(item.speed),
+        model: text(item.model),
+        health: healthNotApplicable || healthPercent !== undefined ? '' : healthText,
+        healthPercent,
+        healthNotApplicable
+      }
+    })
 }
 
 /**
@@ -151,21 +182,36 @@ export function sanitizeTechnicalSheet(value: TechnicalSheet): TechnicalSheet {
       type: row.type?.trim() ?? '',
       capacity: row.capacity?.trim() ?? '',
       speed: row.speed?.trim() ?? '',
-      brand: row.brand?.trim() ?? '',
-      warranty: row.warranty?.trim() ?? ''
+      brand: row.brand?.trim() ?? ''
     }))
     .filter((row) => Object.entries(row).some(([key, item]) => key !== 'id' && Boolean(item)))
   const storageDrives = (value.storageDrives ?? [])
-    .map((row) => ({
-      id: row.id,
-      type: row.type?.trim() ?? '',
-      capacity: row.capacity?.trim() ?? '',
-      speed: row.speed?.trim() ?? '',
-      model: row.model?.trim() ?? '',
-      health: row.health?.trim() ?? '',
-      warranty: row.warranty?.trim() ?? ''
-    }))
-    .filter((row) => Object.entries(row).some(([key, item]) => key !== 'id' && Boolean(item)))
+    .map((row) => {
+      const healthPercent =
+        normalizeHealthPercent(row.healthPercent) ?? normalizeHealthPercent(row.health)
+      const healthNotApplicable = Boolean(row.healthNotApplicable)
+      return {
+        id: row.id,
+        type: row.type?.trim() ?? '',
+        capacity: row.capacity?.trim() ?? '',
+        speed: row.speed?.trim() ?? '',
+        model: row.model?.trim() ?? '',
+        health: healthNotApplicable || healthPercent !== undefined ? '' : (row.health?.trim() ?? ''),
+        healthPercent: healthNotApplicable ? undefined : healthPercent,
+        healthNotApplicable
+      }
+    })
+    .filter((row) =>
+      Boolean(
+        row.type ||
+          row.capacity ||
+          row.speed ||
+          row.model ||
+          row.health ||
+          row.healthPercent !== undefined ||
+          row.healthNotApplicable
+      )
+    )
   return {
     os: value.os?.trim() ?? '',
     osNotVisible: Boolean(value.osNotVisible),
@@ -203,12 +249,17 @@ export function technicalSheetEntries(value: unknown): Array<[string, string]> {
   if (sheet.gpu?.notVisible) entries.push(['GPU', 'N/A'])
   else if (gpu) entries.push(['GPU', gpu])
   const ramRows = (sheet.ramModules ?? [])
-    .map((row) => [row.type, row.capacity, row.speed, row.brand, row.warranty].filter(Boolean).join(' '))
+    .map((row) => [row.type, row.capacity, row.speed, row.brand].filter(Boolean).join(' '))
     .filter(Boolean)
   if (sheet.ramNotVisible) entries.push(['RAM', 'N/A'])
   else if (ramRows.length) entries.push(['RAM', ramRows.join(' · ')])
   const storageRows = (sheet.storageDrives ?? [])
-    .map((row) => [row.type, row.capacity, row.speed, row.model, row.health, row.warranty].filter(Boolean).join(' '))
+    .map((row) => {
+      const health = formatStorageHealth(row)
+      return [row.type, row.capacity, row.speed, row.model, health ? `Salud: ${health}` : '']
+        .filter(Boolean)
+        .join(' ')
+    })
     .filter(Boolean)
   if (sheet.storageNotVisible) entries.push(['Almacenamiento', 'N/A'])
   else if (storageRows.length) entries.push(['Almacenamiento', storageRows.join(' · ')])

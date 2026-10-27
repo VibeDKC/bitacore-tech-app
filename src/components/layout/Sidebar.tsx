@@ -182,7 +182,7 @@ export function Sidebar({
           </div>
         </div>
         <p className="mt-3 px-1 text-center text-[9px] font-medium uppercase tracking-[0.14em] text-slate-300">
-          BitacoreTech Taller & POS · v1.7.0
+          BitacoreTech Taller & POS · v1.8.0
         </p>
       </div>
     </aside>

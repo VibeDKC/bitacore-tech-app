@@ -168,12 +168,14 @@ export function OrderDetailPage() {
     quantity: string
     unitPrice: string
     productId: string
+    warrantyDays: string
   }>({
     type: 'servicio',
     description: '',
     quantity: '1',
     unitPrice: '',
-    productId: ''
+    productId: '',
+    warrantyDays: ''
   })
 
   useEffect(() => {
@@ -420,15 +422,20 @@ export function OrderDetailPage() {
     setSaving(true)
     try {
       const quantity = Number(newItem.quantity) || 1
+      const warrantyDays =
+        newItem.type === 'repuesto' && newItem.productId
+          ? Math.max(0, Math.min(3650, Math.round(Number(newItem.warrantyDays) || 0)))
+          : 0
       const updated = await api.orders.addItem(order.id, {
         type: newItem.type,
         description: newItem.description.trim(),
         quantity,
         unitPrice: parseMoney(newItem.unitPrice),
-        productId: newItem.productId || null
+        productId: newItem.productId || null,
+        warrantyDays
       })
       applyOrder(updated)
-      setNewItem({ type: 'servicio', description: '', quantity: '1', unitPrice: '', productId: '' })
+      setNewItem({ type: 'servicio', description: '', quantity: '1', unitPrice: '', productId: '', warrantyDays: '' })
       setItemModal(false)
       toast.success('Ítem agregado a la OT')
       reload()
@@ -792,7 +799,7 @@ export function OrderDetailPage() {
                       Términos aceptados
                     </p>
                     <p className="mt-0.5 text-[9px] leading-relaxed text-brand-700/75">
-                      Snapshot inmutable del {formatDateTime(intake.legal.acceptedAt)} · garantía {intake.legal.warrantyDays} días · abandono {intake.legal.abandonmentDays} días.
+                      Snapshot inmutable del {formatDateTime(intake.legal.acceptedAt)} · garantía de mano de obra y repuestos del taller {intake.legal.warrantyDays} días · abandono {intake.legal.abandonmentDays} días.
                     </p>
                   </div>
                 </div>
@@ -874,7 +881,7 @@ export function OrderDetailPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-display text-[16px] font-bold text-ink">Diagnóstico técnico</h2>
-                <p className="mt-0.5 text-[11px] text-slate-400">Falla reportada, hallazgos y solución propuesta</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">Motivo de ingreso, hallazgos y solución propuesta</p>
               </div>
               <div className="flex items-center gap-2">
                 {can(role, 'useAI') ? (
@@ -905,7 +912,9 @@ export function OrderDetailPage() {
             </div>
 
             <div className="mt-4 rounded-xl border border-warning-100 bg-warning-50/60 p-3.5">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-warning-700">Reportado por el cliente</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-warning-700">
+                {intake?.serviceKind === 'mantenimiento' ? 'Servicio solicitado' : 'Reportado por el cliente'}
+              </p>
               <p className="mt-1.5 text-[12px] leading-relaxed text-slate-700">{order.reportedIssue}</p>
             </div>
 
@@ -1050,7 +1059,14 @@ export function OrderDetailPage() {
                 <tbody>
                   {items.map((item) => (
                     <tr key={item.id} className="border-b border-line/70 last:border-0">
-                      <td className="table-td pl-5 text-[12px] font-medium text-ink lg:pl-6">{item.description}</td>
+                      <td className="table-td pl-5 text-[12px] font-medium text-ink lg:pl-6">
+                        <p>{item.description}</p>
+                        {item.type === 'repuesto' && item.warrantyDays > 0 ? (
+                          <Badge variant="outline" className="mt-1">
+                            Garantía {item.warrantyDays} días
+                          </Badge>
+                        ) : null}
+                      </td>
                       <td className="table-td">
                         <Badge variant={item.type === 'servicio' ? 'brand' : 'sky'}>
                           {item.type === 'servicio' ? 'Servicio' : 'Repuesto'}
@@ -1334,7 +1350,14 @@ export function OrderDetailPage() {
             <select
               value={newItem.type}
               onChange={(event) =>
-                setNewItem({ ...newItem, type: event.target.value as 'servicio' | 'repuesto', productId: '', description: '', unitPrice: '' })
+                setNewItem({
+                  ...newItem,
+                  type: event.target.value as 'servicio' | 'repuesto',
+                  productId: '',
+                  description: '',
+                  unitPrice: '',
+                  warrantyDays: ''
+                })
               }
               className="field"
             >
@@ -1353,7 +1376,8 @@ export function OrderDetailPage() {
                     ...newItem,
                     productId: event.target.value,
                     description: product?.name ?? '',
-                    unitPrice: product ? String(product.price) : ''
+                    unitPrice: product ? String(product.price) : '',
+                    warrantyDays: product ? String(product.warrantyDays ?? 0) : ''
                   })
                 }}
                 className="field"
@@ -1366,8 +1390,23 @@ export function OrderDetailPage() {
                 ))}
               </select>
               <p className="mt-1 text-[9px] text-slate-400">
-                Al asociar un producto se descuenta del inventario y se registra el costo real.
+                Al asociar un producto se descuenta del inventario, se registra el costo real y se precarga su garantía.
               </p>
+            </label>
+          ) : null}
+          {newItem.type === 'repuesto' && newItem.productId ? (
+            <label className="block">
+              <span className="field-label">Garantía del repuesto (días)</span>
+              <input
+                value={newItem.warrantyDays}
+                onChange={(event) => setNewItem({ ...newItem, warrantyDays: event.target.value.replace(/\D/g, '') })}
+                inputMode="numeric"
+                className="field text-right tabular"
+                placeholder="0"
+              />
+              <span className="mt-1 block text-[9px] text-slate-400">
+                Se guarda como snapshot de esta OT. Solo se imprime para repuestos del inventario; 0 significa sin garantía.
+              </span>
             </label>
           ) : null}
           <label className="block">

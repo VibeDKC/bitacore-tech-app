@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.8.0 — 2026-10-26
+
+### Permisos y negocio
+- Nuevas capacidades `configureBusiness` y `managePermissions`.
+- El administrador puede editar nombre, NIT, DV, NIT extranjero, contacto, moneda y zona horaria.
+- El administrador puede ajustar los roles Administrador, Técnico y Cajero, pero solo conceder permisos que su propia cuenta ya tiene.
+- Los permisos exclusivos del propietario siguen bloqueados.
+- El propietario conserva la edición de cláusulas, garantía y abandono.
+- La identidad del negocio queda auditada y no crea una versión legal nueva.
+- Se impide que un administrador retire `managePermissions` al rol Administrador.
+
+### Recepción de la OT
+- Se eliminó el campo redundante **Componentes internos visibles**; la ficha técnica avanzada conserva esos datos.
+- Nuevo desplegable **Motivo de ingreso**:
+  - Falla de equipo, con el campo de falla reportada.
+  - Servicios de mantenimiento desde el diccionario `service_type`.
+- Si se elige un mantenimiento se oculta la falla y aparece un detalle opcional.
+- Las etiquetas de la OT, el comprobante y el reporte cambian a **Servicio solicitado** cuando aplica.
+- El diccionario se renombró a **Tipos de servicio y mantenimiento**.
+
+### Ficha técnica
+- La salud del disco se registra como porcentaje de benchmark (0–100 %) o N/A por unidad.
+- Se conservan los valores anteriores Bueno/Regular/Crítico como legado.
+- Se eliminaron los campos de garantía de RAM y almacenamiento: los componentes del cliente no llevan garantía.
+
+### Garantía de repuestos
+- Nueva columna `work_order_items.warranty_days` con migración 8.
+- La garantía se muestra solo para repuestos vinculados a un producto del inventario.
+- Se precarga desde `products.warranty_days` y se guarda como snapshot de la OT.
+- Los servicios y los repuestos escritos manualmente no llevan garantía.
+- La garantía del repuesto se imprime en el detalle de la OT, el reporte de entrega y la factura A4.
+- La garantía legal de mano de obra y repuestos del taller se mantiene.
+
+### Calidad
+- Aceptación 1.8.0: 13/13.
+- Migración 8 sobre copia de la base real: OK.
+- Regresión: 1.7.0 11/11, 1.6.1 12/12, 1.6.0 14/14, 1.5.0 12/12, F0/F1 8/8, F2/F3 15/15 y F4/F5 14/14.
+- Instalador `BitacoreTech-1.8.0-x64.exe`.
+
 ## 1.7.0 — 2026-10-26
 
 ### Credenciales del equipo

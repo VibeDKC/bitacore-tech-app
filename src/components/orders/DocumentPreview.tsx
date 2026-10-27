@@ -224,7 +224,11 @@ function TicketSheet({ order, data, variant }: { order: WorkOrder; data: Documen
         <Block label="Accesorios" value={data.accessories} />
         <Block label="Estado inicial" value={`${data.powerState}. ${data.conditionSummary}`} />
         <Block label="Seguridad" value={data.lockSummary} />
-        <Block label="Falla reportada" value={order.reportedIssue} strong />
+        <Block
+          label={order.intake?.serviceKind === 'mantenimiento' ? 'Servicio solicitado' : 'Falla reportada'}
+          value={order.reportedIssue}
+          strong
+        />
       </div>
 
       {data.estimate > 0 || data.diagnosticFee > 0 ? (
@@ -365,7 +369,15 @@ function A4Copy({
             <Block label="Estado de encendido" value={data.powerState} />
             <Block
               label="Condición física"
-              value={[data.conditionSummary, data.internalComponents ? `Interior: ${data.internalComponents}` : '', data.includesExternalDrives ? 'Incluye discos o periféricos externos' : ''].filter(Boolean).join(' · ')}
+              value={[
+                data.conditionSummary,
+                data.internalComponents && !data.conditionSummary.toLowerCase().includes('interior:')
+                  ? `Interior: ${data.internalComponents}`
+                  : '',
+                data.includesExternalDrives ? 'Incluye discos o periféricos externos' : ''
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             />
             <Block label="Bloqueo y autorización" value={data.lockSummary} />
           </div>
@@ -380,7 +392,9 @@ function A4Copy({
           ) : null}
 
           <div className="mt-1.5 rounded border border-black/30 px-2 py-1">
-            <p className="text-[6.5px] font-semibold uppercase tracking-[0.08em] opacity-60">Falla reportada por el cliente</p>
+            <p className="text-[6.5px] font-semibold uppercase tracking-[0.08em] opacity-60">
+              {order.intake?.serviceKind === 'mantenimiento' ? 'Servicio solicitado' : 'Falla reportada por el cliente'}
+            </p>
             <p className="mt-0.5 text-[8px] font-semibold leading-snug">{order.reportedIssue}</p>
             <div className="mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[7px]">
               {data.estimate > 0 ? <span>Presupuesto estimado: <b>{formatCurrency(data.estimate)}</b></span> : null}
@@ -404,7 +418,7 @@ function A4Copy({
 
           <div className="mt-1.5 border-t border-black/30 pt-1.5">
             <div className="flex items-center justify-between text-[6.5px]">
-              <span>Garantía de mano de obra y repuestos: {data.warrantyDays} días.</span>
+              <span>Garantía de mano de obra y repuestos del taller: {data.warrantyDays} días.</span>
               <span>Abandono: {data.abandonmentDays} días calendario.</span>
             </div>
             {data.evidenceCount > 0 ? (

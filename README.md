@@ -80,24 +80,27 @@ La purga crea primero un respaldo completo, elimina las fotografías de las OT p
 Los permisos se validan en el proceso principal de Electron, no solo en la interfaz.
 
 - **Propietario:** acceso total, utilidad neta, auditoría, restauración, purga y configuración maestra. Puede previsualizar la interfaz como otro rol sin cambiar sus permisos reales.
-- **Administrador:** operación completa, costos y margen bruto, usuarios base y configuración. No ve utilidad neta, auditoría, restauración ni purga.
+- **Administrador:** operación completa, costos y margen bruto, usuarios base, identidad del negocio y matriz de permisos. Puede ajustar los roles Administrador, Técnico y Cajero, pero solo conceder permisos que su propia cuenta ya tiene. No ve utilidad neta, auditoría, restauración ni purga.
 - **Técnico:** recepción, diagnóstico, órdenes, evidencias (agregar), inventario sin costos y clientes.
 - **Cajero:** POS, caja, inventario sin costos y clientes. Sin acceso a evidencias.
 
-Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. La contraseña, el PIN o el patrón del equipo del cliente nunca se almacenan: solo se registra el tipo de bloqueo y si el cliente autoriza el acceso.
+Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. Las cláusulas legales, la garantía y el abandono siguen siendo exclusivos del propietario. Las credenciales del equipo se guardan cifradas y temporales; se eliminan al entregar o cerrar la OT.
 
 ## Funcionalidad incluida
 
 - Dashboard por rol, alertas de stock y estado del taller.
-- Recepción dinámica de equipos por tipo (portátil, PC, consola, impresora, otro), accesorios, checklist, estado de encendido, bloqueo, falla y presupuesto.
+- Recepción dinámica de equipos por tipo (portátil, PC, consola, impresora, otro), accesorios, checklist, estado de encendido, bloqueo, motivo de ingreso y presupuesto.
 - Alta rápida de clientes y autocompletado por documento, teléfono o correo.
 - Evidencias fotográficas del estado del equipo al ingreso y durante la reparación, con verificación de integridad y exportación ZIP.
-- Órdenes de trabajo con repuestos, servicios, anticipos, descuentos, garantía, notas, estados e historial.
+- Órdenes de trabajo con repuestos, servicios, anticipos, descuentos, notas, estados e historial.
+- Motivo de ingreso condicional: **Falla de equipo** con descripción libre o un servicio de mantenimiento tomado del diccionario.
+- Garantía por repuesto del inventario, con snapshot de días en la OT, el reporte de entrega y la factura A4.
+- Salud de disco por porcentaje de benchmark o N/A; los componentes del cliente no llevan garantía.
 - Cobro al pasar a `entregado`, con libro de pagos y saldo separado del total. La entrega sin cobro requiere autorización y motivo auditado.
 - POS con carrito, descuento por porcentaje o valor, fidelidad automática, efectivo/tarjeta/mixto y factura interna sin IVA. El precio final nunca queda por debajo del costo de compra.
 - Catálogo ligero de equipos por cliente, con historial de OT y evidencias; QR interno opcional e inactivo por defecto.
 - Fidelidad configurable por cliente (porcentaje o valor, vigencia) y bloqueo de venta bajo costo.
-- Permisos por rol y excepciones por usuario, con auditoría y guardrails del propietario.
+- Permisos por rol y excepciones por usuario, configurables por el administrador dentro de sus propios permisos, con auditoría y guardrails del propietario.
 - NIT colombiano con DV automático y NIT extranjero opcional.
 - Respaldos exportables/importables en `.bctbackup` cifrado con contraseña; la contraseña se guarda cifrada con el almacén del sistema.
 - Sesión sin “recordar”: se cierra al cerrar la aplicación; duración máxima configurable por horas.
@@ -109,7 +112,7 @@ Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. La c
 - Caja con apertura, movimientos, arqueo por denominaciones y cierre de turno.
 - Reportes de ventas, compras, margen bruto, utilidad neta restringida y estadísticas por técnico.
 - Inventario con SKU, código de barras Code128, seriales, ubicaciones, stock mínimo y exportación CSV.
-- Configuración de negocio, usuarios, impresión, respaldos completos, cláusulas legales, IA/API y seguridad.
+- Configuración de negocio, usuarios, permisos, impresión, respaldos completos, cláusulas legales, IA/API y seguridad.
 - Cláusulas legales versionadas con snapshot inmutable por orden de trabajo.
 
 ## Impresión
@@ -138,9 +141,11 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.6.0` | Diccionarios, jerarquías, ficha estructurada, legado y permisos. |
 | `npm run test:acceptance:1.6.1` | Perfil propio, propietario invisible, equipos armados, orden del formulario y N/A. |
 | `npm run test:acceptance:1.7.0` | Credenciales cifradas, borrado automático, mensajes y reportes PDF. |
+| `npm run test:acceptance:1.8.0` | Permisos de admin, negocio, salud %, garantía de inventario y falla/mantenimiento. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
+| `npm run test:migration:1.8.0` | Migración 8, garantía por repuesto y nuevas capacidades. |
 
 ## Pruebas de aceptación
 
@@ -155,12 +160,14 @@ npm run test:acceptance:1.5.0
 npm run test:acceptance:1.6.0
 npm run test:acceptance:1.6.1
 npm run test:acceptance:1.7.0
+npm run test:acceptance:1.8.0
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
 npm run test:migration:1.7.0
+npm run test:migration:1.8.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK` y `11/11 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8 OK`, `15/15 OK`, `14/14 OK`, `12/12 OK`, `14/14 OK`, `12/12 OK`, `11/11 OK` y `13/13 OK`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -168,7 +175,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.7.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.8.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -183,11 +190,13 @@ El instalador queda en `release/` como `BitacoreTech-1.7.0-x64.exe`. La configur
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
 - El inventario permite editar referencias solo a administradores y propietario; el stock se mueve mediante ajustes auditados.
 - Las alertas de stock son opcionales por referencia y las referencias de prueba pueden quedar sin aviso.
-- Los diccionarios alimentan la ficha técnica, las categorías y ubicaciones de inventario, las categorías de proveedor y los tipos de servicio.
+- Los diccionarios alimentan la ficha técnica, las categorías y ubicaciones de inventario, las categorías de proveedor y los motivos de ingreso de la OT.
 - La ficha técnica estructurada se guarda como snapshot en cada OT; las OT anteriores conservan su texto original.
 - El propietario es invisible para los demás usuarios en Configuración y respaldos; su cuenta se administra desde Mi perfil.
 - Las torres y equipos “Otro” pueden registrarse como armados por partes con alias y código interno.
-- La ficha técnica admite N/A por componente cuando no es visible.
+- La ficha técnica admite N/A por componente cuando no es visible y la salud del disco se registra como porcentaje del benchmark o N/A.
+- Los componentes que ingresan con el equipo del cliente no llevan garantía. La garantía por repuesto aparece solo cuando se asocia un producto del inventario.
+- El admin puede editar la identidad del negocio y la matriz de permisos; las cláusulas, la garantía legal y el abandono siguen siendo del propietario.
 - Las credenciales del equipo son temporales, cifradas y se eliminan al entregar o cerrar la OT.
 - Los reportes de diagnóstico se generan en PDF A4 y usan las plantillas de Configuración → Mensajes; WhatsApp se abre con el mensaje, pero el PDF se adjunta manualmente.
 - La IA es opcional y su integración real (facturas, diagnóstico y resúmenes) sigue pendiente. Hoy solo existe la configuración y la huella de la clave; no se guarda la clave en texto plano.

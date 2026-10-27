@@ -169,6 +169,7 @@ export interface OrderItemInput {
   quantity: number
   unitPrice: number
   productId?: string | null
+  warrantyDays?: number
 }
 
 export interface SettleInput {
@@ -492,6 +493,11 @@ export const api = {
   permissions: {
     updateRole(role: Role, permissions: Array<{ capability: string; allowed: boolean }>) {
       return rpc<SettingsData>('permissions.updateRole', { role, permissions })
+    }
+  },
+  business: {
+    update(input: Partial<LegalConfig>) {
+      return rpc<LegalConfig>('business.update', input as Record<string, unknown>)
     }
   },
   legal: {
