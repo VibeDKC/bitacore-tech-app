@@ -7,6 +7,7 @@ export type BackendCapability =
   | 'manageAdmins'
   | 'manageStaff'
   | 'createBackup'
+  | 'importBackup'
   | 'restoreBackup'
   | 'purgeData'
   | 'configureLegal'
@@ -41,6 +42,7 @@ export const ALL_CAPABILITIES: BackendCapability[] = [
   'manageAdmins',
   'manageStaff',
   'createBackup',
+  'importBackup',
   'restoreBackup',
   'purgeData',
   'configureLegal',
@@ -99,6 +101,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'manageAdmins',
     'manageStaff',
     'createBackup',
+    'importBackup',
     'restoreBackup',
     'purgeData',
     'configureLegal',
@@ -134,6 +137,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'managePermissions',
     'manageDictionaries',
     'createBackup',
+    'importBackup',
     'annulInvoice',
     'closeCash',
     'createPurchase',

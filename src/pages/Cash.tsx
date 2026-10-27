@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowDownLeft,
+  ArrowRightLeft,
   ArrowUpRight,
   Banknote,
   Calculator,
@@ -15,10 +16,11 @@ import {
   ShieldCheck,
   TrendingDown,
   TrendingUp,
-  Wallet
+  Wallet,
+  X
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CashMovement, PaymentMethod } from '@/types'
+import type { CashMovement, CashTransfer, PaymentMethod } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDateTime, formatTime } from '@/lib/format'
@@ -54,8 +56,19 @@ export function CashPage() {
   const [closeOpen, setCloseOpen] = useState(false)
   const [openTurnOpen, setOpenTurnOpen] = useState(false)
   const [counts, setCounts] = useState<Record<number, string>>({})
-  const [baseAmount, setBaseAmount] = useState('200000')
+  const [countMode, setCountMode] = useState<'total' | 'denominations'>('total')
+  const [totalCount, setTotalCount] = useState('')
+  const [baseAmount, setBaseAmount] = useState('0')
   const [saving, setSaving] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferAmount, setTransferAmount] = useState('')
+  const [transferNotes, setTransferNotes] = useState('')
+  const [transferSaving, setTransferSaving] = useState(false)
+  const [approveTarget, setApproveTarget] = useState<CashTransfer | null>(null)
+  const [approveAmount, setApproveAmount] = useState('')
+  const [approvalSaving, setApprovalSaving] = useState(false)
+  const [rejectTarget, setRejectTarget] = useState<CashTransfer | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
   const [movementForm, setMovementForm] = useState({
     type: 'ingreso' as 'ingreso' | 'egreso',
     method: 'Efectivo' as PaymentMethod,
@@ -83,8 +96,21 @@ export function CashPage() {
     }
   }, [session])
 
-  const counted = denominations.reduce((sum, denomination) => sum + denomination * (Number(counts[denomination]) || 0), 0)
+  const denominationCount = denominations.reduce(
+    (sum, denomination) => sum + denomination * (Number(counts[denomination]) || 0),
+    0
+  )
+  const counted =
+    countMode === 'total' ? parseMoney(totalCount) : denominationCount
   const difference = counted - summary.expected
+  const pendingTransfers = data?.pendingTransfers ?? []
+  const myTransfers = data?.myTransfers ?? []
+  const incomeAccount = data?.incomeAccount ?? null
+
+  useEffect(() => {
+    if (current || !data?.lastClosed) return
+    setBaseAmount(String(Math.round(data.lastClosed.carryOver ?? 0)))
+  }, [current, data?.lastClosed])
 
   const filteredMovements = movements.filter((movement) => {
     if (filter === 'todos') return true
@@ -127,7 +153,7 @@ export function CashPage() {
       const session = await api.cash.open(parseMoney(baseAmount))
       setData({ current: session, lastClosed: null, movements: session.movements })
       setOpenTurnOpen(false)
-      setBaseAmount('200000')
+      setBaseAmount(String(Math.round(data?.lastClosed?.carryOver ?? 0)))
       toast.success(`Turno #${session.id} abierto`, {
         description: `Base inicial ${formatCurrency(session.initialAmount)} · ${session.user}`
       })
@@ -140,24 +166,106 @@ export function CashPage() {
 
   async function closeCash() {
     if (saving) return
-    if (!counted) {
-      toast.error('Ingresa el efectivo contado')
-      return
-    }
     setSaving(true)
     try {
       const closed = await api.cash.close(counted)
       setData({ current: null, lastClosed: closed, movements: [] })
       setCloseOpen(false)
       setCounts({})
+      setTotalCount('')
+      setCountMode('total')
       toast.success('Turno cerrado correctamente', {
-        description: `Contado ${formatCurrency(counted)} · Diferencia ${formatCurrency(closed.difference ?? 0)}`
+        description: `Contado ${formatCurrency(counted)} · Diferencia ${formatCurrency(closed.difference ?? 0)}${
+          closed.difference ? ' · revisa el descuadre' : ''
+        }`
       })
       reload()
     } catch (failure) {
       toast.error('No se pudo cerrar la caja', { description: errorMessage(failure) })
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function requestTransfer() {
+    const amount = parseMoney(transferAmount)
+    if (amount <= 0) {
+      toast.error('Ingresa el valor a trasladar')
+      return
+    }
+    setTransferSaving(true)
+    try {
+      const result = await api.cash.transferRequest({
+        amount,
+        notes: transferNotes.trim() || undefined
+      })
+      setTransferOpen(false)
+      setTransferAmount('')
+      setTransferNotes('')
+      const approved = result.transfer.status === 'aprobado'
+      toast.success(
+        approved ? 'Traslado aprobado y registrado' : 'Solicitud de traslado enviada',
+        {
+          description: approved
+            ? `${formatCurrency(result.transfer.approvedAmount ?? amount)} · ${result.transfer.accountName}`
+            : `${formatCurrency(amount)} · pendiente de aprobación del administrador de la cuenta`
+        }
+      )
+      reload()
+    } catch (failure) {
+      toast.error('No se pudo trasladar el efectivo', { description: errorMessage(failure) })
+    } finally {
+      setTransferSaving(false)
+    }
+  }
+
+  function openApprove(transfer: CashTransfer) {
+    setApproveTarget(transfer)
+    setApproveAmount(String(Math.round(transfer.requestedAmount)))
+  }
+
+  async function approveTransfer() {
+    if (!approveTarget) return
+    const amount = parseMoney(approveAmount)
+    if (amount <= 0) {
+      toast.error('Ingresa el valor aprobado')
+      return
+    }
+    setApprovalSaving(true)
+    try {
+      await api.cash.transferApprove(approveTarget.id, amount)
+      toast.success('Traslado aprobado', {
+        description: `${formatCurrency(amount)} · ${approveTarget.accountName}`
+      })
+      setApproveTarget(null)
+      setApproveAmount('')
+      reload()
+    } catch (failure) {
+      toast.error('No se pudo aprobar el traslado', { description: errorMessage(failure) })
+    } finally {
+      setApprovalSaving(false)
+    }
+  }
+
+  async function rejectTransfer() {
+    if (!rejectTarget) return
+    if (rejectReason.trim().length < 3) {
+      toast.error('Escribe el motivo del rechazo')
+      return
+    }
+    setApprovalSaving(true)
+    try {
+      await api.cash.transferReject(rejectTarget.id, rejectReason.trim())
+      toast.success('Traslado rechazado', {
+        description: 'El efectivo permanece en caja.'
+      })
+      setRejectTarget(null)
+      setRejectReason('')
+      reload()
+    } catch (failure) {
+      toast.error('No se pudo rechazar el traslado', { description: errorMessage(failure) })
+    } finally {
+      setApprovalSaving(false)
     }
   }
 
@@ -259,6 +367,19 @@ export function CashPage() {
                   Nuevo movimiento
                 </Button>
                 {canClose ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setTransferAmount('')
+                      setTransferNotes('')
+                      setTransferOpen(true)
+                    }}
+                    leftIcon={<ArrowRightLeft className="h-4 w-4" />}
+                  >
+                    Trasladar a banco
+                  </Button>
+                ) : null}
+                {canClose ? (
                   <Button onClick={() => setCloseOpen(true)} leftIcon={<Calculator className="h-4 w-4" />}>
                     Cerrar caja
                   </Button>
@@ -305,6 +426,92 @@ export function CashPage() {
           </div>
         </div>
       </div>
+
+      {pendingTransfers.length || myTransfers.length || incomeAccount ? (
+        <div className="card p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 font-display text-[14px] font-bold text-ink">
+                <Landmark className="h-4 w-4 text-brand-600" /> Cuenta de ingresos
+              </h2>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                {incomeAccount
+                  ? `${incomeAccount.name}${incomeAccount.responsibleUserName ? ` · responsable ${incomeAccount.responsibleUserName}` : ' · sin responsable asignado'}`
+                  : 'Configura la cuenta de ingresos en Diccionarios.'}
+              </p>
+            </div>
+            {current && canClose && incomeAccount ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setTransferAmount('')
+                  setTransferNotes('')
+                  setTransferOpen(true)
+                }}
+                leftIcon={<ArrowRightLeft className="h-3.5 w-3.5" />}
+              >
+                Trasladar efectivo
+              </Button>
+            ) : null}
+          </div>
+
+          {pendingTransfers.length ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-warning-700">
+                Pendientes de tu aprobación
+              </p>
+              {pendingTransfers.map((transfer) => (
+                <div
+                  key={transfer.id}
+                  className="flex flex-col gap-2 rounded-xl border border-warning-100 bg-warning-50/50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-ink">
+                      {formatCurrency(transfer.requestedAmount)} · {transfer.accountName}
+                    </p>
+                    <p className="text-[9px] text-slate-500">
+                      {transfer.requestedByName} · {formatDateTime(transfer.createdAt)}
+                      {transfer.notes ? ` · ${transfer.notes}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Button size="sm" onClick={() => openApprove(transfer)}>
+                      Aprobar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setRejectTarget(transfer)
+                        setRejectReason('')
+                      }}
+                    >
+                      Rechazar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {myTransfers.filter((transfer) => transfer.status === 'pendiente').length ? (
+            <div className="mt-3 space-y-1 rounded-xl bg-slate-50 px-3 py-2.5">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                Tus solicitudes pendientes
+              </p>
+              {myTransfers
+                .filter((transfer) => transfer.status === 'pendiente')
+                .map((transfer) => (
+                  <p key={transfer.id} className="text-[10px] text-slate-600">
+                    {formatCurrency(transfer.requestedAmount)} · {transfer.accountName} · espera aprobación de{' '}
+                    {incomeAccount?.responsibleUserName ?? 'un administrador'}
+                  </p>
+                ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-5">
         {statCards.map((stat) => {
@@ -593,7 +800,7 @@ export function CashPage() {
           />
         </label>
         <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
-          La base inicial se suma al efectivo esperado y queda registrada en la auditoría.
+          La base puede ser 0 y es editable. Se sugiere el efectivo que quedó para base en el turno anterior.
         </p>
       </Modal>
 
@@ -607,13 +814,13 @@ export function CashPage() {
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[9px] uppercase tracking-[0.1em] text-slate-400">Diferencia</p>
-              <p className={cn('tabular font-display text-lg font-bold', !counted ? 'text-slate-400' : difference === 0 ? 'text-success-600' : 'text-danger-600')}>
-                {counted ? formatCurrency(difference) : '—'}
+              <p className={cn('tabular font-display text-lg font-bold', difference === 0 ? 'text-success-600' : 'text-danger-600')}>
+                {formatCurrency(difference)}
               </p>
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => setCloseOpen(false)}>Cancelar</Button>
-              <Button onClick={() => void closeCash()} loading={saving} disabled={!counted} leftIcon={<CheckCircle2 className="h-4 w-4" />}>
+              <Button onClick={() => void closeCash()} loading={saving} leftIcon={<CheckCircle2 className="h-4 w-4" />}>
                 Confirmar cierre
               </Button>
             </div>
@@ -632,32 +839,172 @@ export function CashPage() {
             </div>
           </div>
 
-          <div>
-            <p className="field-label">Conteo por denominación</p>
-            <div className="divide-y divide-line rounded-xl border border-line">
-              {denominations.map((denomination) => (
-                <div key={denomination} className="flex items-center gap-3 px-3.5 py-2">
-                  <span className="flex-1 text-[11px] text-slate-600">{formatCurrency(denomination)}</span>
-                  <input
-                    value={counts[denomination] ?? ''}
-                    onChange={(event) => setCounts({ ...counts, [denomination]: event.target.value })}
-                    inputMode="numeric"
-                    placeholder="0"
-                    className="h-8 w-16 rounded-lg border border-line bg-white px-2 text-right text-[11px] tabular outline-none focus:border-brand-300 focus:ring-4 focus:ring-brand-100/60"
-                  />
-                  <span className="tabular w-24 text-right text-[11px] font-semibold text-ink">
-                    {formatCurrency(denomination * (Number(counts[denomination]) || 0))}
-                  </span>
-                </div>
-              ))}
+          <SegmentedTabs
+            value={countMode}
+            onChange={setCountMode}
+            options={[
+              { value: 'total', label: 'Conteo total' },
+              { value: 'denominations', label: 'Por denominación' }
+            ]}
+          />
+
+          {countMode === 'total' ? (
+            <div className="rounded-xl border border-line bg-slate-50/60 p-3.5">
+              <label className="block">
+                <span className="field-label">Total contado en efectivo</span>
+                <input
+                  value={totalCount}
+                  onChange={(event) => setTotalCount(event.target.value)}
+                  inputMode="numeric"
+                  placeholder="0"
+                  className="field text-right text-base font-semibold tabular"
+                />
+              </label>
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                Puedes cerrar con 0 si no hay efectivo. No es obligatorio contar billete por billete.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div>
+              <p className="field-label">Conteo por denominación</p>
+              <div className="divide-y divide-line rounded-xl border border-line">
+                {denominations.map((denomination) => (
+                  <div key={denomination} className="flex items-center gap-3 px-3.5 py-2">
+                    <span className="flex-1 text-[11px] text-slate-600">{formatCurrency(denomination)}</span>
+                    <input
+                      value={counts[denomination] ?? ''}
+                      onChange={(event) => setCounts({ ...counts, [denomination]: event.target.value })}
+                      inputMode="numeric"
+                      placeholder="0"
+                      className="h-8 w-16 rounded-lg border border-line bg-white px-2 text-right text-[11px] tabular outline-none focus:border-brand-300 focus:ring-4 focus:ring-brand-100/60"
+                    />
+                    <span className="tabular w-24 text-right text-[11px] font-semibold text-ink">
+                      {formatCurrency(denomination * (Number(counts[denomination]) || 0))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between rounded-xl border border-line bg-slate-50/60 px-3.5 py-3">
             <span className="text-[11px] font-semibold text-slate-600">Total contado</span>
             <span className="tabular font-display text-xl font-bold text-ink">{formatCurrency(counted)}</span>
           </div>
+          <p className="text-[9px] leading-relaxed text-slate-400">
+            El efectivo contado quedará como base del próximo turno. Si necesitas depositarlo, usa “Trasladar a banco”.
+          </p>
         </div>
+      </Modal>
+
+      <Modal
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        title="Trasladar efectivo al banco"
+        description={incomeAccount ? `${incomeAccount.name} · responsable ${incomeAccount.responsibleUserName ?? 'sin asignar'}` : 'Configura la cuenta de ingresos'}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setTransferOpen(false)} disabled={transferSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void requestTransfer()} loading={transferSaving} leftIcon={<ArrowRightLeft className="h-4 w-4" />}>
+              Trasladar
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="field-label">Valor a trasladar</span>
+            <input
+              value={transferAmount}
+              onChange={(event) => setTransferAmount(event.target.value)}
+              inputMode="numeric"
+              placeholder="0"
+              className="field text-right text-base font-semibold tabular"
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Nota (opcional)</span>
+            <input
+              value={transferNotes}
+              onChange={(event) => setTransferNotes(event.target.value)}
+              className="field"
+              placeholder="Ej. consignación parcial"
+            />
+          </label>
+          <div className="rounded-xl border border-line bg-slate-50 px-3.5 py-2.5 text-[10px] leading-relaxed text-slate-500">
+            {incomeAccount?.responsibleUserId
+              ? 'Si no eres el administrador vinculado a la cuenta, el traslado queda pendiente de aprobación.'
+              : 'La cuenta no tiene administrador responsable; el traslado quedará pendiente.'}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(approveTarget)}
+        onClose={() => setApproveTarget(null)}
+        title="Aprobar traslado a banco"
+        description={approveTarget ? `${approveTarget.accountName} · ${approveTarget.requestedByName}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setApproveTarget(null)} disabled={approvalSaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void approveTransfer()} loading={approvalSaving} leftIcon={<CheckCircle2 className="h-4 w-4" />}>
+              Aprobar traslado
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-line bg-slate-50 px-3.5 py-2.5 text-[10px] text-slate-500">
+            Solicitado: <b className="text-ink">{formatCurrency(approveTarget?.requestedAmount ?? 0)}</b>. Puedes ajustar el valor antes de aprobar.
+          </div>
+          <label className="block">
+            <span className="field-label">Valor aprobado</span>
+            <input
+              value={approveAmount}
+              onChange={(event) => setApproveAmount(event.target.value)}
+              inputMode="numeric"
+              className="field text-right text-base font-semibold tabular"
+            />
+          </label>
+          <p className="text-[9px] leading-relaxed text-warning-700">
+            La aprobación requiere una caja abierta y descuenta el efectivo del turno actual.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(rejectTarget)}
+        onClose={() => setRejectTarget(null)}
+        title="Rechazar traslado"
+        description={rejectTarget ? `${rejectTarget.accountName} · ${formatCurrency(rejectTarget.requestedAmount)}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setRejectTarget(null)} disabled={approvalSaving}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={() => void rejectTransfer()} loading={approvalSaving} leftIcon={<X className="h-4 w-4" />}>
+              Rechazar
+            </Button>
+          </div>
+        }
+      >
+        <label className="block">
+          <span className="field-label">Motivo del rechazo</span>
+          <textarea
+            value={rejectReason}
+            onChange={(event) => setRejectReason(event.target.value)}
+            rows={3}
+            className="field resize-none"
+            placeholder="Ej. el valor no coincide con el depósito"
+          />
+        </label>
       </Modal>
     </div>
   )

@@ -1,5 +1,6 @@
 import type { Database } from './database'
 import { productImageUrl } from './productImages'
+import { paymentReceiptUrl } from './paymentReceipts'
 import { evidenceDto, evidenceSetHash } from './evidence'
 import { calculateNitDv } from './nit'
 
@@ -178,7 +179,8 @@ export function categoryTone(category: string) {
   return map[category] ?? 'from-slate-500/15 to-slate-500/5 text-slate-600'
 }
 
-export function paymentDto(row: any) {
+export function paymentDto(db: Database, row: any) {
+  const receipt = db.get<any>('SELECT * FROM payment_receipts WHERE payment_id = ?', row.id)
   return {
     id: row.id,
     number: row.number,
@@ -188,10 +190,23 @@ export function paymentDto(row: any) {
     received: row.received_cents === null ? null : money(row.received_cents),
     change: money(row.change_cents),
     reference: row.reference,
+    incomeAccountId: row.income_account_id ?? null,
+    incomeAccountName: row.income_account_name ?? null,
     isException: bool(row.is_exception),
     exceptionReason: row.exception_reason,
     createdAt: row.created_at,
-    createdByName: row.created_by_name
+    createdByName: row.created_by_name,
+    createdByRole: row.created_by_role ?? null,
+    receipt: receipt
+      ? {
+          url: paymentReceiptUrl(String(receipt.path)),
+          filename: receipt.filename,
+          mimeType: receipt.mime_type,
+          size: Number(receipt.size_bytes ?? 0),
+          uploadedAt: receipt.created_at,
+          uploadedByName: receipt.uploaded_by_name ?? null
+        }
+      : null
   }
 }
 
@@ -209,9 +224,13 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
       itemType: line.item_type === 'servicio' ? 'servicio' : 'producto'
     }))
   const payment = db.get<any>(
-    'SELECT received_cents, change_cents FROM payments WHERE invoice_id = ? ORDER BY created_at DESC LIMIT 1',
+    `SELECT id, received_cents, change_cents, income_account_name
+     FROM payments WHERE invoice_id = ? ORDER BY created_at DESC LIMIT 1`,
     row.id
   )
+  const receipt = payment?.id
+    ? db.get<any>('SELECT * FROM payment_receipts WHERE payment_id = ?', payment.id)
+    : null
   return {
     id: row.id,
     number: row.number,
@@ -233,7 +252,21 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
     received: payment ? money(payment.received_cents ?? row.total_cents) : money(row.total_cents),
     change: payment ? money(payment.change_cents ?? 0) : 0,
     notes: row.notes,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    createdByName: row.created_by_name ?? null,
+    createdByRole: row.created_by_role ?? null,
+    incomeAccountName: payment?.income_account_name ?? null,
+    paymentId: payment?.id ?? null,
+    paymentReceipt: receipt
+      ? {
+          url: paymentReceiptUrl(String(receipt.path)),
+          filename: receipt.filename,
+          mimeType: receipt.mime_type,
+          size: Number(receipt.size_bytes ?? 0),
+          uploadedAt: receipt.created_at,
+          uploadedByName: receipt.uploaded_by_name ?? null
+        }
+      : null
   }
 }
 
@@ -286,7 +319,7 @@ export function orderDto(db: Database, row: any) {
     unitPrice: money(item.unit_price_cents),
     warrantyDays: Number(item.warranty_days ?? 0)
   }))
-  const payments = paymentRows.map(paymentDto)
+  const payments = paymentRows.map((payment) => paymentDto(db, payment))
   const itemsTotal = itemRows.reduce((sum, item) => sum + Number(item.unit_price_cents) * Number(item.quantity), 0)
   const totalCents = itemsTotal > 0 ? itemsTotal : toCents(intake?.estimate ?? 0)
   const paidCents = paymentRows.reduce((sum, payment) => sum + Number(payment.amount_cents), 0)
@@ -413,6 +446,7 @@ export function cashSessionDto(db: Database, row: any) {
     counted: row.counted_cents === null ? null : money(row.counted_cents),
     difference: row.difference_cents === null ? null : money(row.difference_cents),
     expected: money(row.status === 'cerrado' ? row.expected_cents : expectedCents),
+    carryOver: money(row.carry_over_cents ?? 0),
     cashSales: money(cashSales),
     digitalSales: money(
       sales.filter((movement) => movement.method !== 'Efectivo').reduce((sum, movement) => sum + Number(movement.amount_cents), 0)

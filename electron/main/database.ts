@@ -85,6 +85,25 @@ export class Database {
     this.ensureColumn('products', 'service_type', 'TEXT')
     this.ensureColumn('products', 'condition', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'origin', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('dictionary_nodes', 'channel', 'TEXT')
+    this.ensureColumn('dictionary_nodes', 'responsible_user_id', 'TEXT REFERENCES users(id)')
+    this.ensureColumn(
+      'dictionary_nodes',
+      'linked_income_account_id',
+      'TEXT REFERENCES dictionary_nodes(id)'
+    )
+    this.ensureColumn('invoices', 'created_by_name', 'TEXT')
+    this.ensureColumn('invoices', 'created_by_role', 'TEXT')
+    this.ensureColumn('purchases', 'created_by_name', 'TEXT')
+    this.ensureColumn('purchases', 'created_by_role', 'TEXT')
+    this.ensureColumn('purchases', 'payment_account', 'TEXT')
+    this.ensureColumn('purchases', 'payment_account_id', 'TEXT')
+    this.ensureColumn('supplier_payments', 'payment_account', 'TEXT')
+    this.ensureColumn('supplier_payments', 'payment_account_id', 'TEXT')
+    this.ensureColumn('payments', 'income_account_id', 'TEXT')
+    this.ensureColumn('payments', 'income_account_name', 'TEXT')
+    this.ensureColumn('payments', 'created_by_role', 'TEXT')
+    this.ensureColumn('cash_sessions', 'carry_over_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('products', 'supplier_sku', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'image_path', 'TEXT')
     this.ensureColumn('products', 'image_thumb_path', 'TEXT')
@@ -108,10 +127,11 @@ export class Database {
     this.ensurePurchasesNumberIndex()
     this.backfillPurchaseItemIva()
     this.backfillPurchasePayments()
+    this.backfillAuditAttribution()
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -223,6 +243,42 @@ export class Database {
            AND NOT EXISTS (SELECT 1 FROM supplier_payments sp WHERE sp.purchase_id = p.id)`
       )
       this.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('purchase_payment_backfill', '1')")
+    })
+  }
+
+  private backfillAuditAttribution() {
+    const done = this.get<{ value: string }>(
+      "SELECT value FROM meta WHERE key = 'attribution_backfill_v13'"
+    )
+    if (done?.value === '1') return
+    this.tx(() => {
+      this.run(
+        `UPDATE invoices
+         SET created_by_name = COALESCE(
+               (SELECT name FROM users WHERE users.id = invoices.created_by),
+               CASE WHEN created_by IS NULL THEN NULL ELSE 'Usuario eliminado' END
+             ),
+             created_by_role = COALESCE(
+               (SELECT role FROM users WHERE users.id = invoices.created_by),
+               CASE WHEN created_by IS NULL THEN NULL ELSE '' END
+             )
+         WHERE created_by_name IS NULL OR created_by_role IS NULL`
+      )
+      this.run(
+        `UPDATE purchases
+         SET created_by_name = COALESCE(
+               (SELECT name FROM users WHERE users.id = purchases.created_by),
+               CASE WHEN created_by IS NULL THEN NULL ELSE 'Usuario eliminado' END
+             ),
+             created_by_role = COALESCE(
+               (SELECT role FROM users WHERE users.id = purchases.created_by),
+               CASE WHEN created_by IS NULL THEN NULL ELSE '' END
+             )
+         WHERE created_by_name IS NULL OR created_by_role IS NULL`
+      )
+      this.run(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('attribution_backfill_v13', '1')"
+      )
     })
   }
 

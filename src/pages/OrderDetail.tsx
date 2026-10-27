@@ -20,6 +20,7 @@ import {
   MapPin,
   MessageCircle,
   Package,
+  Paperclip,
   Phone,
   Plus,
   Printer,
@@ -55,6 +56,7 @@ import { DocumentPreviewModal } from '@/components/orders/DocumentPreview'
 import { EvidenceGallery } from '@/components/evidence/EvidenceGallery'
 import { EvidenceCapture } from '@/components/evidence/EvidenceCapture'
 import type { EvidenceDraft } from '@/lib/evidence'
+import { PaymentReceiptField, type ReceiptDraft } from '@/components/payments/PaymentReceiptField'
 import { cn } from '@/lib/utils'
 
 const paymentMethods: PaymentMethod[] = ['Efectivo', 'Tarjeta', 'Transferencia', 'Mixto']
@@ -157,6 +159,8 @@ export function OrderDetailPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentReference, setPaymentReference] = useState('')
+  const [paymentReceipt, setPaymentReceipt] = useState<ReceiptDraft | null>(null)
+  const [settleReceipt, setSettleReceipt] = useState<ReceiptDraft | null>(null)
   const [settleDiscountType, setSettleDiscountType] = useState<'percent' | 'amount'>('percent')
   const [settleDiscountInput, setSettleDiscountInput] = useState('')
   const [depositMethod, setDepositMethod] = useState<PaymentMethod>('Efectivo')
@@ -376,6 +380,7 @@ export function OrderDetailPage() {
     setSettleDiscountType('percent')
     setSettleDiscountInput('')
     setReceived(String(settleBalance))
+    setSettleReceipt(null)
     setInvoiceModal(true)
   }
 
@@ -465,11 +470,19 @@ export function OrderDetailPage() {
       const updated = await api.orders.addPayment(order.id, {
         amount,
         method: depositMethod,
-        reference: paymentReference.trim() || undefined
+        reference: paymentReference.trim() || undefined,
+        receipt: paymentReceipt
+          ? {
+              dataUrl: paymentReceipt.dataUrl,
+              name: paymentReceipt.name,
+              mimeType: paymentReceipt.mimeType
+            }
+          : undefined
       })
       applyOrder(updated)
       setPaymentAmount('')
       setPaymentReference('')
+      setPaymentReceipt(null)
       setPaymentModal(false)
       toast.success('Anticipo registrado', {
         description: `${formatCurrency(amount)} · ${depositMethod}. El saldo se actualizó en la OT.`
@@ -548,12 +561,21 @@ export function OrderDetailPage() {
         noCharge,
         exceptionReason: noCharge ? exceptionReason.trim() : undefined,
         discountType: noCharge ? undefined : loyaltyActive ? loyaltyType : settleDiscountType,
-        discountValue: noCharge ? 0 : loyaltyActive ? loyaltyValue : Number(settleDiscountInput) || 0
+        discountValue: noCharge ? 0 : loyaltyActive ? loyaltyValue : Number(settleDiscountInput) || 0,
+        receipt:
+          !noCharge && settleReceipt
+            ? {
+                dataUrl: settleReceipt.dataUrl,
+                name: settleReceipt.name,
+                mimeType: settleReceipt.mimeType
+              }
+            : undefined
       })
       applyOrder(updated)
       setInvoiceModal(false)
       setNoCharge(false)
       setExceptionReason('')
+      setSettleReceipt(null)
       if (noCharge) {
         toast.success('Equipo entregado sin cobro', {
           description: 'La excepción quedó registrada en la bitácora y en la auditoría.'
@@ -1180,7 +1202,17 @@ export function OrderDetailPage() {
                 <p className="mt-0.5 text-[10px] text-slate-400">Libro de pagos de la OT</p>
               </div>
               {canDeposit ? (
-                <Button variant="secondary" size="sm" onClick={() => setPaymentModal(true)} leftIcon={<Plus className="h-3.5 w-3.5" />}>
+                <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setPaymentAmount('')
+                  setPaymentReference('')
+                  setPaymentReceipt(null)
+                  setPaymentModal(true)
+                }}
+                leftIcon={<Plus className="h-3.5 w-3.5" />}
+              >
                   Anticipo
                 </Button>
               ) : null}
@@ -1217,6 +1249,15 @@ export function OrderDetailPage() {
                             </p>
                             {payment.reference ? (
                               <p className="text-[9px] text-slate-400">Ref. {payment.reference}</p>
+                            ) : null}
+                            {payment.receipt ? (
+                              <button
+                                type="button"
+                                onClick={() => void api.payments.openReceipt(payment.id)}
+                                className="focus-ring mt-1 inline-flex items-center gap-1 rounded-md text-[9px] font-semibold text-brand-600 hover:text-brand-700"
+                              >
+                                <Paperclip className="h-2.5 w-2.5" /> Ver comprobante
+                              </button>
                             ) : null}
                           </div>
                         </div>
@@ -1508,6 +1549,11 @@ export function OrderDetailPage() {
               className="field"
             />
           </label>
+          <PaymentReceiptField
+            value={paymentReceipt}
+            onChange={setPaymentReceipt}
+            disabled={depositing}
+          />
           <div className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-[10px] leading-relaxed text-slate-500">
             El anticipo se registra en caja y queda en el libro de pagos. No modifica el total de la OT: solo reduce el saldo.
           </div>
@@ -1678,6 +1724,14 @@ export function OrderDetailPage() {
                 <span className="tabular font-semibold text-ink">{formatCurrency(change)}</span>
               </div>
             </div>
+          ) : null}
+
+          {!noCharge ? (
+            <PaymentReceiptField
+              value={settleReceipt}
+              onChange={setSettleReceipt}
+              disabled={settling}
+            />
           ) : null}
 
           <div className={cn('rounded-xl border p-3.5', noCharge ? 'border-danger-200 bg-danger-50/60' : 'border-line bg-white')}>

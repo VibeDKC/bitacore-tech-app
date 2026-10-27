@@ -12,7 +12,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { DICTIONARY_TYPES, type DictionaryNode, type DictionaryType } from '@/types'
+import { DICTIONARY_TYPES, type AppUser, type DictionaryNode, type DictionaryType } from '@/types'
 import { api, errorMessage } from '@/lib/backend'
 import { dictionaryChildren, dictionaryTypeLabel, flattenDictionaryTree } from '@/lib/dictionaries'
 import { Badge } from '@/components/ui/Badge'
@@ -25,7 +25,13 @@ interface NodeEditor {
   parentId?: string | null
 }
 
-export function DictionariesPanel({ canManage }: { canManage: boolean }) {
+export function DictionariesPanel({
+  canManage,
+  users = []
+}: {
+  canManage: boolean
+  users?: AppUser[]
+}) {
   const [nodes, setNodes] = useState<DictionaryNode[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -34,6 +40,9 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
   const [form, setForm] = useState({
     name: '',
     code: '',
+    channel: 'Transferencia',
+    responsibleUserId: '',
+    linkedIncomeAccountId: '',
     parentId: '',
     sortOrder: '0',
     active: true
@@ -61,6 +70,14 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
   const typeNodes = useMemo(() => nodes.filter((node) => node.type === type), [nodes, type])
   const rows = useMemo(() => flattenDictionaryTree(nodes, type), [nodes, type])
   const typeInfo = DICTIONARY_TYPES.find((item) => item.value === type)
+  const incomeAccounts = useMemo(
+    () => nodes.filter((node) => node.type === 'income_account' && node.active),
+    [nodes]
+  )
+  const adminUsers = useMemo(
+    () => users.filter((user) => user.role === 'admin' && user.active),
+    [users]
+  )
 
   function descendantsOf(id: string) {
     const ids = new Set<string>([id])
@@ -82,6 +99,9 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
     setForm({
       name: '',
       code: '',
+      channel: 'Transferencia',
+      responsibleUserId: '',
+      linkedIncomeAccountId: '',
       parentId: parentId ?? '',
       sortOrder: String(siblings.length + 1),
       active: true
@@ -93,6 +113,9 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
     setForm({
       name: node.name,
       code: node.code ?? '',
+      channel: node.channel ?? 'Transferencia',
+      responsibleUserId: node.responsibleUserId ?? '',
+      linkedIncomeAccountId: node.linkedIncomeAccountId ?? '',
       parentId: node.parentId ?? '',
       sortOrder: String(node.sortOrder),
       active: node.active
@@ -118,6 +141,14 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
           payload.code = form.code.trim() || null
           payload.parentId = form.parentId || null
         }
+        if (editor.node.type === 'purchase_payment_account') {
+          payload.channel = form.channel
+          payload.linkedIncomeAccountId = form.linkedIncomeAccountId || null
+        }
+        if (editor.node.type === 'income_account') {
+          payload.channel = 'Digital'
+          payload.responsibleUserId = form.responsibleUserId || null
+        }
         await api.dictionaries.update(editor.node.id, payload)
         toast.success('Diccionario actualizado', { description: form.name.trim() })
       } else {
@@ -125,6 +156,13 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
           type,
           name: form.name.trim(),
           code: form.code.trim() || null,
+          channel: type === 'income_account' ? 'Digital' : form.channel,
+          responsibleUserId:
+            type === 'income_account' ? form.responsibleUserId || null : undefined,
+          linkedIncomeAccountId:
+            type === 'purchase_payment_account'
+              ? form.linkedIncomeAccountId || null
+              : undefined,
           parentId: form.parentId || null,
           sortOrder: Number(form.sortOrder) || 0,
           active: form.active
@@ -424,6 +462,61 @@ export function DictionariesPanel({ canManage }: { canManage: boolean }) {
               placeholder="windows_11"
             />
           </label>
+          {type === 'purchase_payment_account' ? (
+            <>
+              <label className="block">
+                <span className="field-label">Canal</span>
+                <select
+                  value={form.channel}
+                  onChange={(event) => setForm({ ...form, channel: event.target.value })}
+                  className="field"
+                >
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Tarjeta">Tarjeta</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">Cuenta de ingresos vinculada</span>
+                <select
+                  value={form.linkedIncomeAccountId}
+                  onChange={(event) =>
+                    setForm({ ...form, linkedIncomeAccountId: event.target.value })
+                  }
+                  className="field"
+                >
+                  <option value="">No afecta cuenta de ingresos</option>
+                  {incomeAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
+          {type === 'income_account' ? (
+            <label className="block sm:col-span-2">
+              <span className="field-label">Administrador responsable</span>
+              <select
+                value={form.responsibleUserId}
+                onChange={(event) =>
+                  setForm({ ...form, responsibleUserId: event.target.value })
+                }
+                className="field"
+              >
+                <option value="">Sin responsable</option>
+                {adminUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[9px] text-slate-400">
+                Solo puede existir una cuenta de ingresos activa. Este administrador aprueba los traslados de efectivo.
+              </span>
+            </label>
+          ) : null}
           <label className="block">
             <span className="field-label">Orden</span>
             <input

@@ -19,6 +19,7 @@ import type {
   BackupRecord,
   CashCurrentResponse,
   CashSession,
+  CashTransfer,
   ChartPoint,
   Customer,
   DashboardData,
@@ -187,6 +188,7 @@ export interface SettleInput {
   noCharge?: boolean
   exceptionReason?: string
   reference?: string
+  receipt?: { dataUrl: string; name: string; mimeType: string }
   discountType?: 'percent' | 'amount'
   discountValue?: number
 }
@@ -200,6 +202,7 @@ export interface PosSaleInput {
   discountPercent?: number
   received?: number
   reference?: string
+  receipt?: { dataUrl: string; name: string; mimeType: string }
 }
 
 export interface NewOrderInput {
@@ -352,7 +355,15 @@ export const api = {
     addItem(id: string, item: Omit<OrderItemInput, 'id'>) {
       return rpc<WorkOrder>('orders.addItem', { id, ...item })
     },
-    addPayment(id: string, input: { amount: number; method: PaymentMethod; reference?: string }) {
+    addPayment(
+      id: string,
+      input: {
+        amount: number
+        method: PaymentMethod
+        reference?: string
+        receipt?: { dataUrl: string; name: string; mimeType: string }
+      }
+    ) {
       return rpc<WorkOrder>('orders.addPayment', { id, ...input })
     },
     settle(input: SettleInput) {
@@ -432,8 +443,25 @@ export const api = {
     addMovement(input: { type: 'ingreso' | 'egreso'; method: PaymentMethod; amount: number; reason: string }) {
       return rpc<CashSession>('cash.addMovement', input as unknown as Record<string, unknown>)
     },
-    close(counted: number, notes?: string) {
-      return rpc<CashSession>('cash.close', { counted, notes })
+    close(counted: number, notes?: string, carryOver?: number) {
+      return rpc<CashSession>('cash.close', { counted, notes, carryOver })
+    },
+    transferRequest(input: { amount: number; notes?: string }) {
+      return rpc<{ transfer: CashTransfer; pendingTransfers: CashTransfer[] }>(
+        'cash.transferRequest',
+        input as unknown as Record<string, unknown>
+      )
+    },
+    transferApprove(id: string, amount: number) {
+      return rpc<{ transfer: CashTransfer }>('cash.transferApprove', { id, amount })
+    },
+    transferReject(id: string, reason: string) {
+      return rpc<{ transfer: CashTransfer }>('cash.transferReject', { id, reason })
+    }
+  },
+  payments: {
+    openReceipt(paymentId: string) {
+      return rpc<{ opened: boolean }>('payments.openReceipt', { paymentId })
     }
   },
   purchases: {
@@ -462,6 +490,7 @@ export const api = {
       purchaseId: string
       amount: number
       method: string
+      paymentAccountId?: string
       date?: string
       notes?: string
     }) {
@@ -512,7 +541,10 @@ export const api = {
     get() {
       return rpc<SettingsData>('settings.get')
     },
-    updateSection(section: 'print' | 'ai' | 'security' | 'business' | 'equipment' | 'messages', value: Record<string, unknown>) {
+    updateSection(
+      section: 'print' | 'ai' | 'security' | 'business' | 'equipment' | 'messages' | 'tracking',
+      value: Record<string, unknown>
+    ) {
       return rpc<SettingsData>('settings.updateSection', { section, value })
     }
   },
@@ -525,6 +557,9 @@ export const api = {
       name: string
       parentId?: string | null
       code?: string | null
+      channel?: string | null
+      responsibleUserId?: string | null
+      linkedIncomeAccountId?: string | null
       sortOrder?: number
       active?: boolean
     }) {
@@ -532,7 +567,16 @@ export const api = {
     },
     update(
       id: string,
-      input: { name?: string; parentId?: string | null; code?: string | null; sortOrder?: number; active?: boolean }
+      input: {
+        name?: string
+        parentId?: string | null
+        code?: string | null
+        channel?: string | null
+        responsibleUserId?: string | null
+        linkedIncomeAccountId?: string | null
+        sortOrder?: number
+        active?: boolean
+      }
     ) {
       return rpc<DictionaryNode>('dictionaries.update', { id, ...input })
     },

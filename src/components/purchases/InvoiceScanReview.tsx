@@ -30,7 +30,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { ApiError, api, errorMessage } from '@/lib/backend'
 import { formatCurrency } from '@/lib/format'
-import { dictionaryValues } from '@/lib/dictionaries'
+import { activeDictionaryNodes, dictionaryValues } from '@/lib/dictionaries'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
@@ -182,6 +182,7 @@ export function InvoiceScanReviewModal({
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false)
   const [paymentCondition, setPaymentCondition] = useState<'contado' | 'credito'>('contado')
   const [paymentMethod, setPaymentMethod] = useState('Transferencia')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
   const [initialPayment, setInitialPayment] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [duplicateInfo, setDuplicateInfo] = useState<{
@@ -214,6 +215,7 @@ export function InvoiceScanReviewModal({
     setDifferenceConfirmed(false)
     setPaymentCondition('contado')
     setPaymentMethod('Transferencia')
+    setPaymentAccountId('')
     setInitialPayment('')
     setDueDate('')
     setNewSupplierOpen(false)
@@ -261,6 +263,16 @@ export function InvoiceScanReviewModal({
     const values = dictionaryValues(dictionaries, 'supplier_category')
     return values.length ? values : ['Repuestos', 'Tecnología', 'Servicios']
   }, [dictionaries])
+  const purchaseAccounts = useMemo(
+    () => activeDictionaryNodes(dictionaries, 'purchase_payment_account'),
+    [dictionaries]
+  )
+  useEffect(() => {
+    if (!purchaseAccounts.length) return
+    const preferred =
+      purchaseAccounts.find((account) => account.channel === paymentMethod) ?? purchaseAccounts[0]
+    setPaymentAccountId((current) => current || preferred.id)
+  }, [purchaseAccounts, paymentMethod])
   const modelOptions = useMemo(() => {
     const entries = new Map<string, AiModelOption>()
     if (aiSettings.model) {
@@ -364,11 +376,14 @@ export function InvoiceScanReviewModal({
     setDifferenceConfirmed(false)
     setDuplicateConfirmed(false)
     setPaymentCondition(result.invoice.paymentCondition ?? 'contado')
-    setPaymentMethod(
+    const nextMethod =
       result.invoice.paymentMethod &&
-        ['Efectivo', 'Transferencia', 'Tarjeta'].includes(result.invoice.paymentMethod)
+      ['Efectivo', 'Transferencia', 'Tarjeta'].includes(result.invoice.paymentMethod)
         ? result.invoice.paymentMethod
         : 'Transferencia'
+    setPaymentMethod(nextMethod)
+    setPaymentAccountId(
+      (purchaseAccounts.find((account) => account.channel === nextMethod) ?? purchaseAccounts[0])?.id ?? ''
     )
     setInitialPayment('')
     setDueDate('')
@@ -661,6 +676,7 @@ export function InvoiceScanReviewModal({
         duplicateConfirmed,
         paymentCondition,
         paymentMethod,
+        paymentAccountId: paymentAccountId || undefined,
         initialPayment: paymentCondition === 'credito' ? parseAmount(initialPayment) : 0,
         dueDate:
           paymentCondition === 'credito' && dueDate
@@ -1422,15 +1438,21 @@ export function InvoiceScanReviewModal({
                 </select>
               </label>
               <label className="block">
-                <span className="field-label">Medio de pago</span>
+                <span className="field-label">Cuenta de pago</span>
                 <select
-                  value={paymentMethod}
-                  onChange={(event) => setPaymentMethod(event.target.value)}
+                  value={paymentAccountId}
+                  onChange={(event) => {
+                    const account = purchaseAccounts.find((item) => item.id === event.target.value)
+                    setPaymentAccountId(event.target.value)
+                    setPaymentMethod(account?.channel ?? 'Transferencia')
+                  }}
                   className="field"
                 >
-                  <option value="Transferencia">Transferencia</option>
-                  <option value="Efectivo">Efectivo</option>
-                  <option value="Tarjeta">Tarjeta</option>
+                  {purchaseAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} · {account.channel ?? 'Transferencia'}
+                    </option>
+                  ))}
                 </select>
               </label>
               {paymentCondition === 'credito' ? (

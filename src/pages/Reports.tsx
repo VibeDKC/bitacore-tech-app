@@ -523,6 +523,167 @@ export function ReportsPage() {
         </div>
       </div>
 
+      <div className="grid gap-3.5 xl:grid-cols-2">
+        <div className="card overflow-hidden">
+          <div className="border-b border-line px-5 py-4">
+            <h2 className="font-display text-[15px] font-bold text-ink">Ventas por usuario</h2>
+            <p className="mt-0.5 text-[10px] text-slate-400">Quién realizó la venta y cuánto generó.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px]">
+              <thead>
+                <tr className="border-b border-line bg-slate-50/60">
+                  <th className="table-th pl-5">Usuario</th>
+                  <th className="table-th">Rol</th>
+                  <th className="table-th text-right">Facturas</th>
+                  <th className="table-th text-right">Ventas</th>
+                  {canGross ? <th className="table-th pr-5 text-right">Margen</th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {report.salesByUser.map((row) => (
+                  <tr key={row.userId} className="border-b border-line/70 last:border-0">
+                    <td className="table-td pl-5 text-[11px] font-semibold text-ink">{row.name}</td>
+                    <td className="table-td text-[10px] text-slate-500">{row.role}</td>
+                    <td className="table-td text-right text-[10px] tabular">{formatNumber(row.invoices)}</td>
+                    <td className="table-td text-right text-[10px] font-semibold tabular">{formatCurrency(row.sales)}</td>
+                    {canGross ? (
+                      <td className="table-td pr-5 text-right text-[10px] tabular">
+                        {row.margin === null ? '—' : formatCurrency(row.margin)}
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+                {!report.salesByUser.length ? (
+                  <tr>
+                    <td colSpan={canGross ? 5 : 4} className="px-5 py-8 text-center text-[10px] text-slate-400">
+                      Sin ventas en el periodo.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card overflow-hidden">
+          <div className="border-b border-line px-5 py-4">
+            <h2 className="font-display text-[15px] font-bold text-ink">Producción por técnico</h2>
+            <p className="mt-0.5 text-[10px] text-slate-400">OTs entregadas y facturadas por técnico responsable.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px]">
+              <thead>
+                <tr className="border-b border-line bg-slate-50/60">
+                  <th className="table-th pl-5">Técnico</th>
+                  <th className="table-th text-right">OTs</th>
+                  <th className="table-th text-right">Ventas</th>
+                  {canGross ? <th className="table-th pr-5 text-right">Margen</th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {report.technicianRevenue.map((row) => (
+                  <tr key={row.userId} className="border-b border-line/70 last:border-0">
+                    <td className="table-td pl-5 text-[11px] font-semibold text-ink">{row.name}</td>
+                    <td className="table-td text-right text-[10px] tabular">{formatNumber(row.orders)}</td>
+                    <td className="table-td text-right text-[10px] font-semibold tabular">{formatCurrency(row.sales)}</td>
+                    {canGross ? (
+                      <td className="table-td pr-5 text-right text-[10px] tabular">
+                        {row.margin === null ? '—' : formatCurrency(row.margin)}
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+                {!report.technicianRevenue.length ? (
+                  <tr>
+                    <td colSpan={canGross ? 4 : 3} className="px-5 py-8 text-center text-[10px] text-slate-400">
+                      Sin OTs facturadas en el periodo.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {report.purchaseTrackingEnabled ? (
+          <div className="card overflow-hidden xl:col-span-2">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="font-display text-[15px] font-bold text-ink">Compras por usuario</h2>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                Quién compró, cuánto y el margen potencial estimado con el precio de venta actual.
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px]">
+                <thead>
+                  <tr className="border-b border-line bg-slate-50/60">
+                    <th className="table-th pl-5">Comprador</th>
+                    <th className="table-th">Rol</th>
+                    <th className="table-th text-right">Compras</th>
+                    <th className="table-th text-right">Ítems</th>
+                    <th className="table-th text-right">Total</th>
+                    <th className="table-th pr-5 text-right">Margen estimado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.purchasesByUser.map((row) => (
+                    <tr key={row.userId} className="border-b border-line/70 last:border-0">
+                      <td className="table-td pl-5 text-[11px] font-semibold text-ink">{row.name}</td>
+                      <td className="table-td text-[10px] text-slate-500">{row.role}</td>
+                      <td className="table-td text-right text-[10px] tabular">{formatNumber(row.purchases)}</td>
+                      <td className="table-td text-right text-[10px] tabular">{formatNumber(row.items)}</td>
+                      <td className="table-td text-right text-[10px] font-semibold tabular">{formatCurrency(row.total)}</td>
+                      <td className="table-td pr-5 text-right text-[10px] tabular">
+                        {row.estimatedMargin === null ? '—' : formatCurrency(row.estimatedMargin)}
+                      </td>
+                    </tr>
+                  ))}
+                  {!report.purchasesByUser.length ? (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-8 text-center text-[10px] text-slate-400">
+                        Sin compras en el periodo.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {report.accountSummary.length ? (
+          <div className="card overflow-hidden xl:col-span-2">
+            <div className="border-b border-line px-5 py-4">
+              <h2 className="font-display text-[15px] font-bold text-ink">Cuenta de ingresos</h2>
+              <p className="mt-0.5 text-[10px] text-slate-400">Ingresos digitales, traslados de efectivo y egresos vinculados.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px]">
+                <thead>
+                  <tr className="border-b border-line bg-slate-50/60">
+                    <th className="table-th pl-5">Cuenta</th>
+                    <th className="table-th text-right">Ingresos</th>
+                    <th className="table-th text-right">Egresos</th>
+                    <th className="table-th pr-5 text-right">Saldo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.accountSummary.map((row) => (
+                    <tr key={row.accountName} className="border-b border-line/70 last:border-0">
+                      <td className="table-td pl-5 text-[11px] font-semibold text-ink">{row.accountName}</td>
+                      <td className="table-td text-right text-[10px] tabular text-success-600">{formatCurrency(row.income)}</td>
+                      <td className="table-td text-right text-[10px] tabular text-danger-600">{formatCurrency(row.expenses)}</td>
+                      <td className="table-td pr-5 text-right text-[10px] font-semibold tabular">{formatCurrency(row.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       <div className="flex flex-col items-start justify-between gap-2 rounded-2xl border border-line bg-white px-4 py-3 shadow-soft sm:flex-row sm:items-center">
         <div className="flex items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">

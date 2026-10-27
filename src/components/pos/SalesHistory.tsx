@@ -4,6 +4,7 @@ import {
   Download,
   Eye,
   History,
+  Paperclip,
   Printer,
   ReceiptText,
   Search,
@@ -290,6 +291,7 @@ export function SalesHistory({
                 <th className="table-th">Cliente</th>
                 <th className="table-th">Tipo</th>
                 <th className="table-th">Método</th>
+                <th className="table-th">Vendedor</th>
                 <th className="table-th">Estado</th>
                 <th className="table-th text-right">Total</th>
                 <th className="table-th pr-5 text-right lg:pr-6">Acciones</th>
@@ -314,6 +316,11 @@ export function SalesHistory({
                     <Badge variant={invoice.type === 'ot' ? 'sky' : 'brand'}>{invoice.type === 'ot' ? 'OT' : 'POS'}</Badge>
                   </td>
                   <td className="table-td text-[11px] text-slate-500">{invoice.method}</td>
+                  <td className="table-td">
+                    <span className="text-[10px] font-medium text-slate-600">
+                      {invoice.createdByName ?? 'Sin usuario'}
+                    </span>
+                  </td>
                   <td className="table-td">
                     <Badge variant={statusVariant(invoice)}>{invoice.status === 'activa' ? 'Activa' : 'Anulada'}</Badge>
                   </td>
@@ -404,12 +411,14 @@ export function SalesHistory({
       >
         {selected ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
               {[
                 ['Subtotal', formatCurrency(selected.subtotal ?? selected.total)],
                 ['Descuento', `- ${formatCurrency(selected.discount ?? 0)}`],
                 ['Total', formatCurrency(selected.total)],
-                ['Método', selected.method]
+                ['Método', selected.method],
+                ['Vendedor', selected.createdByName ?? 'Sin usuario'],
+                ['Cuenta digital', selected.incomeAccountName ?? '—']
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-line bg-slate-50/60 p-3">
                   <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</p>
@@ -417,6 +426,17 @@ export function SalesHistory({
                 </div>
               ))}
             </div>
+
+            {selected.paymentReceipt && selected.paymentId ? (
+              <button
+                type="button"
+                onClick={() => void api.payments.openReceipt(selected.paymentId!)}
+                className="focus-ring flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5 text-[10px] font-semibold text-brand-700"
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+                Ver comprobante: {selected.paymentReceipt.filename}
+              </button>
+            ) : null}
 
             <div>
               <p className="field-label">Líneas</p>

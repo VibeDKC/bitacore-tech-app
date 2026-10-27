@@ -15,6 +15,7 @@ import { EVIDENCE_SCHEME, resolveEvidenceFile } from './evidence'
 import { handleRpc } from './rpc'
 import { RpcError } from './permissions'
 import { resolveProductImageFile } from './productImages'
+import { resolvePaymentReceiptFile } from './paymentReceipts'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
@@ -101,12 +102,15 @@ function registerEvidenceProtocol() {
       const relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, '')
       const isEvidence = relativePath.startsWith('evidence/')
       const isProductImage = relativePath.startsWith('product-images/')
-      if (!isEvidence && !isProductImage) {
+      const isPaymentReceipt = relativePath.startsWith('payment-receipts/')
+      if (!isEvidence && !isProductImage && !isPaymentReceipt) {
         return new Response('Archivo no encontrado', { status: 404 })
       }
       const absolutePath = isProductImage
         ? resolveProductImageFile(app.getPath('userData'), relativePath)
-        : resolveEvidenceFile(app.getPath('userData'), relativePath)
+        : isPaymentReceipt
+          ? resolvePaymentReceiptFile(app.getPath('userData'), relativePath)
+          : resolveEvidenceFile(app.getPath('userData'), relativePath)
       if (!fs.existsSync(absolutePath)) {
         return new Response('Archivo no encontrado', { status: 404 })
       }

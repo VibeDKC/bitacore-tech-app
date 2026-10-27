@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.11.0 — 2026-10-27
+
+### Cuentas de pago
+- Lista única de cuentas de compra con canal Efectivo, Transferencia o Tarjeta.
+- Cuenta de ingresos única, activa y vinculada a un administrador responsable.
+- Vinculación de cuentas de compra a la cuenta de ingresos.
+- Las compras y abonos con cuenta vinculada descuentan de la cuenta de ingresos.
+- QR, transferencia y Bre-B se enrutan a la cuenta de ingresos sin cambiar el método del POS.
+- Los cobros digitales se rechazan si no hay una cuenta de ingresos activa.
+
+### Caja
+- Base inicial 0 por defecto y editable.
+- Conteo total o por denominaciones.
+- Cierre con 0 y diferencia negativa.
+- Carry-over del efectivo contado al siguiente turno.
+- Traslado de efectivo a banco con aprobación del administrador responsable.
+- Aprobación con monto editable, rechazo con motivo y notificaciones.
+- La aprobación exige caja abierta.
+
+### Comprobantes
+- Un comprobante por pago en POS y OT.
+- Imágenes PNG/JPEG/WebP o PDF de hasta 8 MB.
+- Almacenamiento local y apertura con la aplicación del sistema.
+- Inclusión en respaldo completo, respaldo cifrado, restauración y purga.
+
+### Trazabilidad y reportes
+- Vendedor y rol en facturas; comprador y rol en compras.
+- Reportes de ventas por usuario, producción por técnico y compras por usuario.
+- Margen estimado de compras con el precio de venta actual.
+- Interruptor de rastreo de compras sin borrar la atribución.
+- Rendimiento personal en Dashboard, sin costos para técnicos ni cajeros.
+- Administradores disponibles como técnicos; superadmin excluido.
+
+### Permisos y respaldos
+- Los administradores importan `.bctbackup` con la contraseña del archivo.
+- Los administradores no pueden configurar, revelar ni copiar la contraseña de respaldo.
+- Solo el propietario administra la contraseña y las restauraciones locales.
+- Migración 13 con cuentas, atribución, comprobantes y tablas de caja.
+
+### Calidad
+- Aceptación 1.11.0: 34/34.
+- Smoke empaquetado 1.11.0: 34/34.
+- Migración 13 sobre copia de la base real: OK.
+- Regresión: 1.10.3 26/26 y F4/F5 14/14.
+- Instalador `BitacoreTech-1.11.0-x64.exe`.
+
 ## 1.10.2 — 2026-10-27
 
 ### SKU y datos de proveedor

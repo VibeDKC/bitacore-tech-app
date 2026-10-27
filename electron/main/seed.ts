@@ -77,6 +77,75 @@ export function ensureReferenceData(db: Database) {
   })
 }
 
+function ensurePaymentDictionaries(db: Database) {
+  const nowIso = now()
+  const insert = (
+    type: string,
+    name: string,
+    code: string,
+    options: {
+      system?: boolean
+      active?: boolean
+      channel?: string
+      responsibleUserId?: string | null
+      linkedIncomeAccountId?: string | null
+      sort?: number
+    } = {}
+  ) => {
+    const existing = db.get<{ id: string }>(
+      "SELECT id FROM dictionary_nodes WHERE type = ? AND code = ?",
+      type,
+      code
+    )
+    if (existing) return existing.id
+    const id = `dict_${sha256(`${type}|${code}|${name.toLowerCase()}`).slice(0, 20)}`
+    db.run(
+      `INSERT INTO dictionary_nodes
+        (id, parent_id, type, code, channel, name, sort_order, active, system,
+         responsible_user_id, linked_income_account_id, created_at, updated_at)
+       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      type,
+      code,
+      options.channel ?? code,
+      name,
+      options.sort ?? 0,
+      options.active === false ? 0 : 1,
+      options.system === false ? 0 : 1,
+      options.responsibleUserId ?? null,
+      options.linkedIncomeAccountId ?? null,
+      nowIso,
+      nowIso
+    )
+    return id
+  }
+
+  const admin = db.get<{ id: string }>(
+    "SELECT id FROM users WHERE role = 'admin' AND active = 1 ORDER BY created_at ASC LIMIT 1"
+  )
+  const incomeAccountId = insert('income_account', 'Cuenta de ingresos', 'cuenta_ingresos', {
+    system: true,
+    active: Boolean(admin),
+    channel: 'Digital',
+    responsibleUserId: admin?.id ?? null,
+    sort: 1
+  })
+  ;[
+    ['Efectivo', 'efectivo', 'Efectivo'],
+    ['Transferencia', 'transferencia', 'Transferencia'],
+    ['Tarjeta', 'tarjeta', 'Tarjeta'],
+    ['Cuenta de ingresos', 'cuenta_ingresos_compra', 'Transferencia']
+  ].forEach(([name, code, channel], index) =>
+    insert('purchase_payment_account', name, code, {
+      system: true,
+      active: true,
+      channel,
+      linkedIncomeAccountId: name === 'Cuenta de ingresos' ? incomeAccountId : null,
+      sort: index + 1
+    })
+  )
+}
+
 function ensureSupplementalDictionaries(db: Database) {
   const done = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'supplemental_dictionaries_seeded'")
   if (done?.value === '1') return
@@ -132,6 +201,7 @@ function ensureSupplementalDictionaries(db: Database) {
  */
 export function ensureDictionaries(db: Database) {
   ensureSupplementalDictionaries(db)
+  ensurePaymentDictionaries(db)
   const done = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'dictionaries_seeded'")
   if (done?.value === '1') return
   const nowIso = now()

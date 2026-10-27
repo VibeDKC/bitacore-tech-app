@@ -25,7 +25,7 @@ import { formatCurrency, formatDate } from '@/lib/format'
 import { calculateNitDv } from '@/lib/nit'
 import { downloadCsv } from '@/lib/download'
 import { api, errorMessage } from '@/lib/backend'
-import { dictionaryValues } from '@/lib/dictionaries'
+import { activeDictionaryNodes, dictionaryValues } from '@/lib/dictionaries'
 import { useApi } from '@/lib/useApi'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -54,6 +54,7 @@ interface PurchaseForm {
   status: Purchase['status']
   paymentCondition: 'contado' | 'credito'
   paymentMethod: string
+  paymentAccountId: string
   initialPayment: string
   dueDate: string
   lines: PurchaseLine[]
@@ -89,6 +90,10 @@ export function PurchasesPage() {
     const names = dictionaryValues(data?.dictionaries ?? [], 'supplier_category')
     return names.length ? names : ['Repuestos']
   }, [data?.dictionaries])
+  const purchaseAccounts = useMemo(
+    () => activeDictionaryNodes(data?.dictionaries ?? [], 'purchase_payment_account'),
+    [data?.dictionaries]
+  )
 
   const [tab, setTab] = useState<'compras' | 'proveedores'>('compras')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -105,6 +110,7 @@ export function PurchasesPage() {
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     method: 'Transferencia',
+    paymentAccountId: '',
     date: new Date().toISOString().slice(0, 10),
     notes: ''
   })
@@ -123,14 +129,36 @@ export function PurchasesPage() {
     status: 'recibida',
     paymentCondition: 'contado',
     paymentMethod: 'Transferencia',
+    paymentAccountId: '',
     initialPayment: '',
     dueDate: '',
     lines: [{ ...emptyLine }]
   })
 
+  useEffect(() => {
+    if (!purchaseAccounts.length) return
+    const preferred =
+      purchaseAccounts.find((account) => account.channel === 'Transferencia') ?? purchaseAccounts[0]
+    setForm((current) =>
+      current.paymentAccountId
+        ? current
+        : {
+            ...current,
+            paymentAccountId: preferred.id,
+            paymentMethod: preferred.channel ?? 'Transferencia'
+          }
+    )
+    setPaymentForm((current) =>
+      current.paymentAccountId ? current : { ...current, paymentAccountId: preferred.id }
+    )
+  }, [purchaseAccounts])
+
   const canCreate = can(role, 'createPurchase')
   const canScan = canCreate && can(role, 'useAI')
   const selected = purchases.find((purchase) => purchase.id === selectedId) ?? null
+  const selectedPurchaseAccount = purchaseAccounts.find(
+    (account) => account.id === form.paymentAccountId
+  )
   const visiblePurchases = useMemo(
     () => (supplierFilter ? purchases.filter((purchase) => purchase.supplierId === supplierFilter) : purchases),
     [purchases, supplierFilter]
@@ -275,7 +303,8 @@ export function PurchasesPage() {
         date: new Date(`${form.date}T12:00:00`).toISOString(),
         status: form.status,
         paymentCondition: form.paymentCondition,
-        paymentMethod: form.paymentMethod,
+        paymentMethod: selectedPurchaseAccount?.channel ?? form.paymentMethod,
+        paymentAccountId: form.paymentAccountId || undefined,
         initialPayment:
           form.paymentCondition === 'credito' ? parseMoney(form.initialPayment) : 0,
         dueDate:
@@ -291,7 +320,8 @@ export function PurchasesPage() {
         date: new Date().toISOString().slice(0, 10),
         status: 'recibida',
         paymentCondition: 'contado',
-        paymentMethod: 'Transferencia',
+        paymentMethod: selectedPurchaseAccount?.channel ?? 'Transferencia',
+        paymentAccountId: selectedPurchaseAccount?.id ?? '',
         initialPayment: '',
         dueDate: '',
         lines: [{ ...emptyLine }]
@@ -311,7 +341,8 @@ export function PurchasesPage() {
     setPaymentTarget(purchase)
     setPaymentForm({
       amount: String(Math.round(purchase.balance ?? 0)),
-      method: 'Transferencia',
+      method: purchaseAccounts[0]?.channel ?? 'Transferencia',
+      paymentAccountId: purchaseAccounts[0]?.id ?? '',
       date: new Date().toISOString().slice(0, 10),
       notes: ''
     })
@@ -330,6 +361,7 @@ export function PurchasesPage() {
         purchaseId: paymentTarget.id,
         amount,
         method: paymentForm.method,
+        paymentAccountId: paymentForm.paymentAccountId || undefined,
         date: new Date(`${paymentForm.date}T12:00:00`).toISOString(),
         notes: paymentForm.notes.trim() || undefined
       })
@@ -761,7 +793,13 @@ export function PurchasesPage() {
                   {formatCurrency(selected.balance)}
                 </span>
                 <span>Medio</span>
-                <span className="text-right font-semibold text-ink">{selected.paymentMethod}</span>
+                <span className="text-right font-semibold text-ink">
+                  {selected.paymentAccount ?? selected.paymentMethod}
+                </span>
+                <span>Comprador</span>
+                <span className="text-right font-semibold text-ink">
+                  {selected.createdByName ?? 'Sin usuario'}
+                </span>
                 {selected.dueDate ? (
                   <>
                     <span>Vence</span>
@@ -776,7 +814,7 @@ export function PurchasesPage() {
                       <div>
                         <p className="font-medium text-ink">{formatCurrency(payment.amount)}</p>
                         <p className="text-[9px] text-slate-400">
-                          {formatDate(payment.date)} · {payment.method}
+                          {formatDate(payment.date)} · {payment.paymentAccount ?? payment.method}
                         </p>
                       </div>
                       <span className="text-[9px] text-slate-400">{payment.createdByName ?? ''}</span>
@@ -867,15 +905,24 @@ export function PurchasesPage() {
             </select>
           </label>
           <label className="block">
-            <span className="field-label">Medio de pago</span>
+            <span className="field-label">Cuenta de pago</span>
             <select
-              value={form.paymentMethod}
-              onChange={(event) => setForm({ ...form, paymentMethod: event.target.value })}
+              value={form.paymentAccountId}
+              onChange={(event) => {
+                const account = purchaseAccounts.find((item) => item.id === event.target.value)
+                setForm({
+                  ...form,
+                  paymentAccountId: event.target.value,
+                  paymentMethod: account?.channel ?? 'Transferencia'
+                })
+              }}
               className="field"
             >
-              <option value="Transferencia">Transferencia</option>
-              <option value="Efectivo">Efectivo</option>
-              <option value="Tarjeta">Tarjeta</option>
+              {purchaseAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name} · {account.channel ?? 'Transferencia'}
+                </option>
+              ))}
             </select>
           </label>
           {form.paymentCondition === 'credito' ? (
@@ -1135,15 +1182,24 @@ export function PurchasesPage() {
               />
             </label>
             <label className="block">
-              <span className="field-label">Medio</span>
+              <span className="field-label">Cuenta de pago</span>
               <select
-                value={paymentForm.method}
-                onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}
+                value={paymentForm.paymentAccountId}
+                onChange={(event) => {
+                  const account = purchaseAccounts.find((item) => item.id === event.target.value)
+                  setPaymentForm({
+                    ...paymentForm,
+                    paymentAccountId: event.target.value,
+                    method: account?.channel ?? 'Transferencia'
+                  })
+                }}
                 className="field"
               >
-                <option value="Transferencia">Transferencia</option>
-                <option value="Efectivo">Efectivo</option>
-                <option value="Tarjeta">Tarjeta</option>
+                {purchaseAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} · {account.channel ?? 'Transferencia'}
+                  </option>
+                ))}
               </select>
             </label>
           </div>

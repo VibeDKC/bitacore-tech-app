@@ -183,6 +183,9 @@ export function SettingsPage() {
   const [backupPasswordForm, setBackupPasswordForm] = useState({ password: '', confirm: '' })
   const [backupPasswordSaving, setBackupPasswordSaving] = useState(false)
   const [backupTransferSaving, setBackupTransferSaving] = useState<'export' | 'import' | null>(null)
+  const [importPasswordOpen, setImportPasswordOpen] = useState(false)
+  const [importPassword, setImportPassword] = useState('')
+  const [trackingSaving, setTrackingSaving] = useState(false)
   const [showKey, setShowKey] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [invite, setInvite] = useState({ name: '', username: '', email: '', role: 'tecnico' as Role, password: '', document: '', phone: '', address: '' })
@@ -240,7 +243,9 @@ export function SettingsPage() {
   const canDictionaries = can(role, 'manageDictionaries')
   const canManageAdmins = can(role, 'manageAdmins')
   const canCreateBackup = can(role, 'createBackup')
+  const canImportBackup = can(role, 'importBackup')
   const canRestore = can(role, 'restoreBackup')
+  const canManageBackupPassword = can(role, 'restoreBackup')
   const canPurge = can(role, 'purgeData')
   const canLegal = can(role, 'configureLegal')
   const canBusiness = can(role, 'configureBusiness')
@@ -321,6 +326,24 @@ export function SettingsPage() {
   function applySettings(updated: typeof settings) {
     if (!updated) return
     setData((current) => (current ? { ...current, settings: updated } : current))
+  }
+
+  async function saveTracking(purchasesByUser: boolean) {
+    if (!canBusiness || trackingSaving) return
+    setTrackingSaving(true)
+    try {
+      const updated = await api.settings.updateSection('tracking', { purchasesByUser })
+      applySettings(updated)
+      toast.success('Rastreo de compras actualizado', {
+        description: purchasesByUser
+          ? 'El reporte de compras por usuario queda disponible.'
+          : 'El reporte de compras por usuario queda oculto; la auditoría se conserva.'
+      })
+    } catch (failure) {
+      toast.error('No se pudo actualizar el rastreo', { description: errorMessage(failure) })
+    } finally {
+      setTrackingSaving(false)
+    }
   }
 
   async function saveBusiness() {
@@ -742,18 +765,23 @@ export function SettingsPage() {
     }
   }
 
-  async function importBackup() {
+  async function importBackup(password?: string) {
     if (backupTransferSaving) return
     setBackupTransferSaving('import')
     try {
-      const result = await api.backups.importBackup()
-      if (!result.imported) return
-      toast.success('Respaldo importado y restaurado', {
+      const result = await api.backups.importBackup(password)
+      if (!result.imported) {
+        setImportPasswordOpen(false)
+        return
+      }
+      setImportPasswordOpen(false)
+      setImportPassword('')
+      toast.success('Base importada y restaurada', {
         description: `Copia previa: ${result.safetyBackup}. La aplicación se recargará.`
       })
       window.setTimeout(() => window.location.reload(), 1200)
     } catch (failure) {
-      toast.error('No se pudo importar el respaldo', { description: errorMessage(failure) })
+      toast.error('No se pudo importar la base', { description: errorMessage(failure) })
     } finally {
       setBackupTransferSaving(null)
     }
@@ -1202,6 +1230,29 @@ export function SettingsPage() {
                 </div>
               </div>
 
+              <div className="card p-5 lg:p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Rastreo operativo</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Controla si el reporte de compras por usuario está visible. La auditoría de quién compró se conserva.
+                    </p>
+                  </div>
+                  <Switch
+                    active={settings?.tracking.purchasesByUser !== false}
+                    onClick={() =>
+                      void saveTracking(settings?.tracking.purchasesByUser === false)
+                    }
+                    label="Rastrear compras por usuario"
+                  />
+                </div>
+                <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
+                  {settings?.tracking.purchasesByUser !== false
+                    ? 'Activo: se muestra quién compró, cuánto y el margen estimado.'
+                    : 'Inactivo: el reporte de compras por usuario no se muestra.'}
+                </p>
+              </div>
+
               <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
                 <div className="flex items-start gap-2.5">
                   <Server className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
@@ -1590,7 +1641,9 @@ export function SettingsPage() {
             </>
           ) : null}
 
-          {tab === 'diccionarios' ? <DictionariesPanel canManage={canDictionaries} /> : null}
+          {tab === 'diccionarios' ? (
+            <DictionariesPanel canManage={canDictionaries} users={staff} />
+          ) : null}
 
           {tab === 'mensajes' ? (
             <MessagesPanel
@@ -1696,7 +1749,7 @@ export function SettingsPage() {
                   <div>
                     <h2 className="font-display text-[16px] font-bold text-ink">Contraseña y transferencia</h2>
                     <p className="mt-0.5 text-[11px] text-slate-400">
-                      Protege la exportación e importación del respaldo. Solo el propietario y el administrador pueden verla o copiarla.
+                      La contraseña la administra exclusivamente el propietario. Los administradores pueden exportar e importar escribiendo la contraseña del archivo, sin verla ni cambiarla.
                     </p>
                   </div>
                   <Badge variant={settings?.backup.passwordConfigured ? 'success' : 'warning'}>
@@ -1704,38 +1757,44 @@ export function SettingsPage() {
                   </Badge>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                  <label className="block">
-                    <span className="field-label">Contraseña de respaldo</span>
-                    <input
-                      type="password"
-                      readOnly
-                      value={settings?.backup.passwordConfigured ? '••••••••••••' : ''}
-                      placeholder="Sin configurar"
-                      className="field bg-slate-50 text-slate-500"
-                    />
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => void copyBackupPassword()}
-                      disabled={!settings?.backup.passwordConfigured}
-                      leftIcon={<Copy className="h-4 w-4" />}
-                    >
-                      Copiar
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setBackupPasswordForm({ password: '', confirm: '' })
-                        setBackupPasswordOpen(true)
-                      }}
-                      leftIcon={<KeyRound className="h-4 w-4" />}
-                    >
-                      {settings?.backup.passwordConfigured ? 'Cambiar' : 'Configurar'}
-                    </Button>
+                {canManageBackupPassword ? (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <label className="block">
+                      <span className="field-label">Contraseña de respaldo</span>
+                      <input
+                        type="password"
+                        readOnly
+                        value={settings?.backup.passwordConfigured ? '••••••••••••' : ''}
+                        placeholder="Sin configurar"
+                        className="field bg-slate-50 text-slate-500"
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => void copyBackupPassword()}
+                        disabled={!settings?.backup.passwordConfigured}
+                        leftIcon={<Copy className="h-4 w-4" />}
+                      >
+                        Copiar
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setBackupPasswordForm({ password: '', confirm: '' })
+                          setBackupPasswordOpen(true)
+                        }}
+                        leftIcon={<KeyRound className="h-4 w-4" />}
+                      >
+                        {settings?.backup.passwordConfigured ? 'Cambiar' : 'Configurar'}
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-line bg-slate-50 px-3.5 py-2.5 text-[10px] leading-relaxed text-slate-500">
+                    La contraseña de respaldo la configura el propietario. Para importar una base, solicítala y escríbela en el paso de importación.
+                  </div>
+                )}
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
                   <Button
@@ -1746,15 +1805,17 @@ export function SettingsPage() {
                   >
                     Exportar respaldo
                   </Button>
-                  {canRestore ? (
+                  {canImportBackup ? (
                     <Button
                       variant="secondary"
-                      onClick={() => void importBackup()}
+                      onClick={() => {
+                        setImportPassword('')
+                        setImportPasswordOpen(true)
+                      }}
                       loading={backupTransferSaving === 'import'}
-                      disabled={!settings?.backup.passwordConfigured}
                       leftIcon={<RefreshCcw className="h-4 w-4" />}
                     >
-                      Importar respaldo
+                      Importar base
                     </Button>
                   ) : null}
                   <span className="text-[9px] text-slate-400">
@@ -2678,6 +2739,57 @@ export function SettingsPage() {
           <div className="rounded-xl border border-warning-100 bg-warning-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-warning-800">
             Si cambias la contraseña, los respaldos exportados antes seguirán necesitando la contraseña anterior. Consérvala en un lugar seguro.
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={importPasswordOpen}
+        onClose={() => {
+          if (backupTransferSaving === 'import') return
+          setImportPasswordOpen(false)
+          setImportPassword('')
+        }}
+        title="Importar base de datos"
+        description="Selecciona un archivo .bctbackup y escribe la contraseña con la que fue exportado."
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setImportPasswordOpen(false)
+                setImportPassword('')
+              }}
+              disabled={backupTransferSaving === 'import'}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void importBackup(importPassword)}
+              loading={backupTransferSaving === 'import'}
+              disabled={!importPassword.trim() && !canManageBackupPassword}
+              leftIcon={<RefreshCcw className="h-4 w-4" />}
+            >
+              Seleccionar archivo e importar
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="field-label">Contraseña del archivo</span>
+            <input
+              type="password"
+              value={importPassword}
+              onChange={(event) => setImportPassword(event.target.value)}
+              className="field"
+              placeholder="Contraseña usada al exportar"
+              autoComplete="current-password"
+            />
+          </label>
+          <p className="rounded-xl border border-warning-100 bg-warning-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-warning-800">
+            La importación reemplaza la base actual y crea una copia de seguridad previa. Si no conoces la contraseña, solicítala al propietario.
+          </p>
         </div>
       </Modal>
 

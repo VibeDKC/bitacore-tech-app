@@ -63,6 +63,16 @@ export const DICTIONARY_TYPES = [
     value: 'service_type',
     label: 'Tipos de servicio y mantenimiento',
     description: 'Servicios que aparecen como motivo de ingreso en la OT y en el inventario.'
+  },
+  {
+    value: 'purchase_payment_account',
+    label: 'Cuentas de compra',
+    description: 'Tarjetas y cuentas con las que se pagan compras y abonos a proveedores.'
+  },
+  {
+    value: 'income_account',
+    label: 'Cuenta de ingresos',
+    description: 'Cuenta bancaria que recibe los pagos digitales y los traslados de efectivo.'
   }
 ] as const
 
@@ -73,11 +83,14 @@ export interface DictionaryNode {
   parentId: string | null
   type: DictionaryType
   code: string | null
+  channel?: string | null
   name: string
   sortOrder: number
   active: boolean
   system: boolean
   usageCount: number
+  responsibleUserId?: string | null
+  linkedIncomeAccountId?: string | null
   createdAt?: string
   updatedAt?: string
 }

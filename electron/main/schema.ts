@@ -71,10 +71,13 @@ CREATE TABLE IF NOT EXISTS dictionary_nodes (
   parent_id TEXT REFERENCES dictionary_nodes(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   code TEXT,
+  channel TEXT,
   name TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
   system INTEGER NOT NULL DEFAULT 0,
+  responsible_user_id TEXT REFERENCES users(id),
+  linked_income_account_id TEXT REFERENCES dictionary_nodes(id),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -228,6 +231,10 @@ CREATE TABLE IF NOT EXISTS purchases (
   notes TEXT,
   ai_metadata_json TEXT,
   created_by TEXT,
+  created_by_name TEXT,
+  created_by_role TEXT,
+  payment_account TEXT,
+  payment_account_id TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -251,6 +258,8 @@ CREATE TABLE IF NOT EXISTS supplier_payments (
   purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
   amount_cents INTEGER NOT NULL,
   method TEXT NOT NULL,
+  payment_account TEXT,
+  payment_account_id TEXT,
   paid_at TEXT NOT NULL,
   notes TEXT,
   created_by TEXT,
@@ -394,6 +403,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   status TEXT NOT NULL DEFAULT 'activa' CHECK (status IN ('activa', 'anulada')),
   notes TEXT,
   created_by TEXT,
+  created_by_name TEXT,
+  created_by_role TEXT,
   created_at TEXT NOT NULL,
   annulled_at TEXT,
   annulled_by TEXT,
@@ -426,8 +437,11 @@ CREATE TABLE IF NOT EXISTS payments (
   reference TEXT,
   is_exception INTEGER NOT NULL DEFAULT 0,
   exception_reason TEXT,
+  income_account_id TEXT,
+  income_account_name TEXT,
   created_by TEXT,
   created_by_name TEXT,
+  created_by_role TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -454,6 +468,7 @@ CREATE TABLE IF NOT EXISTS cash_sessions (
   counted_cents INTEGER,
   difference_cents INTEGER,
   status TEXT NOT NULL DEFAULT 'abierto' CHECK (status IN ('abierto', 'cerrado')),
+  carry_over_cents INTEGER NOT NULL DEFAULT 0,
   notes TEXT
 );
 
@@ -480,6 +495,56 @@ CREATE TRIGGER IF NOT EXISTS cash_movements_no_delete
 BEFORE DELETE ON cash_movements BEGIN
   SELECT RAISE(ABORT, 'cash_movements es append-only');
 END;
+
+CREATE TABLE IF NOT EXISTS payment_receipts (
+  id TEXT PRIMARY KEY,
+  payment_id TEXT NOT NULL UNIQUE REFERENCES payments(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  path TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  uploaded_by TEXT,
+  uploaded_by_name TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_receipts_payment ON payment_receipts(payment_id);
+
+CREATE TABLE IF NOT EXISTS account_movements (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES dictionary_nodes(id),
+  type TEXT NOT NULL CHECK (type IN ('ingreso', 'egreso')),
+  amount_cents INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  reference_type TEXT,
+  reference_id TEXT,
+  user_id TEXT,
+  user_name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_movements_account ON account_movements(account_id, created_at);
+
+CREATE TABLE IF NOT EXISTS cash_transfers (
+  id TEXT PRIMARY KEY,
+  cash_session_id TEXT REFERENCES cash_sessions(id),
+  account_id TEXT NOT NULL REFERENCES dictionary_nodes(id),
+  requested_cents INTEGER NOT NULL,
+  approved_cents INTEGER,
+  status TEXT NOT NULL DEFAULT 'pendiente' CHECK (status IN ('pendiente', 'aprobado', 'rechazado')),
+  requested_by TEXT,
+  requested_by_name TEXT NOT NULL,
+  approved_by TEXT,
+  approved_by_name TEXT,
+  approved_at TEXT,
+  rejection_reason TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_transfers_status ON cash_transfers(status, created_at);
 
 CREATE TABLE IF NOT EXISTS legal_versions (
   id TEXT PRIMARY KEY,

@@ -86,7 +86,10 @@ export const DEFAULT_SETTINGS = {
   equipment: {
     qrEnabled: false
   },
-  messages: DEFAULT_MESSAGES
+  messages: DEFAULT_MESSAGES,
+  tracking: {
+    purchasesByUser: true
+  }
 }
 
 export const STATUS_CONFIG = [

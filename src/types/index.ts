@@ -24,6 +24,7 @@ export type Capability =
   | 'manageAdmins'
   | 'manageStaff'
   | 'createBackup'
+  | 'importBackup'
   | 'restoreBackup'
   | 'purgeData'
   | 'configureLegal'
@@ -327,6 +328,15 @@ export interface Settlement {
   exceptionReason?: string
 }
 
+export interface PaymentReceipt {
+  url: string
+  filename: string
+  mimeType: string
+  size: number
+  uploadedAt?: string
+  uploadedByName?: string | null
+}
+
 export interface Payment {
   id: string
   number: string
@@ -336,10 +346,13 @@ export interface Payment {
   received: number | null
   change: number
   reference?: string | null
+  incomeAccountId?: string | null
+  incomeAccountName?: string | null
   isException?: boolean
   exceptionReason?: string | null
   createdAt: string
   createdByName: string
+  receipt?: PaymentReceipt | null
 }
 
 export interface WorkOrderItem {
@@ -454,6 +467,11 @@ export interface Invoice {
   change?: number
   notes?: string | null
   createdAt?: string
+  createdByName?: string
+  createdByRole?: string
+  incomeAccountName?: string | null
+  paymentId?: string | null
+  paymentReceipt?: PaymentReceipt | null
 }
 
 export interface CashMovement {
@@ -484,12 +502,40 @@ export interface CashSession {
   sales: number
   movements: CashMovement[]
   notes?: string | null
+  carryOver?: number
+}
+
+export interface CashTransfer {
+  id: string
+  cashSessionId: string
+  accountId: string
+  accountName: string
+  requestedAmount: number
+  approvedAmount: number | null
+  status: 'pendiente' | 'aprobado' | 'rechazado'
+  requestedBy: string
+  requestedByName: string
+  approvedBy?: string | null
+  approvedByName?: string | null
+  approvedAt?: string | null
+  rejectionReason?: string | null
+  notes?: string | null
+  createdAt: string
+  canApprove: boolean
 }
 
 export interface CashCurrentResponse {
   current: CashSession | null
   lastClosed: CashSession | null
   movements: CashMovement[]
+  pendingTransfers?: CashTransfer[]
+  myTransfers?: CashTransfer[]
+  incomeAccount?: {
+    id: string
+    name: string
+    responsibleUserId?: string | null
+    responsibleUserName?: string | null
+  } | null
 }
 
 export interface AuditEvent {
@@ -571,9 +617,14 @@ export interface Purchase {
   status: 'recibida' | 'pendiente'
   paymentStatus: 'pagada' | 'pendiente' | 'parcial'
   paymentMethod: string
+  paymentAccount?: string | null
+  paymentAccountId?: string | null
   paid: number
   balance: number
   dueDate?: string | null
+  createdByName?: string
+  createdByRole?: string
+  linkedIncomeAccountName?: string | null
   payments: SupplierPayment[]
   notes?: string | null
   ai?: {
@@ -604,6 +655,8 @@ export interface SupplierPayment {
   id: string
   amount: number
   method: string
+  paymentAccount?: string | null
+  paymentAccountId?: string | null
   date: string
   notes?: string | null
   createdByName?: string | null
@@ -734,6 +787,7 @@ export interface PurchaseReviewInput {
   duplicateConfirmed?: boolean
   paymentCondition?: 'contado' | 'credito'
   paymentMethod?: string
+  paymentAccountId?: string
   initialPayment?: number
   dueDate?: string | null
   notes?: string
@@ -822,6 +876,12 @@ export interface DashboardData {
   stockSummary: StockSummary
   chartData: ChartPoint[]
   technicianStats: TechnicianStats[]
+  personalPerformance: {
+    sellerInvoices: number
+    sellerSales: number
+    technicianOrders: number
+    technicianSales: number
+  }
   notifications: NotificationItem[]
 }
 
@@ -831,6 +891,50 @@ export interface ReportTopProduct {
   revenue: number
   margin: number | null
   marginPercent: number | null
+}
+
+export interface SalesByUserRow {
+  userId: string
+  name: string
+  role: string
+  invoices: number
+  sales: number
+  cost: number | null
+  margin: number | null
+  marginPercent: number | null
+  averageTicket: number
+}
+
+export interface TechnicianRevenueRow {
+  userId: string
+  name: string
+  role: string
+  orders: number
+  sales: number
+  services: number
+  parts: number
+  cost: number | null
+  margin: number | null
+}
+
+export interface PurchasesByUserRow {
+  userId: string
+  name: string
+  role: string
+  purchases: number
+  items: number
+  total: number
+  iva: number
+  estimatedMargin: number | null
+  lastPurchaseAt: string | null
+}
+
+export interface AccountSummaryRow {
+  accountName: string
+  income: number
+  expenses: number
+  balance: number
+  entries: number
 }
 
 export interface ReportData {
@@ -849,6 +953,11 @@ export interface ReportData {
   categoryData: Array<{ name: string; value: number; color: string }>
   topProducts: ReportTopProduct[]
   technicianStats: TechnicianStats[]
+  salesByUser: SalesByUserRow[]
+  technicianRevenue: TechnicianRevenueRow[]
+  purchasesByUser: PurchasesByUserRow[]
+  accountSummary: AccountSummaryRow[]
+  purchaseTrackingEnabled: boolean
   invoices: Invoice[]
   payments: Payment[]
   permissions: { grossMargin: boolean; netProfit: boolean }
@@ -899,6 +1008,7 @@ export interface SettingsData {
   }
   equipment: { qrEnabled: boolean }
   messages: { initial: string; ready: string }
+  tracking: { purchasesByUser: boolean }
   backup: { passwordConfigured: boolean }
   rolePermissions: Array<{ role: Role; capability: Capability; allowed: boolean }>
   statuses: StatusSetting[]

@@ -172,6 +172,30 @@ export function DashboardPage() {
         ))}
       </div>
 
+      {data?.personalPerformance ? (
+        <div className="card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-display text-[14px] font-bold text-ink">Mi rendimiento</h2>
+              <p className="mt-0.5 text-[10px] text-slate-400">Últimos 30 días · sin costos ni márgenes</p>
+            </div>
+            <Badge variant="outline">{displayUser.name}</Badge>
+          </div>
+          <div className="mt-3 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-line bg-slate-50/60 p-3">
+              <p className="text-[9px] uppercase tracking-[0.1em] text-slate-400">Ventas realizadas</p>
+              <p className="mt-1 text-[14px] font-bold text-ink">{formatNumber(data.personalPerformance.sellerInvoices)}</p>
+              <p className="text-[9px] text-slate-500">{formatCurrency(data.personalPerformance.sellerSales)}</p>
+            </div>
+            <div className="rounded-xl border border-line bg-slate-50/60 p-3">
+              <p className="text-[9px] uppercase tracking-[0.1em] text-slate-400">OTs facturadas</p>
+              <p className="mt-1 text-[14px] font-bold text-ink">{formatNumber(data.personalPerformance.technicianOrders)}</p>
+              <p className="text-[9px] text-slate-500">{formatCurrency(data.personalPerformance.technicianSales)}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(330px,1fr)]">
         {role === 'tecnico' ? (
           <WorkshopLoad orders={data?.orders ?? []} technician={displayUser.name} />

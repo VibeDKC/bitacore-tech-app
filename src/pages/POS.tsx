@@ -33,6 +33,7 @@ import { SearchInput, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { SegmentedTabs } from '@/components/ui/Tabs'
 import { ReceiptPreviewModal } from '@/components/pos/ReceiptPreview'
+import { PaymentReceiptField, type ReceiptDraft } from '@/components/payments/PaymentReceiptField'
 import { SalesHistory } from '@/components/pos/SalesHistory'
 import { cn } from '@/lib/utils'
 
@@ -83,6 +84,7 @@ export function POSPage() {
   const [method, setMethod] = useState<PaymentMethod>('Efectivo')
   const [received, setReceived] = useState('')
   const [reference, setReference] = useState('')
+  const [receipt, setReceipt] = useState<ReceiptDraft | null>(null)
   const [sale, setSale] = useState<SaleResult | null>(null)
   const [selling, setSelling] = useState(false)
 
@@ -191,6 +193,7 @@ export function POSPage() {
     setMethod('Efectivo')
     setReceived(String(total))
     setReference('')
+    setReceipt(null)
     setPaymentOpen(true)
   }
 
@@ -209,7 +212,10 @@ export function POSPage() {
         discountType: loyaltyActive ? loyaltyType : discountType,
         discountValue: loyaltyActive ? loyaltyValue : Number(discountInput) || 0,
         received: method === 'Efectivo' ? receivedValue : undefined,
-        reference: reference.trim() || undefined
+        reference: reference.trim() || undefined,
+        receipt: receipt
+          ? { dataUrl: receipt.dataUrl, name: receipt.name, mimeType: receipt.mimeType }
+          : undefined
       })
       setSale({ ...result, customer })
       setPaymentOpen(false)
@@ -217,6 +223,7 @@ export function POSPage() {
       setDiscountInput('')
       setDiscountType('percent')
       setReference('')
+      setReceipt(null)
       toast.success(`Venta ${result.receipt.number} registrada`, {
         description: `${formatCurrency(result.receipt.total)} · ${method} · ${customer.name}`
       })
@@ -721,6 +728,8 @@ export function POSPage() {
               />
             </label>
           )}
+
+          <PaymentReceiptField value={receipt} onChange={setReceipt} disabled={selling} />
 
           <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3">
             <div className="flex items-center justify-between text-[11px] text-brand-700">

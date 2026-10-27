@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { dialog, safeStorage } from 'electron'
+import { dialog, safeStorage, shell } from 'electron'
 import { z } from 'zod'
 import type { Database } from './database'
 import {
@@ -61,6 +61,14 @@ import {
   productImageRoot,
   removeProductImageFiles
 } from './productImages'
+import {
+  PAYMENT_RECEIPT_FOLDER,
+  preparePaymentReceipt,
+  paymentReceiptRoot,
+  paymentReceiptUrl,
+  removePaymentReceiptFiles,
+  resolvePaymentReceiptFile
+} from './paymentReceipts'
 import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
@@ -503,6 +511,198 @@ function recordCash(
   )
 }
 
+function recordAccountMovement(
+  db: Database,
+  session: Session,
+  input: {
+    accountId: string
+    accountName: string
+    type: 'ingreso' | 'egreso'
+    amountCents: number
+    description: string
+    referenceType?: string
+    referenceId?: string
+    createdAt?: string
+  }
+) {
+  db.run(
+    `INSERT INTO account_movements
+      (id, account_id, type, amount_cents, description, reference_type, reference_id,
+       user_id, user_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `acm_${sha256(`${input.accountId}|${Date.now()}|${Math.random()}`).slice(0, 20)}`,
+    input.accountId,
+    input.type,
+    input.amountCents,
+    input.description,
+    input.referenceType ?? null,
+    input.referenceId ?? null,
+    session.userId,
+    displayUser(session).name,
+    input.createdAt ?? new Date().toISOString()
+  )
+}
+
+function prepareReceiptFromPayload(
+  runtime: Runtime,
+  paymentId: string,
+  receipt: any
+) {
+  if (!receipt || typeof receipt !== 'object' || !receipt.dataUrl) return null
+  return preparePaymentReceipt({
+    userDataPath: runtime.userDataPath,
+    paymentId,
+    dataUrl: receipt.dataUrl,
+    filename: receipt.name
+  })
+}
+
+function insertPaymentReceipt(
+  db: Database,
+  session: Session,
+  paymentId: string,
+  prepared: ReturnType<typeof preparePaymentReceipt> | null
+) {
+  if (!prepared) return
+  db.run(
+    `INSERT INTO payment_receipts
+      (id, payment_id, filename, mime_type, size_bytes, path, sha256,
+       uploaded_by, uploaded_by_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `prc_${sha256(`${paymentId}|${prepared.sha256}`).slice(0, 20)}`,
+    paymentId,
+    prepared.filename,
+    prepared.mimeType,
+    prepared.sizeBytes,
+    prepared.relativePath,
+    prepared.sha256,
+    session.userId,
+    displayUser(session).name,
+    new Date().toISOString()
+  )
+}
+
+function paymentAccountById(db: Database, id: string, type = 'purchase_payment_account') {
+  return db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ? AND type = ? AND active = 1', id, type)
+}
+
+function resolvePurchaseAccount(
+  db: Database,
+  payloadAccountId: unknown,
+  fallbackMethod: unknown
+) {
+  const requestedId =
+    typeof payloadAccountId === 'string' && payloadAccountId.trim() ? payloadAccountId.trim() : ''
+  if (requestedId) {
+    const account = paymentAccountById(db, requestedId)
+    if (!account) fail('La cuenta de pago seleccionada no está activa.')
+    return {
+      id: account.id,
+      name: account.name,
+      channel: String(account.channel ?? 'Transferencia'),
+      linkedIncomeAccountId: account.linked_income_account_id ?? null
+    }
+  }
+  const method =
+    typeof fallbackMethod === 'string' && fallbackMethod.trim()
+      ? fallbackMethod.trim()
+      : 'Transferencia'
+  const account = db.get<any>(
+    `SELECT * FROM dictionary_nodes
+     WHERE type = 'purchase_payment_account' AND active = 1 AND channel = ?
+     ORDER BY sort_order ASC, name ASC LIMIT 1`,
+    method
+  )
+  return {
+    id: account?.id ?? null,
+    name: account?.name ?? method,
+    channel: account?.channel ?? method,
+    linkedIncomeAccountId: account?.linked_income_account_id ?? null
+  }
+}
+
+function cashTransferDto(db: Database, row: any, session: Session) {
+  const account = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', row.account_id)
+  return {
+    id: row.id,
+    cashSessionId: row.cash_session_id,
+    accountId: row.account_id,
+    accountName: account?.name ?? 'Cuenta de ingresos',
+    requestedAmount: money(row.requested_cents),
+    approvedAmount: row.approved_cents === null ? null : money(row.approved_cents),
+    status: row.status,
+    requestedBy: row.requested_by,
+    requestedByName: row.requested_by_name,
+    approvedBy: row.approved_by ?? null,
+    approvedByName: row.approved_by_name ?? null,
+    approvedAt: row.approved_at ?? null,
+    rejectionReason: row.rejection_reason ?? null,
+    notes: row.notes ?? null,
+    createdAt: row.created_at,
+    canApprove:
+      row.status === 'pendiente' &&
+      Boolean(account?.responsible_user_id) &&
+      account.responsible_user_id === session.userId
+  }
+}
+
+function pendingTransfersFor(db: Database, userId: string) {
+  return db.all<any>(
+    `SELECT t.*
+     FROM cash_transfers t
+     JOIN dictionary_nodes account ON account.id = t.account_id
+     WHERE t.status = 'pendiente' AND account.responsible_user_id = ?
+     ORDER BY t.created_at ASC`,
+    userId
+  )
+}
+
+function executeCashTransfer(
+  db: Database,
+  session: Session,
+  transfer: any,
+  amountCents: number,
+  account: any
+) {
+  const current = requireCashSession(db)
+  const expectedCents = toCents(cashSessionDto(db, current).expected)
+  if (amountCents > expectedCents) {
+    fail(`El traslado supera el efectivo disponible en caja (${money(expectedCents)}).`)
+  }
+  const nowIso = new Date().toISOString()
+  recordCash(db, session, {
+    type: 'egreso',
+    method: 'Efectivo',
+    amountCents,
+    reason: `Traslado a banco · ${account.name}`,
+    referenceType: 'cash_transfer',
+    referenceId: transfer.id,
+    createdAt: nowIso
+  })
+  recordAccountMovement(db, session, {
+    accountId: account.id,
+    accountName: account.name,
+    type: 'ingreso',
+    amountCents,
+    description: `Traslado de efectivo a banco · ${account.name}`,
+    referenceType: 'cash_transfer',
+    referenceId: transfer.id,
+    createdAt: nowIso
+  })
+  db.run(
+    `UPDATE cash_transfers
+     SET status = 'aprobado', approved_cents = ?, approved_by = ?, approved_by_name = ?,
+         approved_at = ?, updated_at = ?
+     WHERE id = ?`,
+    amountCents,
+    session.userId,
+    displayUser(session).name,
+    nowIso,
+    nowIso,
+    transfer.id
+  )
+}
+
 function getOrderOrFail(db: Database, id: string) {
   const row = db.get<any>(
     `SELECT w.*, c.name AS customer_name
@@ -697,8 +897,9 @@ function createOrderInvoice(
   db.run(
     `INSERT INTO invoices
       (id, number, type, customer_id, customer_name, order_id, subtotal_cents, discount_percent, discount_type,
-       discount_value, discount_cents, total_cents, payment_method, status, notes, created_by, created_at)
-     VALUES (?, ?, 'ot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?, ?)`,
+       discount_value, discount_cents, total_cents, payment_method, status, notes, created_by,
+       created_by_name, created_by_role, created_at)
+     VALUES (?, ?, 'ot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?, ?, ?, ?)`,
     id,
     number,
     order.customer_id,
@@ -713,6 +914,8 @@ function createOrderInvoice(
     isException ? null : method,
     isException ? `Excepción: ${exceptionReason} · Autorizado por ${name}` : null,
     session.userId,
+    name,
+    session.actualRole,
     new Date().toISOString()
   )
   const items = db.all<any>('SELECT * FROM work_order_items WHERE work_order_id = ? ORDER BY rowid ASC', order.id)
@@ -807,6 +1010,7 @@ function settingsData(db: Database) {
     business: db.getSetting('business_config', DEFAULT_SETTINGS.business),
     equipment: db.getSetting('equipment_config', DEFAULT_SETTINGS.equipment),
     messages: db.getSetting('messages_config', DEFAULT_SETTINGS.messages),
+    tracking: db.getSetting('tracking_config', DEFAULT_SETTINGS.tracking),
     backup: { passwordConfigured: backupPasswordConfigured(db) },
     rolePermissions: db
       .all<{ role: string; capability: string; allowed: number }>(
@@ -893,6 +1097,34 @@ function dictionaryUsageCount(db: Database, row: any) {
       db.get<{ count: number }>('SELECT COUNT(*) AS count FROM work_orders WHERE category_label = ?', row.name)?.count ?? 0
     )
   }
+  if (row.type === 'purchase_payment_account') {
+    return (
+      Number(
+        db.get<{ count: number }>('SELECT COUNT(*) AS count FROM purchases WHERE payment_account_id = ?', row.id)
+          ?.count ?? 0
+      ) +
+      Number(
+        db.get<{ count: number }>('SELECT COUNT(*) AS count FROM supplier_payments WHERE payment_account_id = ?', row.id)
+          ?.count ?? 0
+      )
+    )
+  }
+  if (row.type === 'income_account') {
+    return (
+      Number(
+        db.get<{ count: number }>('SELECT COUNT(*) AS count FROM payments WHERE income_account_id = ?', row.id)
+          ?.count ?? 0
+      ) +
+      Number(
+        db.get<{ count: number }>('SELECT COUNT(*) AS count FROM cash_transfers WHERE account_id = ?', row.id)
+          ?.count ?? 0
+      ) +
+      Number(
+        db.get<{ count: number }>('SELECT COUNT(*) AS count FROM account_movements WHERE account_id = ?', row.id)
+          ?.count ?? 0
+      )
+    )
+  }
   return 0
 }
 
@@ -902,14 +1134,91 @@ function dictionaryNodeDto(db: Database, row: any) {
     parentId: row.parent_id ?? null,
     type: row.type,
     code: row.code ?? null,
+    channel: row.channel ?? null,
     name: row.name,
     sortOrder: Number(row.sort_order),
     active: Boolean(row.active),
     system: Boolean(row.system),
+    responsibleUserId: row.responsible_user_id ?? null,
+    linkedIncomeAccountId: row.linked_income_account_id ?? null,
     usageCount: dictionaryUsageCount(db, row),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
+}
+
+const PAYMENT_ACCOUNT_CHANNELS = ['Efectivo', 'Transferencia', 'Tarjeta'] as const
+
+function validatePaymentAccountFields(
+  db: Database,
+  type: string,
+  input: {
+    active: boolean
+    responsibleUserId?: string | null
+    linkedIncomeAccountId?: string | null
+    channel?: string | null
+    id?: string
+  }
+) {
+  if (type === 'income_account') {
+    if (input.active) {
+      const other = db.get<any>(
+        "SELECT id, name FROM dictionary_nodes WHERE type = 'income_account' AND active = 1 AND id <> ? LIMIT 1",
+        input.id ?? ''
+      )
+      if (other) {
+        fail(
+          `Solo puede haber una cuenta de ingresos activa. Desactiva primero "${other.name}".`,
+          'DUPLICATE'
+        )
+      }
+      if (!input.responsibleUserId) {
+        fail('Selecciona el administrador responsable de la cuenta de ingresos.')
+      }
+    }
+    if (input.responsibleUserId) {
+      const responsible = db.get<any>(
+        "SELECT id, name, role, active FROM users WHERE id = ?",
+        input.responsibleUserId
+      )
+      if (!responsible || !responsible.active) fail('El administrador responsable no está activo.')
+      if (responsible.role !== 'admin') {
+        fail('La cuenta de ingresos debe quedar vinculada a un administrador.')
+      }
+    }
+    return
+  }
+  if (type !== 'purchase_payment_account') return
+  if (input.channel && !(PAYMENT_ACCOUNT_CHANNELS as readonly string[]).includes(input.channel)) {
+    fail('El canal debe ser Efectivo, Transferencia o Tarjeta.')
+  }
+  if (input.linkedIncomeAccountId) {
+    if ((input.channel ?? 'Transferencia') === 'Efectivo') {
+      fail('Una cuenta de efectivo no puede descontar de la cuenta de ingresos. Usa transferencia o tarjeta.')
+    }
+    const linked = db.get<any>(
+      "SELECT id, name, active FROM dictionary_nodes WHERE id = ? AND type = 'income_account'",
+      input.linkedIncomeAccountId
+    )
+    if (!linked) fail('La cuenta de ingresos vinculada no existe.')
+    if (!linked.active) fail('La cuenta de ingresos vinculada está inactiva.')
+  }
+}
+
+function incomeAccountRow(db: Database) {
+  return db.get<any>(
+    "SELECT * FROM dictionary_nodes WHERE type = 'income_account' AND active = 1 ORDER BY sort_order ASC, name ASC LIMIT 1"
+  )
+}
+
+function requireIncomeAccount(db: Database) {
+  const account = incomeAccountRow(db)
+  if (!account) {
+    fail(
+      'Configura y activa la cuenta de ingresos con un administrador responsable antes de cobrar pagos digitales.'
+    )
+  }
+  return account
 }
 
 function dictionaryDescendants(db: Database, id: string) {
@@ -981,6 +1290,8 @@ function purchaseDto(db: Database, row: any) {
       method: payment.method,
       date: payment.paid_at,
       notes: payment.notes ?? null,
+      paymentAccount: payment.payment_account ?? null,
+      paymentAccountId: payment.payment_account_id ?? null,
       createdByName: payment.created_by_name ?? null
     }))
   let aiMetadata: any = null
@@ -1006,9 +1317,22 @@ function purchaseDto(db: Database, row: any) {
     status: row.status,
     paymentStatus: row.payment_status ?? (Number(row.balance_cents ?? 0) > 0 ? 'pendiente' : 'pagada'),
     paymentMethod: row.payment_method ?? 'Transferencia',
+    paymentAccount: row.payment_account ?? null,
+    paymentAccountId: row.payment_account_id ?? null,
+    linkedIncomeAccountName: row.payment_account_id
+      ? db.get<{ name: string }>(
+          `SELECT linked.name
+           FROM dictionary_nodes account
+           LEFT JOIN dictionary_nodes linked ON linked.id = account.linked_income_account_id
+           WHERE account.id = ?`,
+          row.payment_account_id
+        )?.name ?? null
+      : null,
     paid: money(row.paid_cents ?? 0),
     balance: money(row.balance_cents ?? 0),
     dueDate: row.due_date ?? null,
+    createdByName: row.created_by_name ?? null,
+    createdByRole: row.created_by_role ?? null,
     payments,
     notes: row.notes ?? null,
     ai: aiMetadata,
@@ -1066,6 +1390,12 @@ function recordSupplierPayment(
     purchaseNumber: string
     amountCents: number
     method: string
+    paymentAccount?: {
+      id: string | null
+      name: string
+      channel: string
+      linkedIncomeAccountId: string | null
+    } | null
     paidAt: string
     notes?: string | null
     registerCash?: boolean
@@ -1075,12 +1405,15 @@ function recordSupplierPayment(
   const id = `sp_${sha256(`${input.purchaseId}|${input.amountCents}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
   db.run(
     `INSERT INTO supplier_payments
-      (id, purchase_id, amount_cents, method, paid_at, notes, created_by, created_by_name, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, purchase_id, amount_cents, method, payment_account, payment_account_id,
+       paid_at, notes, created_by, created_by_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     input.purchaseId,
     input.amountCents,
     input.method,
+    input.paymentAccount?.name ?? null,
+    input.paymentAccount?.id ?? null,
     input.paidAt,
     input.notes ?? null,
     session.userId,
@@ -1093,6 +1426,17 @@ function recordSupplierPayment(
       method: 'Efectivo',
       amountCents: input.amountCents,
       reason: `Pago compra ${input.purchaseNumber}`,
+      referenceType: 'purchase',
+      referenceId: input.purchaseId,
+      createdAt: input.paidAt
+    })
+  } else if (input.paymentAccount?.linkedIncomeAccountId) {
+    recordAccountMovement(db, session, {
+      accountId: input.paymentAccount.linkedIncomeAccountId,
+      accountName: input.paymentAccount.name,
+      type: 'egreso',
+      amountCents: input.amountCents,
+      description: `Pago compra ${input.purchaseNumber} · ${input.paymentAccount.name}`,
       referenceType: 'purchase',
       referenceId: input.purchaseId,
       createdAt: input.paidAt
@@ -1642,6 +1986,208 @@ function reportData(db: Database, session: Session, period: string) {
     load: Math.round((stats.open / Math.max(stats.total, 1)) * 100)
   }))
 
+  const invoiceCost = new Map<string, number>()
+  for (const item of items) {
+    invoiceCost.set(
+      item.invoice_id,
+      (invoiceCost.get(item.invoice_id) ?? 0) +
+        Number(item.unit_cost_cents) * Number(item.quantity)
+    )
+  }
+  const salesByUserMap = new Map<
+    string,
+    {
+      userId: string
+      name: string
+      role: string
+      invoices: number
+      sales: number
+      cost: number
+    }
+  >()
+  for (const invoice of invoices) {
+    const key = invoice.created_by || 'sin_usuario'
+    const current = salesByUserMap.get(key) ?? {
+      userId: key,
+      name: invoice.created_by_name || 'Usuario eliminado',
+      role: invoice.created_by_role || '',
+      invoices: 0,
+      sales: 0,
+      cost: 0
+    }
+    current.invoices += 1
+    current.sales += Number(invoice.total_cents)
+    current.cost += invoiceCost.get(invoice.id) ?? 0
+    salesByUserMap.set(key, current)
+  }
+  const salesByUser = [...salesByUserMap.values()]
+    .sort((a, b) => b.sales - a.sales)
+    .map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      role: row.role ? roleLabel(row.role as any) : 'Sin rol',
+      invoices: row.invoices,
+      sales: money(row.sales),
+      cost: canGross ? money(row.cost) : null,
+      margin: canGross ? money(row.sales - row.cost) : null,
+      marginPercent:
+        canGross && row.sales > 0 ? Math.round(((row.sales - row.cost) / row.sales) * 1000) / 10 : null,
+      averageTicket: row.invoices ? money(Math.round(row.sales / row.invoices)) : 0
+    }))
+
+  const technicianMap = new Map<
+    string,
+    {
+      userId: string
+      name: string
+      role: string
+      orders: number
+      sales: number
+      services: number
+      parts: number
+      cost: number
+    }
+  >()
+  for (const invoice of invoices) {
+    if (invoice.type !== 'ot' || !invoice.order_id) continue
+    const order = db.get<any>(
+      `SELECT w.technician_id, u.name AS technician_name, u.role AS technician_role
+       FROM work_orders w LEFT JOIN users u ON u.id = w.technician_id
+       WHERE w.id = ?`,
+      invoice.order_id
+    )
+    if (!order) continue
+    const key = order.technician_id || 'sin_asignar'
+    const current = technicianMap.get(key) ?? {
+      userId: key,
+      name: order.technician_name || 'Sin asignar',
+      role: order.technician_role || '',
+      orders: 0,
+      sales: 0,
+      services: 0,
+      parts: 0,
+      cost: 0
+    }
+    current.orders += 1
+    current.sales += Number(invoice.total_cents)
+    current.cost += invoiceCost.get(invoice.id) ?? 0
+    const orderItems = db.all<any>('SELECT * FROM invoice_items WHERE invoice_id = ?', invoice.id)
+    for (const item of orderItems) {
+      const line = Number(item.unit_price_cents) * Number(item.quantity)
+      if (item.item_type === 'servicio') current.services += line
+      else current.parts += line
+    }
+    technicianMap.set(key, current)
+  }
+  const technicianRevenue = [...technicianMap.values()]
+    .sort((a, b) => b.sales - a.sales)
+    .map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      role: row.role ? roleLabel(row.role as any) : 'Sin rol',
+      orders: row.orders,
+      sales: money(row.sales),
+      services: money(row.services),
+      parts: money(row.parts),
+      cost: canGross ? money(row.cost) : null,
+      margin: canGross ? money(row.sales - row.cost) : null
+    }))
+
+  const trackingConfig = db.getSetting<any>('tracking_config', DEFAULT_SETTINGS.tracking)
+  const purchaseTrackingEnabled = trackingConfig?.purchasesByUser !== false
+  const purchasesByUserMap = new Map<
+    string,
+    {
+      userId: string
+      name: string
+      role: string
+      purchases: number
+      items: number
+      total: number
+      iva: number
+      estimatedMargin: number
+      lastPurchaseAt: string | null
+    }
+  >()
+  if (purchaseTrackingEnabled) {
+    for (const purchase of purchases) {
+      const key = purchase.created_by || 'sin_usuario'
+      const current = purchasesByUserMap.get(key) ?? {
+        userId: key,
+        name: purchase.created_by_name || 'Usuario eliminado',
+        role: purchase.created_by_role || '',
+        purchases: 0,
+        items: 0,
+        total: 0,
+        iva: 0,
+        estimatedMargin: 0,
+        lastPurchaseAt: null
+      }
+      current.purchases += 1
+      current.items += Number(purchase.item_count ?? 0)
+      current.total += Number(purchase.total_cents)
+      current.iva += Number(purchase.iva_cents)
+      const purchaseItems = db.all<any>(
+        `SELECT pi.quantity, pi.unit_price_cents, p.price_cents AS sale_price_cents
+         FROM purchase_items pi LEFT JOIN products p ON p.id = pi.product_id
+         WHERE pi.purchase_id = ?`,
+        purchase.id
+      )
+      for (const item of purchaseItems) {
+        if (item.sale_price_cents === null || item.sale_price_cents === undefined) continue
+        current.estimatedMargin +=
+          (Number(item.sale_price_cents) - Number(item.unit_price_cents)) *
+          Number(item.quantity)
+      }
+      if (!current.lastPurchaseAt || purchase.created_at > current.lastPurchaseAt) {
+        current.lastPurchaseAt = purchase.created_at
+      }
+      purchasesByUserMap.set(key, current)
+    }
+  }
+  const purchasesByUser = [...purchasesByUserMap.values()]
+    .sort((a, b) => b.total - a.total)
+    .map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      role: row.role ? roleLabel(row.role as any) : 'Sin rol',
+      purchases: row.purchases,
+      items: row.items,
+      total: money(row.total),
+      iva: money(row.iva),
+      estimatedMargin: canGross ? money(row.estimatedMargin) : null,
+      lastPurchaseAt: row.lastPurchaseAt
+    }))
+
+  const accountRows = db.all<any>(
+    `SELECT m.account_id, a.name,
+            SUM(CASE WHEN m.type = 'ingreso' THEN m.amount_cents ELSE 0 END) AS income_cents,
+            SUM(CASE WHEN m.type = 'egreso' THEN m.amount_cents ELSE 0 END) AS expense_cents,
+            COUNT(*) AS entries
+     FROM account_movements m
+     JOIN dictionary_nodes a ON a.id = m.account_id
+     WHERE datetime(m.created_at) >= datetime(?)
+     GROUP BY m.account_id, a.name
+     ORDER BY a.name`,
+    start.toISOString()
+  )
+  const accountSummary = accountRows.map((row) => {
+    const all = db.get<any>(
+      `SELECT
+         SUM(CASE WHEN type = 'ingreso' THEN amount_cents ELSE 0 END) AS income_cents,
+         SUM(CASE WHEN type = 'egreso' THEN amount_cents ELSE 0 END) AS expense_cents
+       FROM account_movements WHERE account_id = ?`,
+      row.account_id
+    )
+    return {
+      accountName: row.name,
+      income: money(Number(row.income_cents ?? 0)),
+      expenses: money(Number(row.expense_cents ?? 0)),
+      balance: money(Number(all?.income_cents ?? 0) - Number(all?.expense_cents ?? 0)),
+      entries: Number(row.entries ?? 0)
+    }
+  })
+
   const chartData = monthlyChartData(db)
 
   return {
@@ -1660,8 +2206,13 @@ function reportData(db: Database, session: Session, period: string) {
     categoryData,
     topProducts,
     technicianStats,
+    salesByUser,
+    technicianRevenue,
+    purchasesByUser,
+    accountSummary,
+    purchaseTrackingEnabled,
     invoices: invoices.slice(0, 50).map((invoice) => invoiceDto(db, invoice)),
-    payments: payments.slice(0, 50).map(paymentDto),
+    payments: payments.slice(0, 50).map((payment) => paymentDto(db, payment)),
     permissions: { grossMargin: canGross, netProfit: canNet }
   }
 }
@@ -1669,7 +2220,7 @@ function reportData(db: Database, session: Session, period: string) {
 function requireCapabilitySoft(role: string, capability: BackendCapability) {
   return can(role as any, capability)
 }
-function notificationData(db: Database) {
+function notificationData(db: Database, session?: Session) {
   const low = db.get<{ count: number }>(
     'SELECT COUNT(*) AS count FROM products WHERE active = 1 AND is_service = 0 AND alert_enabled = 1 AND stock > 0 AND stock <= min_stock'
   )?.count ?? 0
@@ -1715,6 +2266,18 @@ function notificationData(db: Database) {
       time: 'Ahora',
       tone: 'warning'
     })
+  }
+  if (session) {
+    const transfers = pendingTransfersFor(db, session.userId)
+    if (transfers.length) {
+      data.push({
+        id: 'cash-transfers',
+        title: `${transfers.length} traslado${transfers.length === 1 ? '' : 's'} a banco pendiente${transfers.length === 1 ? '' : 's'}`,
+        description: 'Revisa el monto y aprueba o rechaza desde Caja.',
+        time: 'Ahora',
+        tone: 'warning'
+      })
+    }
   }
   return data
 }
@@ -1781,6 +2344,13 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
       fs.cpSync(productImagesSource, productImagesTarget, { recursive: true, force: true })
     }
 
+    const paymentReceiptsSource = paymentReceiptRoot(runtime.userDataPath)
+    const paymentReceiptsTarget = path.join(folder, PAYMENT_RECEIPT_FOLDER)
+    fs.mkdirSync(paymentReceiptsTarget, { recursive: true })
+    if (fs.existsSync(paymentReceiptsSource)) {
+      fs.cpSync(paymentReceiptsSource, paymentReceiptsTarget, { recursive: true, force: true })
+    }
+
     const evidenceRows = db.all<any>(
       `SELECT e.*, w.number AS order_number, w.customer_id, c.name AS customer_name
        FROM work_order_evidence e
@@ -1790,6 +2360,7 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
     )
     const evidenceFiles = walkFiles(evidenceTarget)
     const productImageFiles = walkFiles(productImagesTarget)
+    const paymentReceiptFiles = walkFiles(paymentReceiptsTarget)
     const activeRows = evidenceRows.filter((row) => row.status === 'activa')
     const activeBytes = activeRows.reduce((sum, row) => sum + Number(row.size_bytes ?? 0), 0)
     const databaseBytes = fs.readFileSync(databaseTarget)
@@ -1848,8 +2419,17 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
           sha256: sha256Bytes(fs.readFileSync(file.absolute))
         }))
       },
+      paymentReceipts: {
+        count: paymentReceiptFiles.length,
+        bytes: paymentReceiptFiles.reduce((sum, file) => sum + file.size, 0),
+        files: paymentReceiptFiles.map((file) => ({
+          path: file.relative,
+          size: file.size,
+          sha256: sha256Bytes(fs.readFileSync(file.absolute))
+        }))
+      },
       disclaimer:
-        'Respaldo completo de BitacoreTech: base de datos, evidencias fotográficas, imágenes de inventario y manifiesto de integridad. Conserve esta carpeta como soporte de reclamos.'
+        'Respaldo completo de BitacoreTech: base de datos, evidencias fotográficas, imágenes de inventario, comprobantes de pago y manifiesto de integridad. Conserve esta carpeta como soporte de reclamos.'
     }
     const manifestBuffer = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8')
     fs.writeFileSync(path.join(folder, 'manifest.json'), manifestBuffer)
@@ -1857,6 +2437,7 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
       databaseBytes.length +
       evidenceFiles.reduce((sum, file) => sum + file.size, 0) +
       productImageFiles.reduce((sum, file) => sum + file.size, 0) +
+      paymentReceiptFiles.reduce((sum, file) => sum + file.size, 0) +
       manifestBuffer.length
     const id = `bk_${sha256(`${folderName}|${Date.now()}`).slice(0, 20)}`
     db.run(
@@ -2019,6 +2600,8 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
   }
   const sourceProductImages = path.join(String(backup.path), PRODUCT_IMAGE_FOLDER)
   const hasProductImages = format === 'folder' && fs.existsSync(sourceProductImages)
+  const sourcePaymentReceipts = path.join(String(backup.path), PAYMENT_RECEIPT_FOLDER)
+  const hasPaymentReceipts = format === 'folder' && fs.existsSync(sourcePaymentReceipts)
   const safety = await createBackup(db, runtime, session)
   closeDatabase()
   const wal = `${db.path}-wal`
@@ -2043,6 +2626,15 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
     } else {
       fs.mkdirSync(currentProductImages, { recursive: true })
     }
+    const currentPaymentReceipts = paymentReceiptRoot(runtime.userDataPath)
+    if (fs.existsSync(currentPaymentReceipts)) {
+      fs.rmSync(currentPaymentReceipts, { recursive: true, force: true })
+    }
+    if (hasPaymentReceipts) {
+      fs.cpSync(sourcePaymentReceipts, currentPaymentReceipts, { recursive: true, force: true })
+    } else {
+      fs.mkdirSync(currentPaymentReceipts, { recursive: true })
+    }
   } catch (error) {
     try {
       openDatabase(runtime.userDataPath)
@@ -2060,6 +2652,12 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
     restored.run(
       'UPDATE products SET image_path = NULL, image_thumb_path = NULL, image_updated_at = NULL'
     )
+  }
+  if (!hasPaymentReceipts) {
+    const receiptTable = restored.get<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'payment_receipts'"
+    )
+    if (receiptTable) restored.run('DELETE FROM payment_receipts')
   }
   const credentialsRestored = Number(
     restored.get<{ count: number }>('SELECT COUNT(*) AS count FROM work_order_credentials')?.count ?? 0
@@ -2360,6 +2958,21 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const report = reportData(db, session, '30d')
       const open = orders.filter((order: any) => !['entregado', 'no_reparado'].includes(order.status))
       const cash = currentCashSession(db)
+      const performanceStart = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
+      const sellerPerformance = db.get<any>(
+        `SELECT COUNT(*) AS invoices, COALESCE(SUM(total_cents), 0) AS sales
+         FROM invoices
+         WHERE status = 'activa' AND created_by = ? AND datetime(created_at) >= datetime(?)`,
+        session.userId,
+        performanceStart
+      )
+      const technicianPerformance = db.get<any>(
+        `SELECT COUNT(*) AS orders, COALESCE(SUM(i.total_cents), 0) AS sales
+         FROM invoices i JOIN work_orders w ON w.id = i.order_id
+         WHERE i.status = 'activa' AND w.technician_id = ? AND datetime(i.created_at) >= datetime(?)`,
+        session.userId,
+        performanceStart
+      )
       return {
         stats: {
           salesToday: money(todayInvoices.reduce((sum, invoice) => sum + Number(invoice.total_cents), 0)),
@@ -2376,12 +2989,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
         stockSummary,
         chartData: report.chartData,
         technicianStats: report.technicianStats,
-        notifications: notificationData(db)
+        personalPerformance: {
+          sellerInvoices: Number(sellerPerformance?.invoices ?? 0),
+          sellerSales: money(Number(sellerPerformance?.sales ?? 0)),
+          technicianOrders: Number(technicianPerformance?.orders ?? 0),
+          technicianSales: money(Number(technicianPerformance?.sales ?? 0))
+        },
+        notifications: notificationData(db, session)
       }
     }
 
     case 'notifications.list': {
-      return notificationData(db)
+      return notificationData(db, session)
     }
 
     case 'customers.list': {
@@ -3993,13 +4612,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireCashSession(db)
       const number = db.paymentNumber()
       const id = `pay_${sha256(`${row.id}|${number}|${Date.now()}`).slice(0, 20)}`
+      const incomeAccount =
+        method === 'Efectivo' || method === 'Mixto' ? null : requireIncomeAccount(db)
+      const preparedReceipt = prepareReceiptFromPayload(runtime, id, payload?.receipt)
       const nowIso = new Date().toISOString()
-      db.tx(() => {
+      try {
+        db.tx(() => {
         db.run(
           `INSERT INTO payments
             (id, number, kind, order_id, invoice_id, method, amount_cents, received_cents, change_cents, reference,
-             is_exception, created_by, created_by_name, created_at)
-           VALUES (?, ?, 'anticipo', ?, NULL, ?, ?, ?, 0, ?, 0, ?, ?, ?)`,
+             income_account_id, income_account_name, is_exception, created_by, created_by_name, created_by_role, created_at)
+           VALUES (?, ?, 'anticipo', ?, NULL, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?, ?, ?)`,
           id,
           number,
           row.id,
@@ -4007,10 +4630,26 @@ export async function handleRpc(command: string, payload: Payload, token: string
           amountCents,
           amountCents,
           typeof payload?.reference === 'string' ? payload.reference.slice(0, 160) : null,
+          incomeAccount?.id ?? null,
+          incomeAccount?.name ?? null,
           session.userId,
           displayUser(session).name,
+          session.actualRole,
           nowIso
         )
+        insertPaymentReceipt(db, session, id, preparedReceipt)
+        if (incomeAccount) {
+          recordAccountMovement(db, session, {
+            accountId: incomeAccount.id,
+            accountName: incomeAccount.name,
+            type: 'ingreso',
+            amountCents,
+            description: `Anticipo ${row.number} · ${row.customer_name} · ${method}`,
+            referenceType: 'payment',
+            referenceId: id,
+            createdAt: nowIso
+          })
+        }
         recordCash(db, session, {
           type: 'ingreso',
           method,
@@ -4025,10 +4664,16 @@ export async function handleRpc(command: string, payload: Payload, token: string
           session,
           'Registro de pago',
           'Orden de trabajo',
-          `${row.number} · anticipo ${number} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount)} · ${method}`,
+          `${row.number} · anticipo ${number} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount)} · ${method}${incomeAccount ? ` · ${incomeAccount.name}` : ''}${preparedReceipt ? ' · comprobante' : ''}`,
           row.id
         )
-      })
+        })
+      } catch (error) {
+        if (preparedReceipt) {
+          removePaymentReceiptFiles(runtime.userDataPath, [preparedReceipt.relativePath])
+        }
+        throw error
+      }
       return orderDto(db, getOrderOrFail(db, row.id))
     }
 
@@ -4078,8 +4723,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const changeCents = method === 'Efectivo' && !noCharge ? Math.max(received - chargeCents, 0) : 0
       const nowIso = new Date().toISOString()
       requireCashSession(db)
+      const paymentNumber = !noCharge && chargeCents > 0 ? db.paymentNumber() : ''
+      const paymentId =
+        paymentNumber
+          ? `pay_${sha256(`${row.id}|${paymentNumber}|${Date.now()}`).slice(0, 20)}`
+          : ''
+      const incomeAccount =
+        noCharge || method === 'Efectivo' || method === 'Mixto' ? null : requireIncomeAccount(db)
+      const preparedReceipt =
+        paymentId ? prepareReceiptFromPayload(runtime, paymentId, payload?.receipt) : null
       let invoice: { id: string; number: string } | null = null
-      db.tx(() => {
+      try {
+        db.tx(() => {
         invoice = createOrderInvoice(
           db,
           session,
@@ -4096,13 +4751,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
           }
         )
         if (!noCharge && chargeCents > 0) {
-          const paymentNumber = db.paymentNumber()
-          const paymentId = `pay_${sha256(`${row.id}|${paymentNumber}|${Date.now()}`).slice(0, 20)}`
           db.run(
             `INSERT INTO payments
               (id, number, kind, order_id, invoice_id, method, amount_cents, received_cents, change_cents, reference,
-               is_exception, created_by, created_by_name, created_at)
-             VALUES (?, ?, 'saldo', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+               income_account_id, income_account_name, is_exception, created_by, created_by_name, created_by_role, created_at)
+             VALUES (?, ?, 'saldo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
             paymentId,
             paymentNumber,
             row.id,
@@ -4112,10 +4765,26 @@ export async function handleRpc(command: string, payload: Payload, token: string
             received,
             changeCents,
             typeof payload?.reference === 'string' ? payload.reference.slice(0, 160) : null,
+            incomeAccount?.id ?? null,
+            incomeAccount?.name ?? null,
             session.userId,
             displayUser(session).name,
+            session.actualRole,
             nowIso
           )
+          insertPaymentReceipt(db, session, paymentId, preparedReceipt)
+          if (incomeAccount) {
+            recordAccountMovement(db, session, {
+              accountId: incomeAccount.id,
+              accountName: incomeAccount.name,
+              type: 'ingreso',
+              amountCents: chargeCents,
+              description: `Cobro ${invoice!.number} · ${row.number} · ${row.customer_name} · ${method}`,
+              referenceType: 'invoice',
+              referenceId: invoice!.id,
+              createdAt: nowIso
+            })
+          }
           recordCash(db, session, {
             type: 'venta',
             method,
@@ -4157,7 +4826,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
             : `${row.number} · ${invoice!.number} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · saldo ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(chargeCents))}`,
           row.id
         )
-      })
+        })
+      } catch (error) {
+        if (preparedReceipt) {
+          removePaymentReceiptFiles(runtime.userDataPath, [preparedReceipt.relativePath])
+        }
+        throw error
+      }
       return orderDto(db, getOrderOrFail(db, row.id))
     }
 
@@ -4215,13 +4890,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireCashSession(db)
       const number = db.invoiceNumber()
       const invoiceId = `inv_${sha256(`${number}|${Date.now()}`).slice(0, 20)}`
+      const paymentId = `pay_${sha256(`${invoiceId}|${Date.now()}`).slice(0, 20)}`
+      const incomeAccount =
+        method === 'Efectivo' || method === 'Mixto' ? null : requireIncomeAccount(db)
+      const preparedReceipt = prepareReceiptFromPayload(runtime, paymentId, payload?.receipt)
       const nowIso = new Date().toISOString()
-      db.tx(() => {
+      try {
+        db.tx(() => {
         db.run(
           `INSERT INTO invoices
             (id, number, type, customer_id, customer_name, subtotal_cents, discount_percent, discount_type, discount_value,
-             discount_cents, total_cents, payment_method, status, created_by, created_at)
-           VALUES (?, ?, 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?)`,
+             discount_cents, total_cents, payment_method, status, created_by, created_by_name, created_by_role, created_at)
+           VALUES (?, ?, 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?, ?, ?)`,
           invoiceId,
           number,
           customer.id,
@@ -4234,6 +4914,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           totalCents,
           method,
           session.userId,
+          displayUser(session).name,
+          session.actualRole,
           nowIso
         )
         for (const line of prepared) {
@@ -4273,9 +4955,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.run(
           `INSERT INTO payments
             (id, number, kind, order_id, invoice_id, method, amount_cents, received_cents, change_cents, reference,
-             is_exception, created_by, created_by_name, created_at)
-           VALUES (?, ?, 'venta', NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-          `pay_${sha256(`${invoiceId}|${Date.now()}`).slice(0, 20)}`,
+             income_account_id, income_account_name, is_exception, created_by, created_by_name, created_by_role, created_at)
+           VALUES (?, ?, 'venta', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+          paymentId,
           db.paymentNumber(),
           invoiceId,
           method,
@@ -4283,10 +4965,26 @@ export async function handleRpc(command: string, payload: Payload, token: string
           received,
           changeCents,
           typeof payload?.reference === 'string' ? payload.reference.slice(0, 160) : null,
+          incomeAccount?.id ?? null,
+          incomeAccount?.name ?? null,
           session.userId,
           displayUser(session).name,
+          session.actualRole,
           nowIso
         )
+        insertPaymentReceipt(db, session, paymentId, preparedReceipt)
+        if (incomeAccount) {
+          recordAccountMovement(db, session, {
+            accountId: incomeAccount.id,
+            accountName: incomeAccount.name,
+            type: 'ingreso',
+            amountCents: totalCents,
+            description: `Venta ${number} · ${customer.name} · ${method}`,
+            referenceType: 'invoice',
+            referenceId: invoiceId,
+            createdAt: nowIso
+          })
+        }
         recordCash(db, session, {
           type: 'venta',
           method,
@@ -4301,10 +4999,16 @@ export async function handleRpc(command: string, payload: Payload, token: string
           session,
           'Venta POS',
           'Factura',
-          `${number} · ${customer.name} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · ${method}`,
+          `${number} · ${customer.name} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · ${method}${incomeAccount ? ` · ${incomeAccount.name}` : ''}${preparedReceipt ? ' · comprobante' : ''}`,
           invoiceId
         )
-      })
+        })
+      } catch (error) {
+        if (preparedReceipt) {
+          removePaymentReceiptFiles(runtime.userDataPath, [preparedReceipt.relativePath])
+        }
+        throw error
+      }
       const invoice = db.get<any>('SELECT * FROM invoices WHERE id = ?', invoiceId)
       return {
         invoice: invoiceDto(db, invoice),
@@ -4325,6 +5029,32 @@ export async function handleRpc(command: string, payload: Payload, token: string
           }))
         }
       }
+    }
+
+    case 'payments.openReceipt': {
+      if (
+        !can(session.actualRole as any, 'settleOrder') &&
+        !can(session.actualRole as any, 'createOrder') &&
+        !can(session.actualRole as any, 'viewAudit')
+      ) {
+        fail('Tu rol no puede abrir comprobantes de pago.', 'FORBIDDEN')
+      }
+      const paymentId = text(payload?.paymentId, 'Pago', 1, 80)
+      const receipt = db.get<any>('SELECT * FROM payment_receipts WHERE payment_id = ?', paymentId)
+      if (!receipt) fail('Este pago no tiene comprobante.', 'NOT_FOUND')
+      const absolute = resolvePaymentReceiptFile(runtime.userDataPath, String(receipt.path))
+      if (!fs.existsSync(absolute)) fail('El archivo del comprobante no existe.', 'NOT_FOUND')
+      const result = await shell.openPath(absolute)
+      if (result) fail(`No se pudo abrir el comprobante: ${result}`)
+      audit(
+        db,
+        session,
+        'Apertura de comprobante de pago',
+        'Pago',
+        `${receipt.filename} · ${paymentId}`,
+        paymentId
+      )
+      return { opened: true }
     }
 
     case 'invoices.history': {
@@ -4361,16 +5091,61 @@ export async function handleRpc(command: string, payload: Payload, token: string
     case 'cash.current': {
       requireModuleAccess(session, 'cash')
       const current = currentCashSession(db)
-      if (current) return { current: cashSessionDto(db, current), lastClosed: null, movements: cashSessionDto(db, current).movements }
+      const account = incomeAccountRow(db)
+      const responsible = account?.responsible_user_id
+        ? db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', account.responsible_user_id)
+        : null
+      const pending = pendingTransfersFor(db, session.userId).map((row) =>
+        cashTransferDto(db, row, session)
+      )
+      const mine = db
+        .all<any>(
+          'SELECT * FROM cash_transfers WHERE requested_by = ? ORDER BY created_at DESC LIMIT 20',
+          session.userId
+        )
+        .map((row) => cashTransferDto(db, row, session))
+      const incomeAccount = account
+        ? {
+            id: account.id,
+            name: account.name,
+            responsibleUserId: account.responsible_user_id ?? null,
+            responsibleUserName: responsible?.name ?? null
+          }
+        : null
+      if (current) {
+        const dto = cashSessionDto(db, current)
+        return {
+          current: dto,
+          lastClosed: null,
+          movements: dto.movements,
+          pendingTransfers: pending,
+          myTransfers: mine,
+          incomeAccount
+        }
+      }
       const last = db.get<any>("SELECT * FROM cash_sessions WHERE status = 'cerrado' ORDER BY closed_at DESC LIMIT 1")
-      return { current: null, lastClosed: last ? cashSessionDto(db, last) : null, movements: [] }
+      return {
+        current: null,
+        lastClosed: last ? cashSessionDto(db, last) : null,
+        movements: [],
+        pendingTransfers: pending,
+        myTransfers: mine,
+        incomeAccount
+      }
     }
 
     case 'cash.open': {
       requireModuleAccess(session, 'cash')
       requireCap(session, 'closeCash')
       if (currentCashSession(db)) fail('Ya hay un turno de caja abierto.')
-      const initial = numberValue(payload?.initialAmount ?? 200000, 'Base inicial', { min: 0 })
+      const lastClosed = db.get<{ carry_over_cents: number }>(
+        "SELECT carry_over_cents FROM cash_sessions WHERE status = 'cerrado' ORDER BY closed_at DESC LIMIT 1"
+      )
+      const initial = numberValue(
+        payload?.initialAmount ?? money(Number(lastClosed?.carry_over_cents ?? 0)),
+        'Base inicial',
+        { min: 0 }
+      )
       let id = db.nextSequence('cash_session', 184).toString()
       if (db.get<any>('SELECT id FROM cash_sessions WHERE id = ?', id)) {
         id = db.nextSequence('cash_session', Number(id) + 1).toString()
@@ -4429,12 +5204,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const dto = cashSessionDto(db, cashSession)
       const expected = toCents(dto.expected)
       const countedCents = toCents(counted)
+      const carryOverCents = toCents(
+        numberValue(payload?.carryOver ?? money(countedCents), 'Efectivo para base', { min: 0 })
+      )
+      if (carryOverCents > countedCents) {
+        fail('El efectivo para base no puede superar el efectivo contado.')
+      }
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `UPDATE cash_sessions
            SET closed_by = ?, closed_by_name = ?, closed_at = ?, expected_cents = ?, counted_cents = ?,
-               difference_cents = ?, status = 'cerrado', notes = ?
+               difference_cents = ?, carry_over_cents = ?, status = 'cerrado', notes = ?
            WHERE id = ?`,
           session.userId,
           displayUser(session).name,
@@ -4442,6 +5223,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           expected,
           countedCents,
           countedCents - expected,
+          carryOverCents,
           notes,
           cashSession.id
         )
@@ -4454,6 +5236,150 @@ export async function handleRpc(command: string, payload: Payload, token: string
         )
       })
       return cashSessionDto(db, db.get<any>('SELECT * FROM cash_sessions WHERE id = ?', cashSession.id))
+    }
+
+    case 'cash.transferRequest': {
+      requireModuleAccess(session, 'cash')
+      requireCap(session, 'closeCash')
+      const amount = numberValue(payload?.amount, 'Valor del traslado', { min: 0.01 })
+      const amountCents = toCents(amount)
+      const notes =
+        typeof payload?.notes === 'string' && payload.notes.trim()
+          ? payload.notes.trim().slice(0, 500)
+          : null
+      const current = requireCashSession(db)
+      const account = incomeAccountRow(db)
+      if (!account) {
+        fail('Configura y activa la cuenta de ingresos antes de trasladar efectivo.')
+      }
+      const responsible = account.responsible_user_id
+        ? db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', account.responsible_user_id)
+        : null
+      const id = `ctr_${sha256(`${current.id}|${amountCents}|${Date.now()}`).slice(0, 20)}`
+      const nowIso = new Date().toISOString()
+      const requestedBy = session.userId
+      const requestedByName = displayUser(session).name
+      const autoApprove = account.responsible_user_id === requestedBy
+      db.tx(() => {
+        db.run(
+          `INSERT INTO cash_transfers
+            (id, cash_session_id, account_id, requested_cents, approved_cents, status,
+             requested_by, requested_by_name, approved_by, approved_by_name, approved_at,
+             rejection_reason, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, NULL, 'pendiente', ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+          id,
+          current.id,
+          account.id,
+          amountCents,
+          requestedBy,
+          requestedByName,
+          notes,
+          nowIso,
+          nowIso
+        )
+        if (autoApprove) {
+          const transfer = db.get<any>('SELECT * FROM cash_transfers WHERE id = ?', id)
+          executeCashTransfer(db, session, transfer, amountCents, account)
+        }
+        audit(
+          db,
+          session,
+          autoApprove ? 'Traslado de efectivo a banco' : 'Solicitud de traslado a banco',
+          'Caja',
+          `${account.name} · ${money(amountCents)} · ${
+            autoApprove ? 'aprobado automáticamente' : `pendiente de ${responsible?.name ?? 'un administrador'}`
+          }`,
+          id
+        )
+      })
+      const transfer = db.get<any>('SELECT * FROM cash_transfers WHERE id = ?', id)
+      return {
+        transfer: cashTransferDto(db, transfer, session),
+        pendingTransfers: pendingTransfersFor(db, session.userId).map((row) =>
+          cashTransferDto(db, row, session)
+        )
+      }
+    }
+
+    case 'cash.transferApprove': {
+      requireModuleAccess(session, 'cash')
+      requireCap(session, 'closeCash')
+      const id = text(payload?.id, 'Traslado', 1, 80)
+      const transfer = db.get<any>('SELECT * FROM cash_transfers WHERE id = ?', id)
+      if (!transfer) fail('Traslado no encontrado', 'NOT_FOUND')
+      if (transfer.status !== 'pendiente') fail('El traslado ya fue procesado.')
+      const account = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', transfer.account_id)
+      if (!account || account.responsible_user_id !== session.userId) {
+        fail('Solo el administrador vinculado a la cuenta puede aprobar este traslado.', 'FORBIDDEN')
+      }
+      const amount = numberValue(
+        payload?.amount ?? money(Number(transfer.requested_cents)),
+        'Valor aprobado',
+        { min: 0.01 }
+      )
+      const amountCents = toCents(amount)
+      db.tx(() => {
+        executeCashTransfer(db, session, transfer, amountCents, account)
+        audit(
+          db,
+          session,
+          'Aprobación de traslado a banco',
+          'Caja',
+          `${account.name} · solicitado ${money(Number(transfer.requested_cents))} · aprobado ${money(amountCents)}`,
+          id
+        )
+      })
+      return {
+        transfer: cashTransferDto(
+          db,
+          db.get<any>('SELECT * FROM cash_transfers WHERE id = ?', id),
+          session
+        )
+      }
+    }
+
+    case 'cash.transferReject': {
+      requireModuleAccess(session, 'cash')
+      requireCap(session, 'closeCash')
+      const id = text(payload?.id, 'Traslado', 1, 80)
+      const transfer = db.get<any>('SELECT * FROM cash_transfers WHERE id = ?', id)
+      if (!transfer) fail('Traslado no encontrado', 'NOT_FOUND')
+      if (transfer.status !== 'pendiente') fail('El traslado ya fue procesado.')
+      const account = db.get<any>('SELECT * FROM dictionary_nodes WHERE id = ?', transfer.account_id)
+      if (!account || account.responsible_user_id !== session.userId) {
+        fail('Solo el administrador vinculado a la cuenta puede rechazar este traslado.', 'FORBIDDEN')
+      }
+      const reason = text(payload?.reason, 'Motivo del rechazo', 3, 500)
+      const nowIso = new Date().toISOString()
+      db.tx(() => {
+        db.run(
+          `UPDATE cash_transfers
+           SET status = 'rechazado', rejection_reason = ?, approved_by = ?, approved_by_name = ?,
+               approved_at = ?, updated_at = ?
+           WHERE id = ?`,
+          reason,
+          session.userId,
+          displayUser(session).name,
+          nowIso,
+          nowIso,
+          id
+        )
+        audit(
+          db,
+          session,
+          'Rechazo de traslado a banco',
+          'Caja',
+          `${account.name} · ${money(Number(transfer.requested_cents))} · ${reason}`,
+          id
+        )
+      })
+      return {
+        transfer: cashTransferDto(
+          db,
+          db.get<any>('SELECT * FROM cash_transfers WHERE id = ?', id),
+          session
+        )
+      }
     }
 
     case 'purchases.list': {
@@ -4802,21 +5728,31 @@ export async function handleRpc(command: string, payload: Payload, token: string
         typeof payload?.dueDate === 'string' && payload.dueDate.trim()
           ? isoDate(payload.dueDate, 'Fecha de vencimiento')
           : null
+      const paymentAccount = resolvePurchaseAccount(
+        db,
+        payload?.paymentAccountId,
+        payload?.paymentMethod
+      )
       const payment = purchasePaymentSummary({
         totalCents,
         paymentCondition: payload?.paymentCondition,
         initialPayment: payload?.initialPayment,
-        paymentMethod: payload?.paymentMethod
+        paymentMethod: paymentAccount.channel
       })
+      if (payload?.paymentCondition === 'credito' && payment.paidCents === 0) {
+        payment.paymentMethod = 'Crédito'
+      }
+      const paidAccount = payment.paidCents > 0 ? paymentAccount : null
       const id = `pur_${sha256(`${purchaseNumber}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO purchases
             (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
-             discount_cents, adjustment_cents, status, payment_status, payment_method, paid_cents,
-             balance_cents, due_date, notes, ai_metadata_json, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+             discount_cents, adjustment_cents, status, payment_status, payment_method,
+             payment_account, payment_account_id, paid_cents, balance_cents, due_date, notes,
+             ai_metadata_json, created_by, created_by_name, created_by_role, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
           id,
           purchaseNumber,
           supplierId,
@@ -4828,11 +5764,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
           status,
           payment.paymentStatus,
           payment.paymentMethod,
+          paidAccount?.name ?? null,
+          paidAccount?.id ?? null,
           payment.paidCents,
           payment.balanceCents,
           dueDate,
           typeof payload?.notes === 'string' ? payload.notes.slice(0, 1000) : null,
           session.userId,
+          displayUser(session).name,
+          session.actualRole,
           nowIso
         )
         if (!itemsInput.length) {
@@ -4910,6 +5850,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             purchaseNumber,
             amountCents: payment.paidCents,
             method: payment.paymentMethod,
+            paymentAccount: paidAccount,
             paidAt: nowIso,
             notes:
               payment.paymentStatus === 'parcial'
@@ -5034,21 +5975,31 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (aiMetadata && aiMetadata.length > 30000) {
         fail('Los metadatos de la IA son demasiado grandes.')
       }
+      const paymentAccount = resolvePurchaseAccount(
+        db,
+        payload?.paymentAccountId,
+        payload?.paymentMethod
+      )
       const payment = purchasePaymentSummary({
         totalCents: realTotalCents,
         paymentCondition: payload?.paymentCondition,
         initialPayment: payload?.initialPayment,
-        paymentMethod: payload?.paymentMethod
+        paymentMethod: paymentAccount.channel
       })
+      if (payload?.paymentCondition === 'credito' && payment.paidCents === 0) {
+        payment.paymentMethod = 'Crédito'
+      }
+      const paidAccount = payment.paidCents > 0 ? paymentAccount : null
       const id = `pur_${sha256(`${supplierId}|${purchaseNumber}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO purchases
             (id, number, supplier_id, purchase_date, item_count, subtotal_cents, iva_cents, total_cents,
-             discount_cents, adjustment_cents, status, payment_status, payment_method, paid_cents,
-             balance_cents, due_date, notes, ai_metadata_json, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recibida', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             discount_cents, adjustment_cents, status, payment_status, payment_method,
+             payment_account, payment_account_id, paid_cents, balance_cents, due_date, notes,
+             ai_metadata_json, created_by, created_by_name, created_by_role, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recibida', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           purchaseNumber,
           supplierId,
@@ -5061,12 +6012,16 @@ export async function handleRpc(command: string, payload: Payload, token: string
           adjustmentCents,
           payment.paymentStatus,
           payment.paymentMethod,
+          paidAccount?.name ?? null,
+          paidAccount?.id ?? null,
           payment.paidCents,
           payment.balanceCents,
           dueDate,
           typeof payload?.notes === 'string' ? payload.notes.slice(0, 1000) : null,
           aiMetadata,
           session.userId,
+          displayUser(session).name,
+          session.actualRole,
           nowIso
         )
         for (const [index, item] of prepared.entries()) {
@@ -5136,6 +6091,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             purchaseNumber,
             amountCents: payment.paidCents,
             method: payment.paymentMethod,
+            paymentAccount: paidAccount,
             paidAt: nowIso,
             notes:
               payment.paymentStatus === 'parcial'
@@ -5168,7 +6124,12 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (amountCents > balanceCents) {
         fail(`El abono supera el saldo pendiente (${money(balanceCents)}).`)
       }
-      const method = purchasePaymentMethod(payload?.method, 'Transferencia')
+      const paymentAccount = resolvePurchaseAccount(
+        db,
+        payload?.paymentAccountId,
+        payload?.method
+      )
+      const method = paymentAccount.channel
       if (method === 'Crédito') fail('Selecciona un medio de pago para el abono.')
       const paidAt =
         typeof payload?.date === 'string' && payload.date.trim()
@@ -5191,6 +6152,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           purchaseNumber: String(purchase.number ?? ''),
           amountCents,
           method,
+          paymentAccount,
           paidAt,
           notes,
           registerCash: true
@@ -5198,13 +6160,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.run(
           `UPDATE purchases
            SET paid_cents = ?, balance_cents = ?, payment_status = ?,
-               payment_method = CASE WHEN ? <= 0 THEN ? ELSE payment_method END
+               payment_method = CASE WHEN ? <= 0 THEN ? ELSE payment_method END,
+               payment_account = COALESCE(?, payment_account),
+               payment_account_id = COALESCE(?, payment_account_id)
            WHERE id = ?`,
           nextPaid,
           nextBalance,
           nextStatus,
           nextBalance,
           method,
+          paymentAccount.id ? paymentAccount.name : null,
+          paymentAccount.id,
           purchaseId
         )
         audit(
@@ -5284,8 +6250,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
     }
 
     case 'dictionaries.list': {
+      const canSeeAccounts =
+        session.actualRole === 'admin' || session.actualRole === 'superadmin'
       return db
         .all<any>('SELECT * FROM dictionary_nodes ORDER BY type ASC, parent_id ASC, sort_order ASC, name ASC')
+        .filter(
+          (row) =>
+            canSeeAccounts ||
+            (row.type !== 'purchase_payment_account' && row.type !== 'income_account')
+        )
         .map((row) => dictionaryNodeDto(db, row))
     }
 
@@ -5327,20 +6300,48 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const sortOrder =
         payload?.sortOrder === undefined ? Number(nextSort) : numberValue(payload.sortOrder, 'Orden', { min: 0, max: 99999 })
       const active = payload?.active === undefined ? true : Boolean(payload.active)
+      const channel =
+        type === 'income_account'
+          ? 'Digital'
+          : type === 'purchase_payment_account'
+            ? typeof payload?.channel === 'string' && payload.channel.trim()
+              ? payload.channel.trim()
+              : 'Transferencia'
+            : null
+      const responsibleUserId =
+        type === 'income_account' && typeof payload?.responsibleUserId === 'string' && payload.responsibleUserId
+          ? text(payload.responsibleUserId, 'Administrador responsable', 1, 80)
+          : null
+      const linkedIncomeAccountId =
+        type === 'purchase_payment_account' &&
+        typeof payload?.linkedIncomeAccountId === 'string' &&
+        payload.linkedIncomeAccountId
+          ? text(payload.linkedIncomeAccountId, 'Cuenta de ingresos', 1, 80)
+          : null
+      validatePaymentAccountFields(db, type, {
+        active,
+        responsibleUserId,
+        linkedIncomeAccountId,
+        channel
+      })
       const id = `dict_${sha256(`${type}|${parentId ?? ''}|${name}|${Date.now()}`).slice(0, 20)}`
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO dictionary_nodes
-            (id, parent_id, type, code, name, sort_order, active, system, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+            (id, parent_id, type, code, channel, name, sort_order, active, system,
+             responsible_user_id, linked_income_account_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
           id,
           parentId,
           type,
           code,
+          channel,
           name,
           sortOrder,
           active ? 1 : 0,
+          responsibleUserId,
+          linkedIncomeAccountId,
           nowIso,
           nowIso
         )
@@ -5425,13 +6426,51 @@ export async function handleRpc(command: string, payload: Payload, token: string
           changed.push('orden')
         }
       }
-      if (payload?.active !== undefined) {
-        const nextActive = Boolean(payload.active)
-        if (nextActive !== Boolean(row.active)) {
-          updates.push('active = ?')
-          params.push(nextActive ? 1 : 0)
-          changed.push(nextActive ? 'activación' : 'desactivación')
-        }
+      const nextActive = payload?.active === undefined ? Boolean(row.active) : Boolean(payload.active)
+      const nextResponsibleUserId =
+        payload?.responsibleUserId !== undefined
+          ? typeof payload.responsibleUserId === 'string' && payload.responsibleUserId
+            ? text(payload.responsibleUserId, 'Administrador responsable', 1, 80)
+            : null
+          : (row.responsible_user_id ?? null)
+      const nextLinkedIncomeAccountId =
+        payload?.linkedIncomeAccountId !== undefined
+          ? typeof payload.linkedIncomeAccountId === 'string' && payload.linkedIncomeAccountId
+            ? text(payload.linkedIncomeAccountId, 'Cuenta de ingresos', 1, 80)
+            : null
+          : (row.linked_income_account_id ?? null)
+      const nextChannel =
+        payload?.channel !== undefined
+          ? typeof payload.channel === 'string' && payload.channel.trim()
+            ? payload.channel.trim()
+            : null
+          : (row.channel ?? null)
+      validatePaymentAccountFields(db, row.type, {
+        active: nextActive,
+        responsibleUserId: nextResponsibleUserId,
+        linkedIncomeAccountId: nextLinkedIncomeAccountId,
+        channel: nextChannel,
+        id
+      })
+      if (nextActive !== Boolean(row.active)) {
+        updates.push('active = ?')
+        params.push(nextActive ? 1 : 0)
+        changed.push(nextActive ? 'activación' : 'desactivación')
+      }
+      if (nextChannel !== (row.channel ?? null)) {
+        updates.push('channel = ?')
+        params.push(nextChannel)
+        changed.push('canal')
+      }
+      if (nextResponsibleUserId !== (row.responsible_user_id ?? null)) {
+        updates.push('responsible_user_id = ?')
+        params.push(nextResponsibleUserId)
+        changed.push('administrador responsable')
+      }
+      if (nextLinkedIncomeAccountId !== (row.linked_income_account_id ?? null)) {
+        updates.push('linked_income_account_id = ?')
+        params.push(nextLinkedIncomeAccountId)
+        changed.push('cuenta de ingresos vinculada')
       }
       if (!updates.length) fail('No hay cambios para guardar')
       const nowIso = new Date().toISOString()
@@ -5590,10 +6629,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'settings.updateSection': {
       requireModuleAccess(session, 'settings')
-      const section = schema(payload?.section, z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages']))
+      const section = schema(
+        payload?.section,
+        z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages', 'tracking'])
+      )
       if (section === 'ai') requireCap(session, 'configureAI')
       if (section === 'equipment') requireCap(session, 'manageStaff')
       if (section === 'business') requireCap(session, 'configureBusiness')
+      if (section === 'tracking') requireCap(session, 'configureBusiness')
       if (section === 'ai') {
         const current = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
         const value = payload?.value && typeof payload.value === 'object' ? { ...payload.value } : {}
@@ -5874,7 +6917,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'backups.setPassword': {
       requireModuleAccess(session, 'settings')
-      requireCap(session, 'createBackup')
+      requireCap(session, 'restoreBackup')
       const password = text(payload?.password, 'Contraseña de respaldo', 8, 200)
       if (!safeStorage.isEncryptionAvailable()) {
         fail('El cifrado del sistema no está disponible; no se puede guardar la contraseña.', 'UNSUPPORTED')
@@ -5889,11 +6932,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'backups.revealPassword': {
       requireModuleAccess(session, 'settings')
-      requireCap(session, 'createBackup')
+      requireCap(session, 'restoreBackup')
       const password = getBackupPassword(db)
       if (!password) fail('Configura primero la contraseña de respaldo.')
       db.tx(() => {
-        audit(db, session, 'Visualización de contraseña de respaldo', 'Respaldo', 'El administrador copió la contraseña de respaldo.')
+        audit(
+          db,
+          session,
+          'Visualización de contraseña de respaldo',
+          'Respaldo',
+          'El propietario copió la contraseña de respaldo.'
+        )
       })
       return { password }
     }
@@ -5921,6 +6970,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
             data: fs.readFileSync(file.absolute).toString('base64')
           }))
         : []
+      const paymentReceiptsRoot = path.join(folder, PAYMENT_RECEIPT_FOLDER)
+      const paymentReceipts = fs.existsSync(paymentReceiptsRoot)
+        ? walkFiles(paymentReceiptsRoot).map((file) => ({
+            path: file.relative.replace(/\\/g, '/'),
+            data: fs.readFileSync(file.absolute).toString('base64')
+          }))
+        : []
       const container = {
         format: 'bitacoretech-backup',
         version: 1,
@@ -5929,7 +6985,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         manifest,
         database: databaseBytes.toString('base64'),
         evidence,
-        productImages
+        productImages,
+        paymentReceipts
       }
       const encrypted = encryptBackupPayload(Buffer.from(JSON.stringify(container), 'utf8'), password)
       const testPath =
@@ -5958,10 +7015,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
     case 'backups.import': {
       requireModuleAccess(session, 'settings')
-      requireCap(session, 'restoreBackup')
+      requireCap(session, 'importBackup')
       const stored = getBackupPassword(db)
-      const supplied = typeof payload?.password === 'string' && payload.password ? payload.password : stored
-      if (!supplied) fail('Configura la contraseña de respaldo o ingrésala para importar.')
+      const supplied =
+        typeof payload?.password === 'string' && payload.password
+          ? payload.password
+          : session.actualRole === 'superadmin'
+            ? stored
+            : ''
+      if (!supplied) {
+        fail('Ingresa la contraseña del archivo .bctbackup para importar la base.', 'INVALID_PASSWORD')
+      }
       const testPath =
         process.env.BITACORETECH_TEST_PATHS === '1' && typeof payload?.path === 'string' ? payload.path : ''
       const chosen = testPath
@@ -5988,6 +7052,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const folder = path.join(getBackupPath(runtime.userDataPath), folderName)
       fs.mkdirSync(path.join(folder, EVIDENCE_FOLDER), { recursive: true })
       fs.mkdirSync(path.join(folder, PRODUCT_IMAGE_FOLDER), { recursive: true })
+      fs.mkdirSync(path.join(folder, PAYMENT_RECEIPT_FOLDER), { recursive: true })
       const databaseBytes = Buffer.from(String(container.database), 'base64')
       fs.writeFileSync(path.join(folder, BACKUP_DATABASE_FILENAME), databaseBytes)
       for (const item of Array.isArray(container.evidence) ? container.evidence : []) {
@@ -6001,6 +7066,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
         const relative = String(item?.path ?? '').replace(/\\/g, '/')
         if (!relative || relative.includes('..') || path.isAbsolute(relative)) continue
         const target = path.join(folder, PRODUCT_IMAGE_FOLDER, relative)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, Buffer.from(String(item?.data ?? ''), 'base64'))
+      }
+      for (const item of Array.isArray(container.paymentReceipts) ? container.paymentReceipts : []) {
+        const relative = String(item?.path ?? '').replace(/\\/g, '/')
+        if (!relative || relative.includes('..') || path.isAbsolute(relative)) continue
+        const target = path.join(folder, PAYMENT_RECEIPT_FOLDER, relative)
         fs.mkdirSync(path.dirname(target), { recursive: true })
         fs.writeFileSync(target, Buffer.from(String(item?.data ?? ''), 'base64'))
       }
@@ -6051,6 +7123,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.exec('DROP TRIGGER IF EXISTS cash_movements_no_update; DROP TRIGGER IF EXISTS cash_movements_no_delete;')
         db.exec('DROP TRIGGER IF EXISTS stock_movements_no_update; DROP TRIGGER IF EXISTS stock_movements_no_delete;')
         db.exec(`
+          DELETE FROM account_movements;
+          DELETE FROM cash_transfers;
+          DELETE FROM payment_receipts;
           DELETE FROM payments;
           DELETE FROM invoice_items;
           DELETE FROM invoices;
@@ -6096,6 +7171,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
         fs.rmSync(productImagesRoot, { recursive: true, force: true })
       }
       fs.mkdirSync(productImagesRoot, { recursive: true })
+      const paymentReceiptsRoot = paymentReceiptRoot(runtime.userDataPath)
+      if (fs.existsSync(paymentReceiptsRoot)) {
+        fs.rmSync(paymentReceiptsRoot, { recursive: true, force: true })
+      }
+      fs.mkdirSync(paymentReceiptsRoot, { recursive: true })
       db.appendAudit({
         userId: session.userId,
         userName: displayUser(session).name,
@@ -6113,6 +7193,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
         entity: 'Sistema',
         entityId: backup.id,
         detail: `Imágenes de productos eliminadas del disco. El respaldo completo ${backup.name} conserva las imágenes.`
+      })
+      db.appendAudit({
+        userId: session.userId,
+        userName: displayUser(session).name,
+        role: roleLabel(session.role as any),
+        action: 'Purga de comprobantes de pago',
+        entity: 'Sistema',
+        entityId: backup.id,
+        detail: `Comprobantes de pago eliminados del disco. El respaldo completo ${backup.name} conserva los comprobantes.`
       })
       return { purged: true, backup, requiresReload: true }
     }
