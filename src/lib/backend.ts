@@ -316,6 +316,15 @@ export const api = {
     },
     async adjust(productId: string, quantity: number, reason: string) {
       return hydrateProduct(await rpc<ApiProduct>('inventory.adjust', { productId, quantity, reason }))
+    },
+    suggestSku(input: { name: string; supplierSku?: string; productId?: string }) {
+      return rpc<{ sku: string; source: string; warning: string | null }>(
+        'inventory.suggestSku',
+        input
+      )
+    },
+    generateMissingSkus() {
+      return rpc<{ updated: number; pending: number }>('inventory.generateMissingSkus')
     }
   },
   orders: {

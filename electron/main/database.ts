@@ -86,6 +86,9 @@ export class Database {
     this.ensureColumn('products', 'condition', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'origin', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'supplier_sku', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('products', 'image_path', 'TEXT')
+    this.ensureColumn('products', 'image_thumb_path', 'TEXT')
+    this.ensureColumn('products', 'image_updated_at', 'TEXT')
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
@@ -108,7 +111,7 @@ export class Database {
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }

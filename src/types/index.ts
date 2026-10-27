@@ -79,6 +79,9 @@ export interface Product {
   /** El backend lo omite para roles sin permiso de costos. */
   cost?: number
   price: number
+  imageUrl?: string | null
+  imageThumbnailUrl?: string | null
+  imageUpdatedAt?: string | null
   warrantyDays: number
   serials: string[]
   alertEnabled: boolean

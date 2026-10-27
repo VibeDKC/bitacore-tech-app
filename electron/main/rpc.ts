@@ -55,6 +55,12 @@ import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
 import { listGeminiModels, scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
 import { resolveInternalSku } from './sku'
 import { cleanProductText } from './productText'
+import {
+  PRODUCT_IMAGE_FOLDER,
+  prepareProductImage,
+  productImageRoot,
+  removeProductImageFiles
+} from './productImages'
 import { DICTIONARY_TYPES, type DictionaryType } from '@shared/index'
 
 type Payload = Record<string, any>
@@ -1768,6 +1774,13 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
       fs.cpSync(evidenceSource, evidenceTarget, { recursive: true, force: true })
     }
 
+    const productImagesSource = productImageRoot(runtime.userDataPath)
+    const productImagesTarget = path.join(folder, PRODUCT_IMAGE_FOLDER)
+    fs.mkdirSync(productImagesTarget, { recursive: true })
+    if (fs.existsSync(productImagesSource)) {
+      fs.cpSync(productImagesSource, productImagesTarget, { recursive: true, force: true })
+    }
+
     const evidenceRows = db.all<any>(
       `SELECT e.*, w.number AS order_number, w.customer_id, c.name AS customer_name
        FROM work_order_evidence e
@@ -1776,6 +1789,7 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
        ORDER BY e.captured_at ASC, e.rowid ASC`
     )
     const evidenceFiles = walkFiles(evidenceTarget)
+    const productImageFiles = walkFiles(productImagesTarget)
     const activeRows = evidenceRows.filter((row) => row.status === 'activa')
     const activeBytes = activeRows.reduce((sum, row) => sum + Number(row.size_bytes ?? 0), 0)
     const databaseBytes = fs.readFileSync(databaseTarget)
@@ -1825,14 +1839,24 @@ async function createBackup(db: Database, runtime: Runtime, session?: Session) {
           sha256: sha256Bytes(fs.readFileSync(file.absolute))
         }))
       },
+      productImages: {
+        count: productImageFiles.length,
+        bytes: productImageFiles.reduce((sum, file) => sum + file.size, 0),
+        files: productImageFiles.map((file) => ({
+          path: file.relative,
+          size: file.size,
+          sha256: sha256Bytes(fs.readFileSync(file.absolute))
+        }))
+      },
       disclaimer:
-        'Respaldo completo de BitacoreTech: base de datos, evidencias fotográficas y manifiesto de integridad. Conserve esta carpeta como soporte de reclamos.'
+        'Respaldo completo de BitacoreTech: base de datos, evidencias fotográficas, imágenes de inventario y manifiesto de integridad. Conserve esta carpeta como soporte de reclamos.'
     }
     const manifestBuffer = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8')
     fs.writeFileSync(path.join(folder, 'manifest.json'), manifestBuffer)
     const totalSize =
       databaseBytes.length +
       evidenceFiles.reduce((sum, file) => sum + file.size, 0) +
+      productImageFiles.reduce((sum, file) => sum + file.size, 0) +
       manifestBuffer.length
     const id = `bk_${sha256(`${folderName}|${Date.now()}`).slice(0, 20)}`
     db.run(
@@ -1993,6 +2017,8 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
   if (format === 'folder' && !fs.existsSync(sourceEvidence)) {
     fail('El respaldo completo no contiene la carpeta de evidencias.')
   }
+  const sourceProductImages = path.join(String(backup.path), PRODUCT_IMAGE_FOLDER)
+  const hasProductImages = format === 'folder' && fs.existsSync(sourceProductImages)
   const safety = await createBackup(db, runtime, session)
   closeDatabase()
   const wal = `${db.path}-wal`
@@ -2008,6 +2034,15 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
     } else {
       fs.mkdirSync(currentEvidence, { recursive: true })
     }
+    const currentProductImages = productImageRoot(runtime.userDataPath)
+    if (fs.existsSync(currentProductImages)) {
+      fs.rmSync(currentProductImages, { recursive: true, force: true })
+    }
+    if (hasProductImages) {
+      fs.cpSync(sourceProductImages, currentProductImages, { recursive: true, force: true })
+    } else {
+      fs.mkdirSync(currentProductImages, { recursive: true })
+    }
   } catch (error) {
     try {
       openDatabase(runtime.userDataPath)
@@ -2017,6 +2052,15 @@ async function restoreBackupRecord(db: Database, runtime: Runtime, session: Sess
     throw error
   }
   const restored = openDatabase(runtime.userDataPath)
+  const restoredProductColumns = restored.all<{ name: string }>('PRAGMA table_info(products)')
+  if (
+    !hasProductImages &&
+    restoredProductColumns.some((column) => column.name === 'image_path')
+  ) {
+    restored.run(
+      'UPDATE products SET image_path = NULL, image_thumb_path = NULL, image_updated_at = NULL'
+    )
+  }
   const credentialsRestored = Number(
     restored.get<{ count: number }>('SELECT COUNT(*) AS count FROM work_order_credentials')?.count ?? 0
   )
@@ -2718,11 +2762,82 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }))
     }
 
+    case 'inventory.suggestSku': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      const name = text(payload?.name, 'Nombre', 2, 160)
+      const supplierSku =
+        typeof payload?.supplierSku === 'string' ? payload.supplierSku.trim().slice(0, 60) : ''
+      const productId = typeof payload?.productId === 'string' ? payload.productId : ''
+      const existingSkus = db
+        .all<{ sku: string }>('SELECT sku FROM products WHERE id <> ?', productId)
+        .map((row) => row.sku)
+      const result = resolveInternalSku({
+        aiSku: '',
+        name,
+        supplierSku,
+        existingSkus
+      })
+      if (!result.sku) fail('No se pudo generar un SKU para este producto.')
+      return result
+    }
+
+    case 'inventory.generateMissingSkus': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      const rows = db.all<any>(
+        "SELECT id, name, supplier_sku FROM products WHERE active = 1 AND (sku IS NULL OR TRIM(sku) = '' OR TRIM(sku) = '-')"
+      )
+      const used = new Set(
+        db
+          .all<{ sku: string }>('SELECT sku FROM products')
+          .map((row) => String(row.sku).toLowerCase())
+      )
+      let updated = 0
+      db.tx(() => {
+        for (const row of rows) {
+          const result = resolveInternalSku({
+            aiSku: '',
+            name: String(row.name),
+            supplierSku: String(row.supplier_sku ?? ''),
+            existingSkus: [...used]
+          })
+          if (!result.sku) continue
+          db.run('UPDATE products SET sku = ?, updated_at = ? WHERE id = ?', result.sku, new Date().toISOString(), row.id)
+          used.add(result.sku.toLowerCase())
+          updated += 1
+        }
+        if (updated > 0) {
+          audit(
+            db,
+            session,
+            'Generación masiva de SKU',
+            'Producto',
+            `${updated} producto${updated === 1 ? '' : 's'} sin SKU actualizado${updated === 1 ? '' : 's'}.`
+          )
+        }
+      })
+      return { updated, pending: rows.length - updated }
+    }
+
     case 'inventory.create': {
       requireModuleAccess(session, 'inventory')
       requireCap(session, 'editInventory')
       const name = text(payload?.name, 'Nombre', 2, 160)
-      const sku = text(payload?.sku, 'SKU', 2, 60)
+      const supplierSku =
+        typeof payload?.supplierSku === 'string' ? payload.supplierSku.trim().slice(0, 60) : ''
+      const requestedSku = typeof payload?.sku === 'string' ? payload.sku.trim() : ''
+      let sku = requestedSku ? text(requestedSku, 'SKU', 2, 60) : ''
+      if (!sku) {
+        const generated = resolveInternalSku({
+          aiSku: '',
+          name,
+          supplierSku,
+          existingSkus: db.all<{ sku: string }>('SELECT sku FROM products').map((row) => row.sku)
+        })
+        if (!generated.sku) fail('No se pudo generar un SKU para este producto.')
+        sku = generated.sku
+      }
       if (db.get<any>('SELECT id FROM products WHERE sku = ?', sku)) fail('Ya existe un producto con ese SKU', 'DUPLICATE')
       const price = numberValue(payload?.price, 'Precio', { min: 1 })
       const cost = numberValue(payload?.cost ?? 0, 'Costo', { min: 0 })
@@ -2744,53 +2859,86 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const id = `prod_${sha256(`${sku}|${Date.now()}`).slice(0, 20)}`
       const barcode = String(payload?.barcode ?? `LOCAL${Date.now().toString().slice(-9)}`).slice(0, 60)
-      const supplierSku =
-        typeof payload?.supplierSku === 'string' ? payload.supplierSku.trim().slice(0, 60) : ''
+      const imageDataUrl = typeof payload?.imageDataUrl === 'string' ? payload.imageDataUrl : ''
+      let preparedImage = null as ReturnType<typeof prepareProductImage> | null
+      if (imageDataUrl) {
+        try {
+          preparedImage = prepareProductImage({
+            userDataPath: runtime.userDataPath,
+            productId: id,
+            dataUrl: imageDataUrl,
+            thumbnailDataUrl: payload?.imageThumbnailDataUrl
+          })
+        } catch (error) {
+          fail(error instanceof Error ? error.message : 'No se pudo preparar la imagen del producto.')
+        }
+      }
       const nowIso = new Date().toISOString()
-      db.tx(() => {
-        db.run(
-          `INSERT INTO products
-            (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
-             warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-          id,
-          name,
-          sku,
-          barcode,
-          supplierSku,
-          text(payload?.category ?? 'Repuestos', 'Categoría', 2, 80),
-          text(payload?.location ?? 'Bodega A', 'Ubicación', 2, 80),
-          typeof payload?.condition === 'string' ? payload.condition.trim().slice(0, 80) : '',
-          typeof payload?.origin === 'string' ? payload.origin.trim().slice(0, 80) : '',
-          stock,
-          minStock,
-          toCents(cost),
-          toCents(price),
-          Math.max(0, Math.round(numberValue(payload?.warrantyDays ?? 0, 'Garantía', { min: 0 }))),
-          service ? 1 : 0,
-          serviceType,
-          alertEnabled ? 1 : 0,
-          rotation,
-          nowIso,
-          nowIso
-        )
-        if (stock > 0) {
+      try {
+        db.tx(() => {
           db.run(
-            `INSERT INTO stock_movements
-              (id, product_id, type, quantity, unit_cost_cents, reason, reference_type, reference_id, user_id, user_name, created_at)
-             VALUES (?, ?, 'carga_inicial', ?, ?, 'Stock inicial', 'product', ?, ?, ?, ?)`,
-            `sm_${Date.now()}`,
+            `INSERT INTO products
+              (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
+               image_path, image_thumb_path, image_updated_at,
+               warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             id,
+            name,
+            sku,
+            barcode,
+            supplierSku,
+            text(payload?.category ?? 'Repuestos', 'Categoría', 2, 80),
+            text(payload?.location ?? 'Bodega A', 'Ubicación', 2, 80),
+            typeof payload?.condition === 'string' ? payload.condition.trim().slice(0, 80) : '',
+            typeof payload?.origin === 'string' ? payload.origin.trim().slice(0, 80) : '',
             stock,
+            minStock,
             toCents(cost),
-            id,
-            session.userId,
-            displayUser(session).name,
+            toCents(price),
+            preparedImage?.imagePath ?? null,
+            preparedImage?.imageThumbPath ?? null,
+            preparedImage ? nowIso : null,
+            Math.max(0, Math.round(numberValue(payload?.warrantyDays ?? 0, 'Garantía', { min: 0 }))),
+            service ? 1 : 0,
+            serviceType,
+            alertEnabled ? 1 : 0,
+            rotation,
+            nowIso,
             nowIso
           )
+          if (stock > 0) {
+            db.run(
+              `INSERT INTO stock_movements
+                (id, product_id, type, quantity, unit_cost_cents, reason, reference_type, reference_id, user_id, user_name, created_at)
+               VALUES (?, ?, 'carga_inicial', ?, ?, 'Stock inicial', 'product', ?, ?, ?, ?)`,
+              `sm_${Date.now()}`,
+              id,
+              stock,
+              toCents(cost),
+              id,
+              session.userId,
+              displayUser(session).name,
+              nowIso
+            )
+          }
+          audit(
+            db,
+            session,
+            'Creación de producto',
+            'Producto',
+            `${name} · SKU ${sku}${preparedImage ? ' · con imagen' : ''}`,
+            id
+          )
+        })
+      } catch (error) {
+        if (preparedImage) {
+          removeProductImageFiles(runtime.userDataPath, [
+            preparedImage.imagePath,
+            preparedImage.imageThumbPath
+          ])
         }
-        audit(db, session, 'Creación de producto', 'Producto', `${name} · SKU ${sku}`, id)
-      })
+        throw error
+      }
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', id), true)
     }
 
@@ -2812,7 +2960,23 @@ export async function handleRpc(command: string, payload: Payload, token: string
         changed.push('nombre')
       }
       if (payload?.sku !== undefined) {
-        const sku = text(payload.sku, 'SKU', 2, 60)
+        const requested = typeof payload.sku === 'string' ? payload.sku.trim() : ''
+        let sku = requested ? text(requested, 'SKU', 2, 60) : ''
+        if (!sku) {
+          const generated = resolveInternalSku({
+            aiSku: '',
+            name: String(payload.name ?? product.name),
+            supplierSku:
+              payload.supplierSku !== undefined
+                ? String(payload.supplierSku ?? '').trim()
+                : String(product.supplier_sku ?? ''),
+            existingSkus: db
+              .all<{ sku: string }>('SELECT sku FROM products WHERE id <> ?', productId)
+              .map((row) => row.sku)
+          })
+          if (!generated.sku) fail('No se pudo generar un SKU para este producto.')
+          sku = generated.sku
+        }
         const duplicate = db.get<any>('SELECT id FROM products WHERE sku = ? AND id <> ?', sku, productId)
         if (duplicate) fail('Ya existe un producto con ese SKU', 'DUPLICATE')
         updates.push('sku = ?')
@@ -2919,20 +3083,67 @@ export async function handleRpc(command: string, payload: Payload, token: string
         params.push(payload.active ? 1 : 0)
         changed.push(payload.active ? 'reactivación' : 'desactivación')
       }
+      const imageDataUrl = typeof payload?.imageDataUrl === 'string' ? payload.imageDataUrl : ''
+      const removeImage = Boolean(payload?.removeImage)
+      let preparedImage = null as ReturnType<typeof prepareProductImage> | null
+      if (imageDataUrl) {
+        try {
+          preparedImage = prepareProductImage({
+            userDataPath: runtime.userDataPath,
+            productId,
+            dataUrl: imageDataUrl,
+            thumbnailDataUrl: payload?.imageThumbnailDataUrl
+          })
+        } catch (error) {
+          fail(error instanceof Error ? error.message : 'No se pudo preparar la imagen del producto.')
+        }
+      }
+      if (removeImage && !preparedImage) {
+        updates.push('image_path = NULL', 'image_thumb_path = NULL', 'image_updated_at = NULL')
+        changed.push('imagen eliminada')
+      } else if (preparedImage) {
+        updates.push('image_path = ?', 'image_thumb_path = ?', 'image_updated_at = ?')
+        params.push(
+          preparedImage.imagePath,
+          preparedImage.imageThumbPath,
+          new Date().toISOString()
+        )
+        changed.push('imagen actualizada')
+      }
       if (!updates.length) fail('No hay cambios para guardar')
       updates.push('updated_at = ?')
       params.push(new Date().toISOString())
-      db.tx(() => {
-        db.run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, ...params, productId)
-        audit(
-          db,
-          session,
-          'Actualización de producto',
-          'Producto',
-          `${product.name} · ${changed.join(', ')}`,
-          productId
+      const oldImagePaths = [product.image_path, product.image_thumb_path].filter(Boolean)
+      try {
+        db.tx(() => {
+          db.run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, ...params, productId)
+          audit(
+            db,
+            session,
+            'Actualización de producto',
+            'Producto',
+            `${product.name} · ${changed.join(', ')}`,
+            productId
+          )
+        })
+      } catch (error) {
+        if (preparedImage) {
+          removeProductImageFiles(runtime.userDataPath, [
+            preparedImage.imagePath,
+            preparedImage.imageThumbPath
+          ])
+        }
+        throw error
+      }
+      if (preparedImage || removeImage) {
+        const nextImagePaths = new Set(
+          preparedImage ? [preparedImage.imagePath, preparedImage.imageThumbPath] : []
         )
-      })
+        removeProductImageFiles(
+          runtime.userDataPath,
+          oldImagePaths.filter((item) => !nextImagePaths.has(String(item)))
+        )
+      }
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', productId), canSession(session, 'viewCosts'))
     }
 
@@ -5703,6 +5914,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
             data: fs.readFileSync(file.absolute).toString('base64')
           }))
         : []
+      const productImagesRoot = path.join(folder, PRODUCT_IMAGE_FOLDER)
+      const productImages = fs.existsSync(productImagesRoot)
+        ? walkFiles(productImagesRoot).map((file) => ({
+            path: file.relative.replace(/\\/g, '/'),
+            data: fs.readFileSync(file.absolute).toString('base64')
+          }))
+        : []
       const container = {
         format: 'bitacoretech-backup',
         version: 1,
@@ -5710,7 +5928,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         appVersion: runtime.version,
         manifest,
         database: databaseBytes.toString('base64'),
-        evidence
+        evidence,
+        productImages
       }
       const encrypted = encryptBackupPayload(Buffer.from(JSON.stringify(container), 'utf8'), password)
       const testPath =
@@ -5768,12 +5987,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const folderName = `import-${stamp}`
       const folder = path.join(getBackupPath(runtime.userDataPath), folderName)
       fs.mkdirSync(path.join(folder, EVIDENCE_FOLDER), { recursive: true })
+      fs.mkdirSync(path.join(folder, PRODUCT_IMAGE_FOLDER), { recursive: true })
       const databaseBytes = Buffer.from(String(container.database), 'base64')
       fs.writeFileSync(path.join(folder, BACKUP_DATABASE_FILENAME), databaseBytes)
       for (const item of Array.isArray(container.evidence) ? container.evidence : []) {
         const relative = String(item?.path ?? '').replace(/\\/g, '/')
         if (!relative || relative.includes('..') || path.isAbsolute(relative)) continue
         const target = path.join(folder, EVIDENCE_FOLDER, relative)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, Buffer.from(String(item?.data ?? ''), 'base64'))
+      }
+      for (const item of Array.isArray(container.productImages) ? container.productImages : []) {
+        const relative = String(item?.path ?? '').replace(/\\/g, '/')
+        if (!relative || relative.includes('..') || path.isAbsolute(relative)) continue
+        const target = path.join(folder, PRODUCT_IMAGE_FOLDER, relative)
         fs.mkdirSync(path.dirname(target), { recursive: true })
         fs.writeFileSync(target, Buffer.from(String(item?.data ?? ''), 'base64'))
       }
@@ -5864,6 +6091,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const evidenceRoot = getEvidencePath(runtime.userDataPath)
       if (fs.existsSync(evidenceRoot)) fs.rmSync(evidenceRoot, { recursive: true, force: true })
       fs.mkdirSync(evidenceRoot, { recursive: true })
+      const productImagesRoot = productImageRoot(runtime.userDataPath)
+      if (fs.existsSync(productImagesRoot)) {
+        fs.rmSync(productImagesRoot, { recursive: true, force: true })
+      }
+      fs.mkdirSync(productImagesRoot, { recursive: true })
       db.appendAudit({
         userId: session.userId,
         userName: displayUser(session).name,
@@ -5872,6 +6104,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
         entity: 'Sistema',
         entityId: backup.id,
         detail: `Fotografías de las OT purgadas eliminadas del disco. El respaldo completo ${backup.name} conserva las evidencias.`
+      })
+      db.appendAudit({
+        userId: session.userId,
+        userName: displayUser(session).name,
+        role: roleLabel(session.role as any),
+        action: 'Purga de imágenes de inventario',
+        entity: 'Sistema',
+        entityId: backup.id,
+        detail: `Imágenes de productos eliminadas del disco. El respaldo completo ${backup.name} conserva las imágenes.`
       })
       return { purged: true, backup, requiresReload: true }
     }

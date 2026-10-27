@@ -18,6 +18,7 @@ import {
   Search,
   SlidersHorizontal,
   Tag,
+  Wand2,
   Warehouse
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -39,6 +40,7 @@ import { Modal } from '@/components/ui/Modal'
 import { StockStatusBadge } from '@/components/ui/StatusBadge'
 import { ProgressBar } from '@/components/ui/EmptyState'
 import { SegmentedTabs } from '@/components/ui/Tabs'
+import { ProductImageField } from '@/components/inventory/ProductImageField'
 import { cn } from '@/lib/utils'
 
 const defaultCategories = [
@@ -77,7 +79,10 @@ const emptyProductForm = {
   rotation: 'rotativo' as ProductRotation,
   alertEnabled: true,
   service: false,
-  serviceType: ''
+  serviceType: '',
+  imageDataUrl: null as string | null,
+  imageThumbnailDataUrl: null as string | null,
+  removeImage: false
 }
 
 export function InventoryPage() {
@@ -113,6 +118,8 @@ export function InventoryPage() {
   const [editForm, setEditForm] = useState(emptyProductForm)
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [saving, setSaving] = useState(false)
+  const [skuSaving, setSkuSaving] = useState(false)
+  const [bulkSkuSaving, setBulkSkuSaving] = useState(false)
 
   const canEdit = can(role, 'editInventory') && (role === 'admin' || role === 'superadmin')
   const canCosts = can(role, 'viewCosts')
@@ -204,15 +211,24 @@ export function InventoryPage() {
   }
 
   async function createProduct() {
-    if (!form.name.trim() || !form.sku.trim() || Number(form.price) <= 0) {
-      toast.error('Completa nombre, SKU y precio de venta')
+    if (!form.name.trim() || Number(form.price) <= 0) {
+      toast.error('Completa nombre y precio de venta')
       return
     }
     setSaving(true)
     try {
+      let sku = form.sku.trim()
+      if (!sku) {
+        const generated = await api.inventory.suggestSku({
+          name: form.name.trim(),
+          supplierSku: form.supplierSku.trim() || undefined
+        })
+        sku = generated.sku
+        setForm((value) => ({ ...value, sku }))
+      }
       const product = await api.inventory.create({
         name: form.name.trim(),
-        sku: form.sku.trim(),
+        sku,
         barcode: form.barcode.trim() || undefined,
         supplierSku: form.supplierSku.trim() || undefined,
         category: form.category,
@@ -227,7 +243,9 @@ export function InventoryPage() {
         rotation: form.rotation,
         alertEnabled: form.alertEnabled,
         service: form.service,
-        serviceType: form.service ? form.serviceType || undefined : undefined
+        serviceType: form.service ? form.serviceType || undefined : undefined,
+        imageDataUrl: form.imageDataUrl || undefined,
+        imageThumbnailDataUrl: form.imageThumbnailDataUrl || undefined
       })
       setData((current) => (current ? { ...current, products: [product, ...current.products] } : current))
       setCreateOpen(false)
@@ -265,22 +283,35 @@ export function InventoryPage() {
       rotation: product.rotation,
       alertEnabled: product.alertEnabled,
       service: Boolean(product.service),
-      serviceType: product.serviceType ?? ''
+      serviceType: product.serviceType ?? '',
+      imageDataUrl: null,
+      imageThumbnailDataUrl: null,
+      removeImage: false
     })
     setEditOpen(true)
   }
 
   async function updateProduct() {
     if (!selected) return
-    if (!editForm.name.trim() || !editForm.sku.trim() || Number(editForm.price) <= 0) {
-      toast.error('Completa nombre, SKU y precio de venta')
+    if (!editForm.name.trim() || Number(editForm.price) <= 0) {
+      toast.error('Completa nombre y precio de venta')
       return
     }
     setSaving(true)
     try {
+      let sku = editForm.sku.trim()
+      if (!sku) {
+        const generated = await api.inventory.suggestSku({
+          name: editForm.name.trim(),
+          supplierSku: editForm.supplierSku.trim() || undefined,
+          productId: selected.id
+        })
+        sku = generated.sku
+        setEditForm((value) => ({ ...value, sku }))
+      }
       const updated = await api.inventory.update(selected.id, {
         name: editForm.name.trim(),
-        sku: editForm.sku.trim(),
+        sku,
         supplierSku: editForm.supplierSku.trim(),
         ...(editForm.barcode.trim() ? { barcode: editForm.barcode.trim() } : {}),
         category: editForm.category,
@@ -294,7 +325,10 @@ export function InventoryPage() {
         rotation: editForm.rotation,
         alertEnabled: editForm.alertEnabled,
         service: editForm.service,
-        serviceType: editForm.service ? editForm.serviceType || undefined : undefined
+        serviceType: editForm.service ? editForm.serviceType || undefined : undefined,
+        imageDataUrl: editForm.imageDataUrl || undefined,
+        imageThumbnailDataUrl: editForm.imageThumbnailDataUrl || undefined,
+        removeImage: editForm.removeImage
       })
       setData((current) =>
         current ? { ...current, products: current.products.map((item) => (item.id === updated.id ? updated : item)) } : current
@@ -305,6 +339,58 @@ export function InventoryPage() {
       toast.error('No se pudo actualizar la referencia', { description: errorMessage(failure) })
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function suggestSku(mode: 'create' | 'edit') {
+    const current = mode === 'create' ? form : editForm
+    if (!current.name.trim()) {
+      toast.error('Escribe primero el nombre del producto')
+      return
+    }
+    setSkuSaving(true)
+    try {
+      const result = await api.inventory.suggestSku({
+        name: current.name.trim(),
+        supplierSku: current.supplierSku.trim() || undefined,
+        productId: mode === 'edit' ? selected?.id : undefined
+      })
+      if (mode === 'create') {
+        setForm((value) => ({ ...value, sku: result.sku }))
+      } else {
+        setEditForm((value) => ({ ...value, sku: result.sku }))
+      }
+      toast.success('SKU generado', { description: result.sku })
+      if (result.warning) toast.info(result.warning)
+    } catch (failure) {
+      toast.error('No se pudo generar el SKU', { description: errorMessage(failure) })
+    } finally {
+      setSkuSaving(false)
+    }
+  }
+
+  async function generateMissingSkus() {
+    if (bulkSkuSaving) return
+    setBulkSkuSaving(true)
+    try {
+      const result = await api.inventory.generateMissingSkus()
+      if (result.updated > 0) {
+        toast.success('SKUs generados', {
+          description: `${result.updated} producto${result.updated === 1 ? '' : 's'} actualizado${result.updated === 1 ? '' : 's'}.`
+        })
+        await reload()
+      } else {
+        toast.info('Todos los productos ya tienen SKU')
+      }
+      if (result.pending > 0) {
+        toast.warning(`${result.pending} producto${result.pending === 1 ? '' : 's'} quedó sin SKU`, {
+          description: 'Revisa los nombres o SKU de proveedor.'
+        })
+      }
+    } catch (failure) {
+      toast.error('No se pudieron generar los SKUs', { description: errorMessage(failure) })
+    } finally {
+      setBulkSkuSaving(false)
     }
   }
 
@@ -370,6 +456,16 @@ export function InventoryPage() {
         description="Existencias, costos, seriales y alertas de reposición del taller y el mostrador."
         actions={
           <>
+            {canEdit ? (
+              <Button
+                variant="secondary"
+                onClick={() => void generateMissingSkus()}
+                loading={bulkSkuSaving}
+                leftIcon={<Wand2 className="h-4 w-4" />}
+              >
+                Generar SKUs
+              </Button>
+            ) : null}
             <Button variant="secondary" onClick={exportInventory} leftIcon={<Download className="h-4 w-4" />}>
               Exportar
             </Button>
@@ -462,9 +558,17 @@ export function InventoryPage() {
                   >
                     <td className="table-td pl-5 lg:pl-6">
                       <div className="flex items-center gap-3">
-                        <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br', product.tone)}>
-                          <Icon className="h-[18px] w-[18px]" />
-                        </span>
+                        {product.imageThumbnailUrl ? (
+                          <img
+                            src={product.imageThumbnailUrl}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded-xl border border-line bg-white object-cover"
+                          />
+                        ) : (
+                          <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br', product.tone)}>
+                            <Icon className="h-[18px] w-[18px]" />
+                          </span>
+                        )}
                         <div className="min-w-0">
                           <p className="truncate text-[12px] font-semibold text-ink">{product.name}</p>
                           <p className="mt-0.5 truncate font-mono text-[9px] text-slate-400">
@@ -582,6 +686,13 @@ export function InventoryPage() {
       >
         {selected ? (
           <div className="space-y-4">
+            {selected.imageUrl ? (
+              <img
+                src={selected.imageUrl}
+                alt={selected.name}
+                className="h-56 w-full rounded-2xl border border-line bg-white object-contain"
+              />
+            ) : null}
             <div className="flex items-center gap-3">
               <span className={cn('flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br', selected.tone)}>
                 <selected.icon className="h-7 w-7" />
@@ -778,10 +889,35 @@ export function InventoryPage() {
             <span className="field-label">Nombre</span>
             <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="field" placeholder="Ej. SSD NVMe 1TB" />
           </label>
-          <label className="block">
-            <span className="field-label">SKU</span>
+          <div className="sm:col-span-2">
+            <ProductImageField
+              previewUrl={form.imageDataUrl}
+              hasExisting={false}
+              disabled={saving}
+              onChange={(imageDataUrl, imageThumbnailDataUrl) =>
+                setForm({ ...form, imageDataUrl, imageThumbnailDataUrl, removeImage: false })
+              }
+              onRemove={() =>
+                setForm({ ...form, imageDataUrl: null, imageThumbnailDataUrl: null })
+              }
+            />
+          </div>
+          <div className="block">
+            <div className="flex items-center justify-between gap-2">
+              <span className="field-label mb-0">SKU</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => void suggestSku('create')}
+                loading={skuSaving}
+                leftIcon={<Wand2 className="h-3.5 w-3.5" />}
+              >
+                Generar
+              </Button>
+            </div>
             <input value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} className="field" placeholder="SSD-NVME-1TB" />
-          </label>
+          </div>
           <label className="block">
             <span className="field-label">Código de barras (opcional)</span>
             <input value={form.barcode} onChange={(event) => setForm({ ...form, barcode: event.target.value })} className="field" placeholder="Se genera si se deja vacío" />
@@ -979,10 +1115,39 @@ export function InventoryPage() {
             <span className="field-label">Nombre</span>
             <input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} className="field" />
           </label>
-          <label className="block">
-            <span className="field-label">SKU</span>
+          <div className="sm:col-span-2">
+            <ProductImageField
+              previewUrl={
+                editForm.removeImage
+                  ? null
+                  : editForm.imageDataUrl || selected?.imageUrl || null
+              }
+              hasExisting={Boolean(selected?.imageUrl) && !editForm.removeImage}
+              disabled={saving}
+              onChange={(imageDataUrl, imageThumbnailDataUrl) =>
+                setEditForm({ ...editForm, imageDataUrl, imageThumbnailDataUrl, removeImage: false })
+              }
+              onRemove={() =>
+                setEditForm({ ...editForm, imageDataUrl: null, imageThumbnailDataUrl: null, removeImage: true })
+              }
+            />
+          </div>
+          <div className="block">
+            <div className="flex items-center justify-between gap-2">
+              <span className="field-label mb-0">SKU</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => void suggestSku('edit')}
+                loading={skuSaving}
+                leftIcon={<Wand2 className="h-3.5 w-3.5" />}
+              >
+                Generar
+              </Button>
+            </div>
             <input value={editForm.sku} onChange={(event) => setEditForm({ ...editForm, sku: event.target.value })} className="field" />
-          </label>
+          </div>
           <label className="block">
             <span className="field-label">Código de barras</span>
             <input value={editForm.barcode} onChange={(event) => setEditForm({ ...editForm, barcode: event.target.value })} className="field" />

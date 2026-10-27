@@ -1,4 +1,5 @@
 import type { Database } from './database'
+import { productImageUrl } from './productImages'
 import { evidenceDto, evidenceSetHash } from './evidence'
 import { calculateNitDv } from './nit'
 
@@ -131,6 +132,13 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     minStock: Number(row.min_stock),
     ...(includeCost ? { cost: money(row.cost_cents) } : {}),
     price: money(row.price_cents),
+    imageUrl: row.image_path ? productImageUrl(String(row.image_path)) : null,
+    imageThumbnailUrl: row.image_thumb_path
+      ? productImageUrl(String(row.image_thumb_path))
+      : row.image_path
+        ? productImageUrl(String(row.image_path))
+        : null,
+    imageUpdatedAt: row.image_updated_at ?? null,
     warrantyDays: Number(row.warranty_days),
     serials,
     service: bool(row.is_service),

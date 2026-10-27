@@ -284,64 +284,75 @@ function generalSku(name: string, supplierSku: string) {
 export function generateInternalSku(name: string, supplierSku = '') {
   const normalized = normalizeText(name)
   if (!normalized) return ''
-  if (
-    normalized.includes('KZ') ||
-    normalized.includes('QKZ') ||
-    (normalized.includes('AURICULAR') &&
-      ['CASTOR', 'EDX', 'ZSN', 'KRILA', 'DFI'].some((item) => normalized.includes(item)))
-  ) {
-    return headphonesSku(normalized).filter(Boolean).join('-').slice(0, 60)
-  }
-  if (
-    normalized.includes('USB') &&
-    ['MEMORIA', 'PENDRIVE', 'FLASH', 'DRIVE', 'DATATRAVELER', 'EXODIA'].some((item) =>
-      normalized.includes(item)
-    )
-  ) {
-    return usbSku(normalized).filter(Boolean).join('-').slice(0, 60)
-  }
-  if (['MICROSD', 'MICRO SD', 'TF CARD'].some((item) => normalized.includes(item))) {
-    return microSdSku(normalized).filter(Boolean).join('-').slice(0, 60)
-  }
-  if (['SSD', 'DISCO', 'HDD'].some((item) => normalized.includes(item))) {
-    return storageSku(normalized).filter(Boolean).join('-').slice(0, 60)
-  }
-  if (
-    normalized.includes('RAM') ||
-    ['DDR2', 'DDR3', 'DDR4', 'DDR5'].some((item) => normalized.includes(item))
-  ) {
-    return ramSku(normalized).filter(Boolean).join('-').slice(0, 60)
-  }
-  const general = generalSku(normalized, normalizeText(supplierSku))
-  if (general.length >= 2) return general.join('-').slice(0, 60)
+  const candidate = (() => {
+    if (
+      normalized.includes('KZ') ||
+      normalized.includes('QKZ') ||
+      (normalized.includes('AURICULAR') &&
+        ['CASTOR', 'EDX', 'ZSN', 'KRILA', 'DFI'].some((item) => normalized.includes(item)))
+    ) {
+      return headphonesSku(normalized).filter(Boolean).join('-').slice(0, 60)
+    }
+    if (
+      normalized.includes('USB') &&
+      ['MEMORIA', 'PENDRIVE', 'FLASH', 'DRIVE', 'DATATRAVELER', 'EXODIA'].some((item) =>
+        normalized.includes(item)
+      )
+    ) {
+      return usbSku(normalized).filter(Boolean).join('-').slice(0, 60)
+    }
+    if (['MICROSD', 'MICRO SD', 'TF CARD'].some((item) => normalized.includes(item))) {
+      return microSdSku(normalized).filter(Boolean).join('-').slice(0, 60)
+    }
+    if (['SSD', 'DISCO', 'HDD'].some((item) => normalized.includes(item))) {
+      return storageSku(normalized).filter(Boolean).join('-').slice(0, 60)
+    }
+    if (
+      normalized.includes('RAM') ||
+      ['DDR2', 'DDR3', 'DDR4', 'DDR5'].some((item) => normalized.includes(item))
+    ) {
+      return ramSku(normalized).filter(Boolean).join('-').slice(0, 60)
+    }
+    const general = generalSku(normalized, normalizeText(supplierSku))
+    if (general.length >= 2) return general.join('-').slice(0, 60)
 
-  const stop = new Set([
-    'DE',
-    'CON',
-    'PARA',
-    'EL',
-    'LA',
-    'EN',
-    'UN',
-    'UNA',
-    'Y',
-    'POR',
-    'SIN',
-    'THE',
-    'WITH',
-    'FOR',
-    'AND',
-    'TO',
-    'IN',
-    'OF',
-    'ON',
-    'PRODUCTO',
-    'NUEVO'
-  ])
-  const words = normalized.match(/[A-Z0-9]+/g) ?? []
-  const useful = words.filter((word) => !stop.has(word) && word.length > 1)
-  if (!useful.length) return supplierSku ? `PROD-${modelFromSupplierCode(supplierSku)}` : 'PROD-GEN'
-  return useful.slice(0, 4).map((word) => word.slice(0, 6)).join('-').slice(0, 60)
+    const stop = new Set([
+      'DE',
+      'CON',
+      'PARA',
+      'EL',
+      'LA',
+      'EN',
+      'UN',
+      'UNA',
+      'Y',
+      'POR',
+      'SIN',
+      'THE',
+      'WITH',
+      'FOR',
+      'AND',
+      'TO',
+      'IN',
+      'OF',
+      'ON',
+      'PRODUCTO',
+      'NUEVO'
+    ])
+    const words = normalized.match(/[A-Z0-9]+/g) ?? []
+    const useful = words.filter((word) => !stop.has(word) && word.length > 1)
+    if (!useful.length) {
+      const supplierModel = supplierSku ? modelFromSupplierCode(supplierSku) : ''
+      return supplierModel ? `PROD-${supplierModel}` : 'PROD-GEN'
+    }
+    return `PROD-${useful
+      .slice(0, 4)
+      .map((word) => word.slice(0, 6))
+      .join('-')}`.slice(0, 60)
+  })()
+  if (isValidInternalSku(candidate)) return candidate
+  const supplierModel = supplierSku ? modelFromSupplierCode(supplierSku) : ''
+  return supplierModel ? `PROD-${supplierModel}`.slice(0, 60) : 'PROD-GEN'
 }
 
 export function normalizeSkuCandidate(value: unknown) {

@@ -14,6 +14,7 @@ import {
 import { EVIDENCE_SCHEME, resolveEvidenceFile } from './evidence'
 import { handleRpc } from './rpc'
 import { RpcError } from './permissions'
+import { resolveProductImageFile } from './productImages'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
@@ -98,16 +99,20 @@ function registerEvidenceProtocol() {
     try {
       const url = new URL(request.url)
       const relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, '')
-      if (!relativePath.startsWith('evidence/')) {
-        return new Response('Evidencia no encontrada', { status: 404 })
+      const isEvidence = relativePath.startsWith('evidence/')
+      const isProductImage = relativePath.startsWith('product-images/')
+      if (!isEvidence && !isProductImage) {
+        return new Response('Archivo no encontrado', { status: 404 })
       }
-      const absolutePath = resolveEvidenceFile(app.getPath('userData'), relativePath)
+      const absolutePath = isProductImage
+        ? resolveProductImageFile(app.getPath('userData'), relativePath)
+        : resolveEvidenceFile(app.getPath('userData'), relativePath)
       if (!fs.existsSync(absolutePath)) {
-        return new Response('Evidencia no encontrada', { status: 404 })
+        return new Response('Archivo no encontrado', { status: 404 })
       }
       return net.fetch(pathToFileURL(absolutePath).toString())
     } catch {
-      return new Response('Evidencia no encontrada', { status: 404 })
+      return new Response('Archivo no encontrado', { status: 404 })
     }
   })
 }
