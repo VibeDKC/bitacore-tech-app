@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -12,8 +12,10 @@ import {
   ShoppingCart,
   Tag,
   Trash2,
+  UserPlus,
   UserRound,
-  Wallet
+  Wallet,
+  Wrench
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CartLine, Customer, Invoice, PaymentMethod, SaleReceipt } from '@/types'
@@ -49,24 +51,65 @@ interface SaleResult {
   customer: Customer | null
 }
 
+type ServiceModality = 'fixed' | 'hour' | 'unit'
+
+interface ManualServiceLine {
+  id: string
+  description: string
+  modality: ServiceModality
+  quantity: number
+  unitPrice: number
+  warrantyDays: number
+  note: string
+}
+
+const emptyServiceForm = {
+  description: '',
+  modality: 'fixed' as ServiceModality,
+  quantity: '1',
+  unitPrice: '',
+  warrantyDays: '0',
+  note: ''
+}
+
+const emptyCustomerForm = {
+  name: '',
+  document: '',
+  phone: '',
+  email: ''
+}
+
+function parseMoneyInput(value: string) {
+  return Number(value.replace(/[^0-9]/g, '')) || 0
+}
+
 export function POSPage() {
   const { role } = useAuth()
   const navigate = useNavigate()
-  const { data, loading, error, reload } = useApi(async () => {
-    const [products, customers, cash, legal, dictionaries] = await Promise.all([
+  const { data, loading, error, reload, setData } = useApi(async () => {
+    const [products, customers, cash, legal, dictionaries, requirements] = await Promise.all([
       api.inventory.list(),
       api.customers.list(),
       api.cash.current(),
       api.legal.get().catch(() => defaultLegalConfig),
-      api.dictionaries.list()
+      api.dictionaries.list(),
+      api.payments.requirements().catch(() => ({ requireReceiptForDigital: false }))
     ])
-    return { products, customers, cashSession: cash.current, legal, dictionaries }
+    return {
+      products,
+      customers,
+      cashSession: cash.current,
+      legal,
+      dictionaries,
+      requirements
+    }
   }, [])
 
   const products = useMemo(() => data?.products ?? [], [data?.products])
   const customers = useMemo(() => data?.customers ?? [], [data?.customers])
   const legal = data?.legal ?? defaultLegalConfig
   const cashSession = data?.cashSession ?? null
+  const receiptRequired = Boolean(data?.requirements?.requireReceiptForDigital)
   const categories = useMemo(() => {
     const fromDictionary = dictionaryValues(data?.dictionaries ?? [], 'inventory_category')
     const names = fromDictionary.length ? fromDictionary : Array.from(new Set(products.map((product) => product.category)))
@@ -77,6 +120,7 @@ export function POSPage() {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('Todos')
   const [cart, setCart] = useState<CartLine[]>([])
+  const [manualLines, setManualLines] = useState<ManualServiceLine[]>([])
   const [customerId, setCustomerId] = useState('')
   const [discountType, setDiscountType] = useState<'percent' | 'amount'>('percent')
   const [discountInput, setDiscountInput] = useState('')
@@ -86,7 +130,14 @@ export function POSPage() {
   const [reference, setReference] = useState('')
   const [receipt, setReceipt] = useState<ReceiptDraft | null>(null)
   const [sale, setSale] = useState<SaleResult | null>(null)
+  const [lastSale, setLastSale] = useState<SaleResult | null>(null)
   const [selling, setSelling] = useState(false)
+  const [serviceModal, setServiceModal] = useState(false)
+  const [serviceForm, setServiceForm] = useState(emptyServiceForm)
+  const [customerModal, setCustomerModal] = useState(false)
+  const [customerForm, setCustomerForm] = useState(emptyCustomerForm)
+  const [customerSaving, setCustomerSaving] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   const canDiscount = can(role, 'applyDiscount')
   const customer = customers.find((item) => item.id === customerId) ?? customers[0] ?? null
@@ -121,9 +172,21 @@ export function POSPage() {
     })
   }, [products, query, category])
 
-  const subtotal = cart.reduce((sum, line) => sum + unitPrice(line.product) * line.quantity, 0)
-  const listSubtotal = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0)
-  const promotionSavings = Math.max(0, listSubtotal - subtotal)
+  const productSubtotal = cart.reduce(
+    (sum, line) => sum + unitPrice(line.product) * line.quantity,
+    0
+  )
+  const productListSubtotal = cart.reduce(
+    (sum, line) => sum + line.product.price * line.quantity,
+    0
+  )
+  const manualSubtotal = manualLines.reduce(
+    (sum, line) => sum + line.unitPrice * line.quantity,
+    0
+  )
+  const subtotal = productSubtotal + manualSubtotal
+  const listSubtotal = productListSubtotal + manualSubtotal
+  const promotionSavings = Math.max(0, productListSubtotal - productSubtotal)
   const discountValue = hasPromotion
     ? 0
     : loyaltyActive
@@ -134,7 +197,10 @@ export function POSPage() {
         ? Math.round((subtotal * (Number(discountInput) || 0)) / 100)
         : Math.min(Number(discountInput) || 0, subtotal)
   const total = subtotal - discountValue
-  const itemCount = cart.reduce((sum, line) => sum + line.quantity, 0)
+  const itemCount =
+    cart.reduce((sum, line) => sum + line.quantity, 0) +
+    manualLines.reduce((sum, line) => sum + line.quantity, 0)
+  const hasItems = cart.length > 0 || manualLines.length > 0
   const receivedValue = Number(received.replace(/[^0-9]/g, '')) || 0
   const change = Math.max(receivedValue - total, 0)
   const shiftSales = cashSession ? cashSession.movements.filter((movement) => movement.type === 'venta').length : 0
@@ -182,9 +248,87 @@ export function POSPage() {
     )
   }
 
+  function openServiceModal() {
+    setServiceForm(emptyServiceForm)
+    setServiceModal(true)
+  }
+
+  function addManualService() {
+    const description = serviceForm.description.trim()
+    const quantity = Number(serviceForm.quantity.replace(',', '.')) || 0
+    const unitPrice = parseMoneyInput(serviceForm.unitPrice)
+    if (description.length < 2) {
+      toast.error('Escribe la descripción del servicio')
+      return
+    }
+    if (quantity <= 0) {
+      toast.error('La cantidad debe ser mayor a cero')
+      return
+    }
+    if (unitPrice <= 0) {
+      toast.error('Ingresa el valor del servicio')
+      return
+    }
+    const warrantyDays = Math.max(0, Math.round(Number(serviceForm.warrantyDays) || 0))
+    setManualLines((current) => [
+      ...current,
+      {
+        id: `manual_${Date.now()}_${current.length}`,
+        description,
+        modality: serviceForm.modality,
+        quantity,
+        unitPrice,
+        warrantyDays,
+        note: serviceForm.note.trim()
+      }
+    ])
+    setServiceModal(false)
+    setServiceForm(emptyServiceForm)
+  }
+
+  function removeManualLine(id: string) {
+    setManualLines((current) => current.filter((line) => line.id !== id))
+  }
+
+  function openCustomerModal() {
+    setCustomerForm(emptyCustomerForm)
+    setCustomerModal(true)
+  }
+
+  async function saveQuickCustomer() {
+    const name = customerForm.name.trim()
+    if (name.length < 2) {
+      toast.error('Escribe el nombre del cliente')
+      return
+    }
+    setCustomerSaving(true)
+    try {
+      const created = await api.customers.create({
+        name,
+        documentType: 'CC',
+        document: customerForm.document.trim() || undefined,
+        phone: customerForm.phone.trim() || undefined,
+        email: customerForm.email.trim() || undefined
+      })
+      setData((current) =>
+        current
+          ? { ...current, customers: [...current.customers, created] }
+          : current
+      )
+      setCustomerId(created.id)
+      setCustomerModal(false)
+      setCustomerForm(emptyCustomerForm)
+      toast.success('Cliente creado', { description: created.name })
+    } catch (failure) {
+      toast.error('No se pudo crear el cliente', { description: errorMessage(failure) })
+    } finally {
+      setCustomerSaving(false)
+    }
+  }
+
   function openPayment() {
-    if (!cart.length) {
-      toast.error('Agrega productos a la venta')
+    if (!hasItems) {
+      toast.error('Agrega productos o servicios a la venta')
       return
     }
     if (!customer) {
@@ -205,9 +349,17 @@ export function POSPage() {
   }
 
   async function confirmPayment() {
-    if (!customer || !cart.length || selling) return
+    if (!customer || !hasItems || selling) return
     if (method === 'Efectivo' && receivedValue < total) {
       toast.error('El efectivo recibido es menor al total')
+      return
+    }
+    if (
+      receiptRequired &&
+      (method === 'Transferencia' || method === 'Tarjeta') &&
+      !receipt
+    ) {
+      toast.error('Adjunta el comprobante del pago digital para continuar')
       return
     }
     setSelling(true)
@@ -215,6 +367,13 @@ export function POSPage() {
       const result = await api.pos.sell({
         customerId: customer.id,
         lines: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity, note: line.note })),
+        manualLines: manualLines.map((line) => ({
+          description: line.description,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          warrantyDays: line.warrantyDays,
+          note: line.note || undefined
+        })),
         method,
         discountType: hasPromotion ? 'percent' : loyaltyActive ? loyaltyType : discountType,
         discountValue: hasPromotion ? 0 : loyaltyActive ? loyaltyValue : Number(discountInput) || 0,
@@ -224,9 +383,12 @@ export function POSPage() {
           ? { dataUrl: receipt.dataUrl, name: receipt.name, mimeType: receipt.mimeType }
           : undefined
       })
-      setSale({ ...result, customer })
+      const completed = { ...result, customer }
+      setSale(completed)
+      setLastSale(completed)
       setPaymentOpen(false)
       setCart([])
+      setManualLines([])
       setDiscountInput('')
       setDiscountType('percent')
       setReference('')
@@ -245,6 +407,56 @@ export function POSPage() {
   const cashSuggestions = Array.from(
     new Set([total, 50000, 100000, 200000, 300000].filter((value) => value >= total))
   ).slice(0, 4)
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (view !== 'venta') return
+      const modalOpen = paymentOpen || serviceModal || customerModal
+      if (event.key === 'F1' && !modalOpen) {
+        event.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+        return
+      }
+      if (event.key === 'F2' && !modalOpen) {
+        event.preventDefault()
+        openCustomerModal()
+        return
+      }
+      if (event.key === 'F3' && !modalOpen) {
+        event.preventDefault()
+        openServiceModal()
+        return
+      }
+      if (event.key === 'F5' && !modalOpen) {
+        event.preventDefault()
+        openPayment()
+        return
+      }
+      if (event.key === 'F9' && !modalOpen) {
+        event.preventDefault()
+        if (lastSale) setSale(lastSale)
+        else toast.info('No hay una venta reciente para reimprimir')
+        return
+      }
+      if (event.key === 'Escape' && query) {
+        setQuery('')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    view,
+    paymentOpen,
+    serviceModal,
+    customerModal,
+    lastSale,
+    query,
+    hasItems,
+    cashSession,
+    customer,
+    total
+  ])
 
   if (loading && !data) {
     return (
@@ -320,13 +532,25 @@ export function POSPage() {
                 <h2 className="font-display text-[16px] font-bold text-ink">Catálogo</h2>
                 <p className="mt-0.5 text-[11px] text-slate-400">{filteredProducts.length} artículos disponibles</p>
               </div>
-              <SearchInput
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onClear={() => setQuery('')}
-                placeholder="Buscar por nombre, SKU o código..."
-                wrapClassName="w-full sm:w-[320px]"
-              />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={openServiceModal}
+                  leftIcon={<Wrench className="h-3.5 w-3.5" />}
+                  title="Facturar servicio (F3)"
+                >
+                  Servicio
+                </Button>
+                <SearchInput
+                  ref={searchRef}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onClear={() => setQuery('')}
+                  placeholder="Buscar por nombre, SKU o código... (F1)"
+                  wrapClassName="w-full sm:w-[320px]"
+                />
+              </div>
             </div>
 
             <div className="no-scrollbar -mx-1 mt-4 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
@@ -438,10 +662,13 @@ export function POSPage() {
                 <p className="text-[10px] text-slate-400">{itemCount} artículos · {formatCurrency(total)}</p>
               </div>
             </div>
-            {cart.length ? (
+            {hasItems ? (
               <button
                 type="button"
-                onClick={() => setCart([])}
+                onClick={() => {
+                  setCart([])
+                  setManualLines([])
+                }}
                 className="focus-ring rounded-lg px-2 py-1 text-[10px] font-semibold text-slate-400 transition hover:bg-danger-50 hover:text-danger-600"
               >
                 Vaciar
@@ -450,24 +677,35 @@ export function POSPage() {
           </div>
 
           <div className="space-y-3 border-b border-line px-5 py-4">
-            <label className="block">
+            <div className="block">
               <span className="field-label">Cliente</span>
-              <div className="relative">
-                <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                <Select
-                  value={customerId}
-                  onChange={(event) => setCustomerId(event.target.value)}
-                  className="h-10 pl-9 text-[12px]"
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                  <Select
+                    value={customerId}
+                    onChange={(event) => setCustomerId(event.target.value)}
+                    className="h-10 pl-9 text-[12px]"
+                  >
+                    {customers.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} {item.isFinalConsumer ? '' : `· ${customerDocumentLabel(item)}`}
+                        {customerPhones(item).length ? ` · ${customerPhones(item).map((phone) => phone.phone).join(' / ')}` : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={openCustomerModal}
+                  leftIcon={<UserPlus className="h-3.5 w-3.5" />}
+                  title="Registrar cliente (F2)"
                 >
-                  {customers.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} {item.isFinalConsumer ? '' : `· ${customerDocumentLabel(item)}`}
-                      {customerPhones(item).length ? ` · ${customerPhones(item).map((phone) => phone.phone).join(' / ')}` : ''}
-                    </option>
-                  ))}
-                </Select>
+                  Nuevo
+                </Button>
               </div>
-            </label>
+            </div>
             <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-[10px] text-slate-500">
               <span>{customer && customerPrimaryPhone(customer) !== '—' ? customerPrimaryPhone(customer) : 'Venta de mostrador'}</span>
               <span>{customer?.purchases ?? 0} compras</span>
@@ -475,7 +713,7 @@ export function POSPage() {
           </div>
 
           <div className="min-h-[180px] flex-1 overflow-y-auto px-5 py-4">
-            {cart.length ? (
+            {hasItems ? (
               <div className="space-y-3">
                 {cart.map((line) => {
                   const Icon = line.product.icon
@@ -545,6 +783,48 @@ export function POSPage() {
                     </div>
                   )
                 })}
+                {manualLines.map((line) => (
+                  <div
+                    key={line.id}
+                    className="flex gap-3 rounded-xl border border-brand-100 bg-brand-50/40 p-2.5"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+                      <Wrench className="h-[17px] w-[17px]" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-[12px] font-semibold text-ink">{line.description}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">
+                            {line.modality === 'hour'
+                              ? 'Por hora'
+                              : line.modality === 'unit'
+                                ? 'Por unidad'
+                                : 'Tarifa fija'}{' '}
+                            · {formatCurrency(line.unitPrice)} × {line.quantity}
+                            {line.warrantyDays > 0
+                              ? ` · Garantía ${line.warrantyDays} días`
+                              : ''}
+                          </p>
+                          {line.note ? (
+                            <p className="mt-0.5 text-[9px] text-slate-400">{line.note}</p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeManualLine(line.id)}
+                          className="focus-ring flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-300 transition hover:bg-danger-50 hover:text-danger-500"
+                          aria-label={`Eliminar ${line.description}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <p className="mt-1 text-right tabular text-[12px] font-bold text-ink">
+                        {formatCurrency(line.unitPrice * line.quantity)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="flex h-full flex-col items-center justify-center py-8 text-center">
@@ -553,7 +833,7 @@ export function POSPage() {
                 </span>
                 <p className="mt-3 text-[12px] font-semibold text-ink">Carrito vacío</p>
                 <p className="mt-1 max-w-[190px] text-[10px] leading-relaxed text-slate-400">
-                  Toca un producto del catálogo para iniciar la venta.
+                  Toca un producto del catálogo o factura un servicio para iniciar la venta.
                 </p>
               </div>
             )}
@@ -648,7 +928,7 @@ export function POSPage() {
             <Button
               size="lg"
               className="w-full"
-              disabled={!cart.length}
+              disabled={!hasItems}
               onClick={openPayment}
               rightIcon={<ArrowRight className="h-4 w-4" />}
             >
@@ -770,7 +1050,12 @@ export function POSPage() {
             </label>
           )}
 
-          <PaymentReceiptField value={receipt} onChange={setReceipt} disabled={selling} />
+          <PaymentReceiptField
+            value={receipt}
+            onChange={setReceipt}
+            disabled={selling}
+            required={receiptRequired && (method === 'Transferencia' || method === 'Tarjeta')}
+          />
 
           <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3">
             <div className="flex items-center justify-between text-[11px] text-brand-700">
@@ -798,6 +1083,194 @@ export function POSPage() {
           <div className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-[10px] leading-relaxed text-slate-500">
             El pago se registra en caja y descuenta el stock de los productos. La factura es interna y no lleva IVA.
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={serviceModal}
+        onClose={() => setServiceModal(false)}
+        title="Facturar servicio"
+        description="Agrega un servicio que no está en el inventario."
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setServiceModal(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={addManualService} leftIcon={<Plus className="h-4 w-4" />}>
+              Añadir al carrito
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="field-label">Descripción del servicio *</span>
+            <input
+              value={serviceForm.description}
+              onChange={(event) =>
+                setServiceForm({ ...serviceForm, description: event.target.value })
+              }
+              className="field"
+              placeholder="Ej. Mantenimiento preventivo de portátil"
+              autoFocus
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="field-label">Modalidad</span>
+              <Select
+                value={serviceForm.modality}
+                onChange={(event) =>
+                  setServiceForm({
+                    ...serviceForm,
+                    modality: event.target.value as ServiceModality
+                  })
+                }
+              >
+                <option value="fixed">Tarifa fija</option>
+                <option value="hour">Por hora</option>
+                <option value="unit">Por unidad / equipo</option>
+              </Select>
+            </label>
+            <label className="block">
+              <span className="field-label">
+                {serviceForm.modality === 'hour'
+                  ? 'Horas trabajadas'
+                  : serviceForm.modality === 'unit'
+                    ? 'Cantidad de equipos'
+                    : 'Cantidad'}
+              </span>
+              <input
+                value={serviceForm.quantity}
+                onChange={(event) =>
+                  setServiceForm({ ...serviceForm, quantity: event.target.value })
+                }
+                inputMode="decimal"
+                className="field text-right tabular"
+              />
+            </label>
+            <label className="block">
+              <span className="field-label">
+                {serviceForm.modality === 'hour'
+                  ? 'Tarifa por hora *'
+                  : serviceForm.modality === 'unit'
+                    ? 'Precio por unidad *'
+                    : 'Valor del servicio *'}
+              </span>
+              <input
+                value={serviceForm.unitPrice}
+                onChange={(event) =>
+                  setServiceForm({ ...serviceForm, unitPrice: event.target.value })
+                }
+                inputMode="numeric"
+                className="field text-right tabular"
+                placeholder="0"
+              />
+            </label>
+            <label className="block">
+              <span className="field-label">Garantía (días)</span>
+              <input
+                value={serviceForm.warrantyDays}
+                onChange={(event) =>
+                  setServiceForm({ ...serviceForm, warrantyDays: event.target.value })
+                }
+                inputMode="numeric"
+                className="field text-right tabular"
+              />
+            </label>
+          </div>
+          <label className="block">
+            <span className="field-label">Nota para la factura (opcional)</span>
+            <input
+              value={serviceForm.note}
+              onChange={(event) => setServiceForm({ ...serviceForm, note: event.target.value })}
+              className="field"
+              placeholder="Detalle que verá el cliente en el formato A4"
+            />
+          </label>
+          <div className="flex items-center justify-between rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-3">
+            <span className="text-[11px] font-semibold text-brand-800">Total del servicio</span>
+            <span className="tabular text-[18px] font-bold text-brand-900">
+              {formatCurrency(
+                parseMoneyInput(serviceForm.unitPrice) *
+                  (Number(serviceForm.quantity.replace(',', '.')) || 0)
+              )}
+            </span>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={customerModal}
+        onClose={() => setCustomerModal(false)}
+        title="Nuevo cliente"
+        description="Registra el cliente sin salir del cobro."
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCustomerModal(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void saveQuickCustomer()}
+              loading={customerSaving}
+              leftIcon={<UserPlus className="h-4 w-4" />}
+            >
+              Guardar cliente
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="field-label">Nombre completo *</span>
+            <input
+              value={customerForm.name}
+              onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })}
+              className="field"
+              placeholder="Nombre o razón social"
+              autoFocus
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">Documento / NIT (opcional)</span>
+            <input
+              value={customerForm.document}
+              onChange={(event) =>
+                setCustomerForm({ ...customerForm, document: event.target.value })
+              }
+              className="field"
+              inputMode="numeric"
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="field-label">Teléfono (opcional)</span>
+              <input
+                value={customerForm.phone}
+                onChange={(event) =>
+                  setCustomerForm({ ...customerForm, phone: event.target.value })
+                }
+                className="field"
+                inputMode="tel"
+              />
+            </label>
+            <label className="block">
+              <span className="field-label">Correo (opcional)</span>
+              <input
+                type="email"
+                value={customerForm.email}
+                onChange={(event) =>
+                  setCustomerForm({ ...customerForm, email: event.target.value })
+                }
+                className="field"
+              />
+            </label>
+          </div>
+          <p className="text-[9px] leading-relaxed text-slate-400">
+            El cliente queda disponible para la venta actual y para futuras compras.
+          </p>
         </div>
       </Modal>
 

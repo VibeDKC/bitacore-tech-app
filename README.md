@@ -55,9 +55,22 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/18-contrato-1.14.1.md`, el acta en `docs/actas/1.14.1.md` y los pendientes en `docs/pendientes/1.14.1.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/19-contrato-1.15.0.md`, el acta en `docs/actas/1.15.0.md` y los pendientes en `docs/pendientes/1.15.0.md`.
 
 Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales ya consulta por número y código, sin publicar el código en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
+
+## Punto de venta
+
+Desde 1.15.0 el POS permite:
+
+- Facturar servicios manuales sin crear un producto de inventario. Cada línea guarda descripción, modalidad (tarifa fija, por hora o por unidad), cantidad, valor, garantía y nota.
+- Combinar productos y servicios en una misma venta. Solo los productos descuentan stock.
+- Crear un cliente rápido con nombre obligatorio y documento, teléfono o correo opcionales.
+- Usar atajos: **F1** buscar, **F2** cliente rápido, **F3** servicio, **F5** cobrar, **F9** reimprimir la última venta y **Escape** limpiar la búsqueda.
+- Exigir comprobante en pagos digitales desde **Configuración → Impresión → Comprobante en cobros digitales**. La regla aplica a Transferencia y Tarjeta en ventas, anticipos y entrega de OT; está desactivada por defecto y no afecta el efectivo.
+
+Los servicios manuales aparecen en el comprobante de venta y en el historial, pero no crean productos ni movimientos de inventario. Los PDFs no cambian: el comprobante de diagnóstico inicial de la OT sigue siendo fijo.
+
 
 ## Primer arranque
 
@@ -212,6 +225,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.13.1` | Carrito web, visibilidad de stock, publicación por referencia y regla de usados/reacondicionados. |
 | `npm run test:acceptance:1.14.0` | Superadmin oculto, primer admin, administradores y permisos por módulos. |
 | `npm run test:acceptance:1.14.1` | Facturación, entrega, crédito, reportes, purga y seguimiento por hash. |
+| `npm run test:acceptance:1.15.0` | Servicios manuales, cliente rápido, atajos del POS y comprobante digital obligatorio. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
@@ -246,6 +260,7 @@ npm run test:acceptance:1.13.0
 npm run test:acceptance:1.13.1
 npm run test:acceptance:1.14.0
 npm run test:acceptance:1.14.1
+npm run test:acceptance:1.15.0
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -259,7 +274,7 @@ npm run test:migration:1.11.0
 npm run test:migration:1.12.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22` y `22/22`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22` y `44/44`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -267,7 +282,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.14.1-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.15.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -278,6 +293,8 @@ El instalador queda en `release/` como `BitacoreTech-1.14.1-x64.exe`. La configu
 
 - Moneda COP y locale `es-CO`.
 - Las ventas no llevan IVA; las compras sí aplican IVA del 19 %.
+- Los servicios manuales del POS no crean productos ni mueven stock; se guardan como líneas `servicio` con `product_id = NULL`.
+- El comprobante en pagos digitales es configurable y, cuando está activo, exige adjunto en Transferencia y Tarjeta. Está desactivado por defecto.
 - No se emiten facturas electrónicas DIAN.
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
 - El inventario permite editar referencias solo a administradores y propietario; el stock se mueve mediante ajustes auditados.

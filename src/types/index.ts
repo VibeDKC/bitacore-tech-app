@@ -1015,6 +1015,7 @@ export interface SettingsData {
     orderPrefix: string
   }
   equipment: { qrEnabled: boolean }
+  payments: { requireReceiptForDigital: boolean }
   messages: { initial: string; ready: string }
   tracking: { purchasesByUser: boolean }
   catalog: CatalogSyncStatus
@@ -1080,7 +1081,7 @@ export interface SaleReceipt {
   change: number
   customerName: string
   lines: Array<{
-    productId: string
+    productId?: string | null
     name: string
     quantity: number
     price: number

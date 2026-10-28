@@ -52,11 +52,13 @@ async function prepareFile(file: File): Promise<ReceiptDraft> {
 export function PaymentReceiptField({
   value,
   onChange,
-  disabled
+  disabled,
+  required = false
 }: {
   value: ReceiptDraft | null
   onChange: (value: ReceiptDraft | null) => void
   disabled?: boolean
+  required?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
@@ -79,7 +81,7 @@ export function PaymentReceiptField({
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 text-[10px] font-semibold text-ink">
-            <Paperclip className="h-3 w-3" /> Comprobante de pago (opcional)
+            <Paperclip className="h-3 w-3" /> Comprobante de pago {required ? '(obligatorio)' : '(opcional)'}
           </p>
           {value ? (
             <p className="mt-1 truncate text-[9px] text-slate-500">
@@ -89,7 +91,11 @@ export function PaymentReceiptField({
               {value.name} · {(value.size / 1024).toFixed(0)} KB
             </p>
           ) : (
-            <p className="mt-0.5 text-[9px] text-slate-400">Imagen o PDF, máximo 8 MB.</p>
+            <p className={`mt-0.5 text-[9px] ${required ? 'font-semibold text-amber-700' : 'text-slate-400'}`}>
+              {required
+                ? 'Obligatorio para Transferencia o Tarjeta. Imagen o PDF, máximo 8 MB.'
+                : 'Imagen o PDF, máximo 8 MB.'}
+            </p>
           )}
         </div>
         <div className="flex shrink-0 gap-1">

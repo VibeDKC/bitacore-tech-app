@@ -107,18 +107,26 @@ export function OrderDetailPage() {
 
   const { data, loading, error, reload, setData } = useApi(async () => {
     const order = await api.orders.get(id)
-    const [detail, legal, products] = await Promise.all([
+    const [detail, legal, products, requirements] = await Promise.all([
       api.customers.detail(order.customerId).catch(() => null),
       api.legal.get().catch((): LegalConfig => defaultLegalConfig),
-      api.inventory.list().catch((): Product[] => [])
+      api.inventory.list().catch((): Product[] => []),
+      api.payments.requirements().catch(() => ({ requireReceiptForDigital: false }))
     ])
-    return { order, customer: detail?.customer ?? null, legal, products }
+    return {
+      order,
+      customer: detail?.customer ?? null,
+      legal,
+      products,
+      requirements
+    }
   }, [id])
 
   const order = data?.order ?? null
   const customer = data?.customer ?? null
   const legal = data?.legal ?? defaultLegalConfig
   const products = data?.products ?? []
+  const receiptRequired = Boolean(data?.requirements?.requireReceiptForDigital)
 
   const [diagnosis, setDiagnosis] = useState('')
   const [editingDiagnosis, setEditingDiagnosis] = useState(false)
@@ -520,6 +528,14 @@ export function OrderDetailPage() {
       })
       return
     }
+    if (
+      receiptRequired &&
+      (depositMethod === 'Transferencia' || depositMethod === 'Tarjeta') &&
+      !paymentReceipt
+    ) {
+      toast.error('Adjunta el comprobante del pago digital para continuar')
+      return
+    }
     setDepositing(true)
     try {
       const updated = await api.orders.addPayment(order.id, {
@@ -629,6 +645,15 @@ export function OrderDetailPage() {
     }
     if (!noCharge && paymentMethod === 'Efectivo' && receivedValue < settleBalance) {
       toast.error('El efectivo recibido es menor al saldo por cobrar')
+      return
+    }
+    if (
+      !noCharge &&
+      receiptRequired &&
+      (paymentMethod === 'Transferencia' || paymentMethod === 'Tarjeta') &&
+      !settleReceipt
+    ) {
+      toast.error('Adjunta el comprobante del pago digital para continuar')
       return
     }
     setSettling(true)
@@ -1672,6 +1697,10 @@ export function OrderDetailPage() {
             value={paymentReceipt}
             onChange={setPaymentReceipt}
             disabled={depositing}
+            required={
+              receiptRequired &&
+              (depositMethod === 'Transferencia' || depositMethod === 'Tarjeta')
+            }
           />
           <div className="rounded-xl bg-slate-50 px-3.5 py-2.5 text-[10px] leading-relaxed text-slate-500">
             El anticipo se registra en caja y queda en el libro de pagos. No modifica el total de la OT: solo reduce el saldo.
@@ -1870,6 +1899,10 @@ export function OrderDetailPage() {
               value={settleReceipt}
               onChange={setSettleReceipt}
               disabled={settling}
+              required={
+                receiptRequired &&
+                (paymentMethod === 'Transferencia' || paymentMethod === 'Tarjeta')
+              }
             />
           ) : null}
 

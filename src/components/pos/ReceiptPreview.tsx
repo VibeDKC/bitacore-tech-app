@@ -74,7 +74,7 @@ function ReceiptCopy({
         </thead>
         <tbody>
           {receipt.lines.map((line) => (
-            <tr key={`${line.productId}-${line.note ?? ''}`} className="border-b border-black/10">
+            <tr key={`${line.productId ?? line.name}-${line.note ?? ''}`} className="border-b border-black/10">
               <td className="py-0.5 pr-1">
                 {line.name}
                 {line.promotionName ? (

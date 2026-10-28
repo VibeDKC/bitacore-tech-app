@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.15.0 — 2026-10-28
+
+### Punto de venta
+- Facturación de servicios manuales sin crear productos de inventario.
+- Líneas con descripción, modalidad (tarifa fija, por hora o por unidad), cantidad, valor, garantía y nota.
+- Carrito mixto de productos y servicios; los servicios no descuentan stock.
+- Cliente rápido desde el POS con nombre, documento, teléfono y correo opcionales.
+- Atajos: F1 buscar, F2 cliente rápido, F3 servicio, F5 cobrar, F9 reimprimir la última venta y Escape limpiar la búsqueda.
+- El último comprobante de venta se conserva para reimprimir sin salir del POS.
+
+### Cobros
+- Opción **Exigir comprobante en pagos digitales**, desactivada por defecto.
+- La regla aplica a Transferencia y Tarjeta en ventas POS, anticipos y entrega de OT.
+- El comprobante se adjunta en el cobro y se guarda con el pago; el efectivo no se ve afectado.
+- El POS y la OT indican cuándo el comprobante es obligatorio antes de confirmar.
+
+### Documentos
+- Sin cambios en la generación de PDFs. El comprobante de diagnóstico inicial sigue siendo fijo y no se convierte en factura.
+- Las nuevas líneas manuales aparecen en el comprobante de venta y en el historial.
+
+### Calidad
+- Aceptación 1.15.0: 44/44.
+- Smoke empaquetado 1.15.0: 44/44.
+- Regresión 1.14.1: 19/19 sin propietario.
+- Regresión 1.14.0: 20/20 base.
+- Regresión 1.13.1: 23/23.
+- Regresión 1.13.0: 30/30.
+- Typecheck y build de app: OK.
+- Sin migración nueva: esquema 16.
+
 ## 1.14.1 — 2026-10-28
 
 ### Identidad y permisos

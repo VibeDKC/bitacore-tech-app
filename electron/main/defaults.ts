@@ -86,6 +86,9 @@ export const DEFAULT_SETTINGS = {
   equipment: {
     qrEnabled: false
   },
+  payments: {
+    requireReceiptForDigital: false
+  },
   messages: DEFAULT_MESSAGES,
   tracking: {
     purchasesByUser: true

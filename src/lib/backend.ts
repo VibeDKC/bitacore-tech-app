@@ -206,6 +206,13 @@ export interface SettleInput {
 export interface PosSaleInput {
   customerId: string
   lines: Array<{ productId: string; quantity: number; note?: string }>
+  manualLines?: Array<{
+    description: string
+    quantity: number
+    unitPrice: number
+    warrantyDays?: number
+    note?: string
+  }>
   method: PaymentMethod
   discountType?: 'percent' | 'amount'
   discountValue?: number
@@ -527,6 +534,9 @@ export const api = {
     }
   },
   payments: {
+    requirements() {
+      return rpc<{ requireReceiptForDigital: boolean }>('payments.requirements')
+    },
     openReceipt(paymentId: string) {
       return rpc<{ opened: boolean }>('payments.openReceipt', { paymentId })
     }
@@ -609,7 +619,16 @@ export const api = {
       return rpc<SettingsData>('settings.get')
     },
     updateSection(
-      section: 'print' | 'ai' | 'security' | 'business' | 'equipment' | 'messages' | 'tracking' | 'catalog',
+      section:
+        | 'print'
+        | 'ai'
+        | 'security'
+        | 'business'
+        | 'equipment'
+        | 'payments'
+        | 'messages'
+        | 'tracking'
+        | 'catalog',
       value: Record<string, unknown>
     ) {
       return rpc<SettingsData>('settings.updateSection', { section, value })

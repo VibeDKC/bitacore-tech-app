@@ -16,6 +16,7 @@ import {
   Fingerprint,
   Globe2,
   KeyRound,
+  Landmark,
   LockKeyhole,
   MessageCircle,
   Minus,
@@ -232,6 +233,7 @@ export function SettingsPage() {
     showLogo: true,
     showTerms: true
   })
+  const [requireReceiptForDigital, setRequireReceiptForDigital] = useState(false)
   const [aiDraft, setAiDraft] = useState<AiDraft>({
     enabled: false,
     diagnosis: false,
@@ -295,6 +297,9 @@ export function SettingsPage() {
       showLogo: current.print.showLogo,
       showTerms: current.print.showTermsOnReceipt
     })
+    setRequireReceiptForDigital(
+      Boolean(current.payments?.requireReceiptForDigital)
+    )
     setAiDraft({
       enabled: current.ai.enabled,
       diagnosis: current.ai.diagnosis,
@@ -441,6 +446,26 @@ export function SettingsPage() {
       })
     } catch (failure) {
       toast.error('No se pudieron guardar las preferencias', { description: errorMessage(failure) })
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  async function savePayments() {
+    if (saving) return
+    setSaving('cobros')
+    try {
+      const updated = await api.settings.updateSection('payments', {
+        requireReceiptForDigital
+      })
+      applySettings(updated)
+      toast.success('Cobros actualizados', {
+        description: requireReceiptForDigital
+          ? 'Los pagos con transferencia o tarjeta exigirán comprobante.'
+          : 'Los pagos digitales no exigirán comprobante.'
+      })
+    } catch (failure) {
+      toast.error('No se pudieron guardar los cobros', { description: errorMessage(failure) })
     } finally {
       setSaving(null)
     }
@@ -1843,6 +1868,46 @@ export function SettingsPage() {
                   </div>
                   <Button onClick={() => void savePrint()} loading={saving === 'impresion'} leftIcon={<Save className="h-4 w-4" />}>
                     Guardar preferencias
+                  </Button>
+                </div>
+              </div>
+
+              <div className="card p-5 lg:p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Comprobante en cobros digitales</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      Exige adjuntar el soporte cuando se cobra con transferencia o tarjeta.
+                    </p>
+                  </div>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                    <Landmark className="h-4 w-4" />
+                  </span>
+                </div>
+
+                <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-line px-4 py-3">
+                  <div>
+                    <p className="text-[11px] font-semibold text-ink">Exigir comprobante en pagos digitales</p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      Aplica a ventas de POS y abonos de OT con Transferencia o Tarjeta. El efectivo no se ve afectado.
+                    </p>
+                  </div>
+                  <Switch
+                    active={requireReceiptForDigital}
+                    onClick={() => setRequireReceiptForDigital((value) => !value)}
+                    label="Exigir comprobante en pagos digitales"
+                  />
+                </div>
+
+                <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-xl border border-line bg-slate-50/60 p-4 sm:flex-row sm:items-center">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success-600" />
+                    <p className="text-[10px] text-slate-500">
+                      El comprobante se adjunta en el cobro y se guarda con el pago. Los comprobantes de venta no cambian.
+                    </p>
+                  </div>
+                  <Button onClick={() => void savePayments()} loading={saving === 'cobros'} leftIcon={<Save className="h-4 w-4" />}>
+                    Guardar cobros
                   </Button>
                 </div>
               </div>

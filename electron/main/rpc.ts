@@ -606,6 +606,18 @@ function recordAccountMovement(
   )
 }
 
+function requiresDigitalReceipt(db: Database, method: string) {
+  const config = db.getSetting<any>('payments_config', DEFAULT_SETTINGS.payments)
+  return Boolean(config?.requireReceiptForDigital) &&
+    (method === 'Transferencia' || method === 'Tarjeta')
+}
+
+function assertDigitalReceipt(db: Database, method: string, receipt: any) {
+  if (requiresDigitalReceipt(db, method) && !receipt?.dataUrl) {
+    fail('Adjunta el comprobante del pago digital para continuar.', 'RECEIPT_REQUIRED')
+  }
+}
+
 function prepareReceiptFromPayload(
   runtime: Runtime,
   paymentId: string,
@@ -1104,6 +1116,7 @@ function settingsData(db: Database, runtime: Runtime) {
     security: db.getSetting('security_config', DEFAULT_SETTINGS.security),
     business: db.getSetting('business_config', DEFAULT_SETTINGS.business),
     equipment: db.getSetting('equipment_config', DEFAULT_SETTINGS.equipment),
+    payments: db.getSetting('payments_config', DEFAULT_SETTINGS.payments),
     messages: db.getSetting('messages_config', DEFAULT_SETTINGS.messages),
     tracking: db.getSetting('tracking_config', DEFAULT_SETTINGS.tracking),
     catalog: catalogStatus(db, runtime),
@@ -4863,6 +4876,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const amountCents = toCents(amount)
       if (amountCents > balanceCents) fail(`El anticipo supera el saldo pendiente (${money(balanceCents)}).`)
       const method = schema(payload?.method, z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
+      assertDigitalReceipt(db, method, payload?.receipt)
       requireCashSession(db)
       const number = db.paymentNumber()
       const id = `pay_${sha256(`${row.id}|${number}|${Date.now()}`).slice(0, 20)}`
@@ -5070,6 +5084,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const exceptionReason = noCharge ? text(payload?.exceptionReason, 'Motivo de la excepción', 5, 500) : ''
       const balanceCents = Math.max(totalCents - paidCents, 0)
       const chargeCents = noCharge || credit ? 0 : balanceCents
+      if (!noCharge && !credit && chargeCents > 0) {
+        assertDigitalReceipt(db, method, payload?.receipt)
+      }
       const receivedCents = numberValue(payload?.received ?? money(chargeCents), 'Efectivo recibido', { min: 0 })
       const received = toCents(receivedCents)
       if (!noCharge && !credit && method === 'Efectivo' && received < chargeCents) {
@@ -5223,20 +5240,34 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', customerId)
       if (!customer) fail('Selecciona un cliente válido')
       const lines = schema(
-        payload?.lines,
-        z
-          .array(
-            z.object({
-              productId: z.string().min(1),
-              quantity: z.number().positive(),
-              note: z.string().max(500).optional()
-            })
-          )
-          .min(1)
+        payload?.lines ?? [],
+        z.array(
+          z.object({
+            productId: z.string().min(1),
+            quantity: z.number().positive(),
+            note: z.string().max(500).optional()
+          })
+        )
       )
+      const manualLines = schema(
+        payload?.manualLines ?? [],
+        z.array(
+          z.object({
+            description: z.string().trim().min(2).max(300),
+            quantity: z.number().positive(),
+            unitPrice: z.number().min(0.01),
+            warrantyDays: z.number().min(0).max(3650).optional(),
+            note: z.string().max(500).optional()
+          })
+        )
+      )
+      if (!lines.length && !manualLines.length) {
+        fail('Agrega al menos un producto o servicio a la venta.')
+      }
       const method = schema(payload?.method, z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
+      assertDigitalReceipt(db, method, payload?.receipt)
       const activePromotions = activePromotionRows(db)
-      const prepared = lines.map((line) => {
+      const preparedProducts = lines.map((line) => {
         const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', line.productId)
         if (!product) fail('Uno de los productos ya no existe')
         if (!product.is_service && Number(product.stock) < line.quantity) {
@@ -5247,6 +5278,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
         const unitPriceCents = promotion ? toCents(promotion.price) : originalUnitPriceCents
         return {
           ...line,
+          sourceKey: line.productId,
+          manual: false,
           product,
           promotion,
           originalUnitPriceCents,
@@ -5255,7 +5288,30 @@ export async function handleRpc(command: string, payload: Payload, token: string
           note: product.is_service ? line.note?.trim().slice(0, 500) || null : null
         }
       })
-      const hasPromotion = prepared.some((line) => Boolean(line.promotion))
+      const manualPrepared = manualLines.map((line, index) => {
+        const warrantyDays = Math.max(0, Math.round(Number(line.warrantyDays ?? 0)))
+        const note = line.note?.trim().slice(0, 500) || null
+        return {
+          ...line,
+          sourceKey: `manual_${index}_${sha256(`${line.description}|${line.unitPrice}|${index}`).slice(0, 8)}`,
+          manual: true,
+          product: {
+            id: null,
+            name: line.description,
+            cost_cents: 0,
+            is_service: 1,
+            stock: 0
+          },
+          promotion: null,
+          originalUnitPriceCents: toCents(line.unitPrice),
+          unitPriceCents: toCents(line.unitPrice),
+          promotionDiscountCents: 0,
+          warrantyDays,
+          note: warrantyDays > 0 ? `${note ? `${note} · ` : ''}Garantía: ${warrantyDays} días` : note
+        }
+      })
+      const prepared = [...preparedProducts, ...manualPrepared]
+      const hasPromotion = preparedProducts.some((line) => Boolean(line.promotion))
       if (hasPromotion) {
         const requestedValue =
           payload?.discountValue !== undefined
@@ -5281,8 +5337,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           name: line.product.name,
           quantity: line.quantity,
           unitPriceCents: line.unitPriceCents,
-          unitCostCents: Number(line.product.cost_cents),
-          isService: Boolean(line.product.is_service),
+          unitCostCents: line.manual ? 0 : Number(line.product.cost_cents),
+          isService: Boolean(line.manual || line.product.is_service),
           allowBelowCost: Boolean(line.promotion?.allowBelowCost)
         })),
         subtotalCents,
@@ -5332,28 +5388,28 @@ export async function handleRpc(command: string, payload: Payload, token: string
                unit_cost_cents, line_total_cents, promotion_id, promotion_name, promotion_discount_cents,
                item_type, note)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            `ii_${sha256(`${invoiceId}|${line.productId}`).slice(0, 20)}`,
+            `ii_${sha256(`${invoiceId}|${line.sourceKey}`).slice(0, 20)}`,
             invoiceId,
-            line.product.id,
+            line.manual ? null : line.product.id,
             line.product.name,
             line.quantity,
             line.unitPriceCents,
             line.originalUnitPriceCents,
-            line.product.cost_cents,
+            line.manual ? 0 : line.product.cost_cents,
             Math.round(line.unitPriceCents * line.quantity),
             line.promotion?.id ?? null,
             line.promotion?.name ?? null,
             line.promotionDiscountCents,
-            line.product.is_service ? 'servicio' : 'producto',
+            line.manual || line.product.is_service ? 'servicio' : 'producto',
             line.note
           )
-          if (!line.product.is_service) {
+          if (!line.manual && !line.product.is_service) {
             db.run('UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?', line.quantity, nowIso, line.product.id)
             db.run(
               `INSERT INTO stock_movements
                 (id, product_id, type, quantity, unit_cost_cents, reason, reference_type, reference_id, user_id, user_name, created_at)
                VALUES (?, ?, 'venta', ?, ?, ?, 'invoice', ?, ?, ?, ?)`,
-              `sm_${sha256(`${invoiceId}|${line.productId}`).slice(0, 20)}`,
+              `sm_${sha256(`${invoiceId}|${line.sourceKey}`).slice(0, 20)}`,
               line.product.id,
               -Math.abs(line.quantity),
               line.product.cost_cents,
@@ -5434,7 +5490,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           change: money(changeCents),
           customerName: customer.name,
           lines: prepared.map((line) => ({
-            productId: line.product.id,
+            productId: line.manual ? null : line.product.id,
             name: line.product.name,
             quantity: line.quantity,
             price: money(line.unitPriceCents),
@@ -5445,6 +5501,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
             note: line.note
           }))
         }
+      }
+    }
+
+    case 'payments.requirements': {
+      return {
+        requireReceiptForDigital: Boolean(
+          db.getSetting<any>('payments_config', DEFAULT_SETTINGS.payments)
+            ?.requireReceiptForDigital
+        )
       }
     }
 
@@ -7278,11 +7343,23 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireModuleAccess(session, 'settings')
       const section = schema(
         payload?.section,
-        z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages', 'tracking', 'catalog'])
+        z.enum([
+          'print',
+          'ai',
+          'security',
+          'business',
+          'equipment',
+          'payments',
+          'messages',
+          'tracking',
+          'catalog'
+        ])
       )
       if (section === 'ai') requireCap(session, 'configureAI')
       if (section === 'equipment') requireCap(session, 'manageStaff')
-      if (section === 'business') requireCap(session, 'configureBusiness')
+      if (section === 'business' || section === 'payments') {
+        requireCap(session, 'configureBusiness')
+      }
       if (section === 'tracking') requireCap(session, 'configureBusiness')
       if (section === 'catalog') requireCap(session, 'publishCatalog')
       if (section === 'catalog') {
