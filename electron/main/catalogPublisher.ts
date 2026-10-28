@@ -13,6 +13,7 @@ import { RpcError } from './permissions'
 import { resolveProductImageFile } from './productImages'
 import { activePromotionRows, resolvePromotionForProductRow } from './promotions'
 import { sha256, sha256Bytes } from './security'
+import { slugify, uniqueSlug } from './slug'
 
 const DEMO_ORDERS = [
   {
@@ -89,27 +90,6 @@ function promotionCount(catalog: { products?: any[] }) {
       .filter((product) => product?.promotion?.id)
       .map((product) => String(product.promotion.id))
   ).size
-}
-
-function slugify(value: string) {
-  return String(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
-}
-
-function uniqueSlug(base: string, used: Set<string>) {
-  let slug = base || 'producto'
-  let index = 2
-  while (used.has(slug)) {
-    slug = `${base}-${index}`
-    index += 1
-  }
-  used.add(slug)
-  return slug
 }
 
 function defaultTargetPath(runtime: { userDataPath: string }) {
@@ -427,17 +407,46 @@ function buildCatalogData(
   const usedSlugs = new Set<string>()
   const images: CatalogImage[] = []
   const products: any[] = []
+  const galleryRows = db.all<any>(
+    `SELECT * FROM product_images
+     ORDER BY product_id ASC, is_cover DESC, sort_order ASC, created_at ASC`
+  )
+  const galleryByProduct = new Map<string, any[]>()
+  for (const image of galleryRows) {
+    const key = String(image.product_id)
+    const list = galleryByProduct.get(key) ?? []
+    list.push(image)
+    galleryByProduct.set(key, list)
+  }
 
   for (const row of rows) {
     const regularCents = Number(row.price_cents || 0)
     const promotion = resolvePromotionForProductRow(db, row, promos)
-    let image: string | null = null
-    if (row.image_path) {
+    const productImages: string[] = []
+    for (const image of galleryByProduct.get(String(row.id)) ?? []) {
+      try {
+        const source = resolveProductImageFile(runtime.userDataPath, String(image.image_path))
+        if (!fs.existsSync(source)) continue
+        const extension = path.extname(source).toLowerCase() || '.jpg'
+        const filename = `${row.id}-${image.id}${extension}`
+        const bytes = fs.readFileSync(source)
+        images.push({
+          filename,
+          bytes,
+          contentType: MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
+        })
+        productImages.push(imageUrlFor(filename, bytes))
+      } catch {
+        // Una imagen ilegible no debe impedir publicar el resto del catálogo.
+      }
+    }
+    let image: string | null = productImages[0] ?? null
+    if (!image && row.image_path) {
       try {
         const source = resolveProductImageFile(runtime.userDataPath, String(row.image_path))
         if (fs.existsSync(source)) {
           const extension = path.extname(source).toLowerCase() || '.jpg'
-          const filename = `${row.id}${extension}`
+          const filename = `${row.id}-legacy${extension}`
           const bytes = fs.readFileSync(source)
           images.push({
             filename,
@@ -445,17 +454,22 @@ function buildCatalogData(
             contentType: MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
           })
           image = imageUrlFor(filename, bytes)
+          productImages.push(image)
         }
       } catch {
         image = null
       }
     }
-    const slug = uniqueSlug(slugify(row.name) || slugify(row.sku), usedSlugs)
+    const slug = uniqueSlug(
+      String(row.slug ?? '').trim() || slugify(row.name) || slugify(row.sku),
+      usedSlugs
+    )
     products.push({
       id: row.id,
       sku: row.sku,
       slug,
       name: row.name,
+      description: row.description ?? '',
       category: row.category,
       categorySlug: slugify(row.category),
       regularPrice: promotion ? money(regularCents) : null,
@@ -464,6 +478,7 @@ function buildCatalogData(
       condition: row.condition || '',
       warrantyDays: Number(row.warranty_days || 0),
       image,
+      images: productImages,
       bestSeller: bestSellerIds.has(String(row.id)),
       promotion: promotion
         ? {
@@ -569,6 +584,7 @@ function buildCatalogData(
       stats: {
         products: products.length,
         withImage: products.filter((product) => product.image).length,
+        images: images.length,
         categories: categories.length
       },
       bestSellers,
@@ -626,9 +642,9 @@ function publishCatalogLocal(db: Database, runtime: { userDataPath: string }) {
     writeLocalStatus(db, {
       lastStatus: 'success',
       lastPublishedAt: built.catalog.generatedAt,
-      lastMessage: `Catálogo local publicado: ${built.catalog.stats.products} productos y ${built.catalog.stats.withImage} imágenes.`,
+      lastMessage: `Catálogo local publicado: ${built.catalog.stats.products} productos y ${built.images.length} imágenes.`,
       lastProductCount: built.catalog.stats.products,
-      lastImageCount: built.catalog.stats.withImage,
+      lastImageCount: built.images.length,
       lastPromotionCount: promotionCount(built.catalog)
     })
     return { ok: true as const, error: undefined }

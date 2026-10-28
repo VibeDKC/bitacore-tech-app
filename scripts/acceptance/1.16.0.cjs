@@ -364,7 +364,7 @@ async function main() {
     )
 
     check(
-      'esquema 17 con columnas de cartera',
+      'esquema con columnas de cartera',
       (() => {
         const db = readDb()
         try {
@@ -380,7 +380,7 @@ async function main() {
             .all()
             .map((row) => row.name)
           return (
-            version === 17 &&
+            version >= 17 &&
             customerColumns.includes('credit_limit_cents') &&
             customerColumns.includes('credit_days') &&
             invoiceColumns.includes('due_date')

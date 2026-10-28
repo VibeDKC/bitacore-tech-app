@@ -46,6 +46,8 @@ Incluye:
 - Etiqueta “Más vendido” con la regla de 30 días y mínimo 2 unidades (solo cuando hay datos).
 - Servicios sin precio por hora.
 - Consulta real de OT por número (solo dígitos) y clave de seguimiento validada por hash.
+- Galería de hasta 8 imágenes por producto, portada y descripción comercial.
+- Slug estable y compatibilidad con catálogos anteriores sin galería.
 - Promociones por SKU/categoría/todo, porcentaje o monto fijo, vigencia, prioridad y publicación web.
 - Exclusión de servicios, inactivos, insumos de taller, productos con `publish_web = 0` y condiciones no elegibles (`Usado`, `Para repuesto`, `Otro`).
 
@@ -55,7 +57,7 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/22-contrato-1.16.2.md`, el acta en `docs/actas/1.16.2.md` y los pendientes en `docs/pendientes/1.16.2.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/23-contrato-1.17.0.md`, el acta en `docs/actas/1.17.0.md` y los pendientes en `docs/pendientes/1.17.0.md`.
 
 Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales consulta por número (solo dígitos, sin `#OT-`) y clave de seguimiento, sin publicar la clave en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
@@ -85,6 +87,20 @@ Desde 1.16.0 el taller incorpora:
 - Riesgo de abandono según los días configurados en el snapshot legal de la OT, con aviso en el detalle y notificación en el panel.
 
 La cartera aplica a las entregas a crédito de OT. Las ventas de POS siguen cobrándose con los métodos actuales.
+
+## Inventario y catálogo
+
+Desde 1.17.0 la ficha del producto incorpora:
+
+- **Descripción comercial** visible en la app y en la web.
+- **Notas internas** privadas, nunca publicadas.
+- **Galería de hasta 8 imágenes** con portada, orden, cambio de portada y eliminación.
+- Miniatura de la portada en inventario y POS.
+- **Slug estable** para la URL pública; no cambia al renombrar la referencia.
+- **Historial de compras** con proveedor, factura, fecha, cantidad y costo.
+- El costo actual se actualiza con las compras recibidas.
+
+El catálogo publica la descripción, las imágenes y el slug estable. La web muestra la galería y la descripción comercial; las notas internas nunca salen de la app.
 
 ## Marca
 
@@ -257,8 +273,10 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.16.0` | Cartera, cupo de crédito, vencimientos, abonos, garantías y abandono. |
 | `npm run test:acceptance:1.16.1` | Logo, símbolo, icono, favicon y wordmark en la app. |
 | `npm run test:acceptance:1.16.2` | Actualización con base existente, acceso del propietario y recuperación de clave. |
+| `npm run test:acceptance:1.17.0` | Galería, descripciones, slug estable, historial de compras y catálogo. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.16.0` | Migración 17 de cartera, cupo de crédito y vencimientos sobre copia de la base real. |
+| `npm run test:migration:1.17.0` | Migración 18 de galería, descripciones y slugs sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
@@ -296,6 +314,7 @@ npm run test:acceptance:1.15.0
 npm run test:acceptance:1.16.0
 npm run test:acceptance:1.16.1
 npm run test:acceptance:1.16.2
+npm run test:acceptance:1.17.0
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -308,9 +327,10 @@ npm run test:migration:1.10.3
 npm run test:migration:1.11.0
 npm run test:migration:1.12.0
 npm run test:migration:1.16.0
+npm run test:migration:1.17.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36`, `6/6` y `16/16`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36`, `6/6`, `16/16` y `20/20`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -318,7 +338,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.16.2-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.17.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -331,6 +351,8 @@ El instalador queda en `release/` como `BitacoreTech-1.16.2-x64.exe`. La configu
 - Las ventas no llevan IVA; las compras sí aplican IVA del 19 %.
 - Los servicios manuales del POS no crean productos ni mueven stock; se guardan como líneas `servicio` con `product_id = NULL`.
 - El comprobante en pagos digitales es configurable y, cuando está activo, exige adjunto en Transferencia y Tarjeta. Está desactivado por defecto.
+- El catálogo publica hasta 8 imágenes por producto y una descripción comercial; las notas internas nunca se publican.
+- El slug del producto se conserva aunque se renombre la referencia.
 - La cartera agrupa las facturas de OT entregadas a crédito; el cupo por cliente se valida antes de autorizar y 0 significa sin límite.
 - La búsqueda web de OT acepta el número sin `#OT-` y la clave sin distinguir mayúsculas; ambos datos siguen siendo obligatorios.
 - El logo oficial se usa en la app y el icono del instalador es el símbolo sin texto.

@@ -22,7 +22,13 @@ import {
   Warehouse
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Product, ProductRotation, StockMovement, StockStatus } from '@/types'
+import type {
+  Product,
+  ProductPurchaseHistoryRow,
+  ProductRotation,
+  StockMovement,
+  StockStatus
+} from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { isWebEligibleCondition } from '@/lib/products'
@@ -42,6 +48,7 @@ import { StockStatusBadge } from '@/components/ui/StatusBadge'
 import { ProgressBar } from '@/components/ui/EmptyState'
 import { SegmentedTabs } from '@/components/ui/Tabs'
 import { ProductImageField } from '@/components/inventory/ProductImageField'
+import { ProductGalleryField } from '@/components/inventory/ProductGalleryField'
 import { cn } from '@/lib/utils'
 
 const defaultCategories = [
@@ -71,6 +78,8 @@ const emptyProductForm = {
   location: 'Bodega A',
   condition: '',
   origin: '',
+  description: '',
+  internalNotes: '',
   stock: '0',
   minStock: '2',
   cost: '',
@@ -118,6 +127,8 @@ export function InventoryPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState(emptyProductForm)
   const [movements, setMovements] = useState<StockMovement[]>([])
+  const [purchaseHistory, setPurchaseHistory] = useState<ProductPurchaseHistoryRow[]>([])
+  const [gallerySaving, setGallerySaving] = useState(false)
   const [saving, setSaving] = useState(false)
   const [skuSaving, setSkuSaving] = useState(false)
   const [bulkSkuSaving, setBulkSkuSaving] = useState(false)
@@ -129,16 +140,23 @@ export function InventoryPage() {
   useEffect(() => {
     if (!selectedId) {
       setMovements([])
+      setPurchaseHistory([])
       return
     }
     let active = true
-    api.inventory
-      .movements(selectedId)
-      .then((rows) => {
-        if (active) setMovements(rows)
+    Promise.all([
+      api.inventory.movements(selectedId),
+      api.inventory.purchaseHistory(selectedId).catch(() => [])
+    ])
+      .then(([rows, purchases]) => {
+        if (!active) return
+        setMovements(rows)
+        setPurchaseHistory(purchases)
       })
       .catch(() => {
-        if (active) setMovements([])
+        if (!active) return
+        setMovements([])
+        setPurchaseHistory([])
       })
     return () => {
       active = false
@@ -238,6 +256,8 @@ export function InventoryPage() {
         location: form.location,
         condition: form.condition || undefined,
         origin: form.origin || undefined,
+        description: form.description || undefined,
+        internalNotes: form.internalNotes || undefined,
         stock: Number(form.stock) || 0,
         minStock: Number(form.minStock) || 0,
         cost: Number(form.cost) || 0,
@@ -279,6 +299,8 @@ export function InventoryPage() {
       location: product.location,
       condition: product.condition ?? '',
       origin: product.origin ?? '',
+      description: product.description ?? '',
+      internalNotes: product.internalNotes ?? '',
       stock: String(product.stock),
       minStock: String(product.minStock),
       cost: String(product.cost ?? 0),
@@ -323,6 +345,8 @@ export function InventoryPage() {
         location: editForm.location,
         condition: editForm.condition,
         origin: editForm.origin,
+        description: editForm.description,
+        internalNotes: editForm.internalNotes,
         minStock: Number(editForm.minStock) || 0,
         cost: Number(editForm.cost) || 0,
         price: Number(editForm.price),
@@ -345,6 +369,85 @@ export function InventoryPage() {
       toast.error('No se pudo actualizar la referencia', { description: errorMessage(failure) })
     } finally {
       setSaving(false)
+    }
+  }
+
+  function replaceProduct(updated: Product) {
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            products: current.products.map((item) => (item.id === updated.id ? updated : item))
+          }
+        : current
+    )
+  }
+
+  async function addGalleryImage(dataUrl: string, thumbnailDataUrl: string) {
+    if (!selected || gallerySaving) return
+    setGallerySaving(true)
+    try {
+      const updated = await api.inventory.addImage({
+        productId: selected.id,
+        dataUrl,
+        thumbnailDataUrl
+      })
+      replaceProduct(updated)
+      toast.success('Imagen agregada a la galería')
+    } catch (failure) {
+      toast.error('No se pudo agregar la imagen', { description: errorMessage(failure) })
+    } finally {
+      setGallerySaving(false)
+    }
+  }
+
+  async function removeGalleryImage(imageId: string) {
+    if (!selected || gallerySaving) return
+    setGallerySaving(true)
+    try {
+      const updated = await api.inventory.removeImage(selected.id, imageId)
+      replaceProduct(updated)
+      toast.success('Imagen eliminada')
+    } catch (failure) {
+      toast.error('No se pudo eliminar la imagen', { description: errorMessage(failure) })
+    } finally {
+      setGallerySaving(false)
+    }
+  }
+
+  async function setGalleryCover(imageId: string) {
+    if (!selected || gallerySaving) return
+    setGallerySaving(true)
+    try {
+      const updated = await api.inventory.setCoverImage(selected.id, imageId)
+      replaceProduct(updated)
+      toast.success('Portada actualizada')
+    } catch (failure) {
+      toast.error('No se pudo actualizar la portada', { description: errorMessage(failure) })
+    } finally {
+      setGallerySaving(false)
+    }
+  }
+
+  async function moveGalleryImage(imageId: string, direction: -1 | 1) {
+    if (!selected || gallerySaving) return
+    const images = selected.images ?? []
+    const cover = images.find((image) => image.isCover) ?? null
+    const nonCover = images.filter((image) => !image.isCover)
+    const index = nonCover.findIndex((image) => image.id === imageId)
+    const nextIndex = index + direction
+    if (index < 0 || nextIndex < 0 || nextIndex >= nonCover.length) return
+    const reordered = [...nonCover]
+    ;[reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]]
+    const ids = [...(cover ? [cover.id] : []), ...reordered.map((image) => image.id)]
+    setGallerySaving(true)
+    try {
+      const updated = await api.inventory.reorderImages(selected.id, ids)
+      replaceProduct(updated)
+    } catch (failure) {
+      toast.error('No se pudo ordenar la galería', { description: errorMessage(failure) })
+    } finally {
+      setGallerySaving(false)
     }
   }
 
@@ -699,6 +802,30 @@ export function InventoryPage() {
                 className="h-56 w-full rounded-2xl border border-line bg-white object-contain"
               />
             ) : null}
+            {(selected.images?.length ?? 0) > 1 ? (
+              <div className="grid grid-cols-4 gap-2">
+                {selected.images?.map((image) => (
+                  <div
+                    key={image.id}
+                    className={cn(
+                      'relative overflow-hidden rounded-xl border bg-white',
+                      image.isCover ? 'border-brand-300 ring-2 ring-brand-100' : 'border-line'
+                    )}
+                  >
+                    <img
+                      src={image.thumbnailUrl || image.url}
+                      alt={image.alt || selected.name}
+                      className="h-16 w-full object-cover"
+                    />
+                    {image.isCover ? (
+                      <span className="absolute left-1 top-1 rounded-full bg-brand-600 px-1.5 py-0.5 text-[7px] font-bold uppercase text-white">
+                        Portada
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="flex items-center gap-3">
               <span className={cn('flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br', selected.tone)}>
                 <selected.icon className="h-7 w-7" />
@@ -751,6 +878,24 @@ export function InventoryPage() {
               </div>
             </div>
 
+            {selected.description ? (
+              <div>
+                <p className="field-label">Descripción pública</p>
+                <p className="whitespace-pre-wrap rounded-xl border border-line bg-slate-50/60 px-3.5 py-3 text-[11px] leading-relaxed text-slate-600">
+                  {selected.description}
+                </p>
+              </div>
+            ) : null}
+
+            {selected.internalNotes ? (
+              <div>
+                <p className="field-label">Notas internas</p>
+                <p className="whitespace-pre-wrap rounded-xl border border-warning-100 bg-warning-50/50 px-3.5 py-3 text-[11px] leading-relaxed text-warning-800">
+                  {selected.internalNotes}
+                </p>
+              </div>
+            ) : null}
+
             {canCosts ? (
               <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-3.5">
                 <div className="flex items-center justify-between text-[11px] text-brand-800">
@@ -790,6 +935,40 @@ export function InventoryPage() {
               ) : (
                 <p className="rounded-xl border border-dashed border-line px-3 py-3 text-center text-[10px] text-slate-400">
                   Producto sin control individual de seriales.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="field-label mb-0">Historial de compras</p>
+                <Badge variant="neutral">{purchaseHistory.length}</Badge>
+              </div>
+              {purchaseHistory.length ? (
+                <div className="divide-y divide-line rounded-xl border border-line">
+                  {purchaseHistory.map((row) => (
+                    <div
+                      key={row.id}
+                      className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5"
+                    >
+                      <div>
+                        <p className="text-[10px] font-semibold text-ink">
+                          {row.supplier} · {row.purchaseNumber}
+                        </p>
+                        <p className="mt-0.5 text-[9px] text-slate-400">
+                          {formatDateTime(row.date)} · {row.quantity} ×{' '}
+                          {formatCurrency(row.unitCost)}
+                        </p>
+                      </div>
+                      <span className="tabular text-[11px] font-semibold text-ink">
+                        {formatCurrency(row.lineTotal)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-line px-3 py-3 text-center text-[10px] text-slate-400">
+                  Sin compras registradas para esta referencia.
                 </p>
               )}
             </div>
@@ -993,6 +1172,26 @@ export function InventoryPage() {
               ))}
             </select>
           </label>
+          <label className="block sm:col-span-2">
+            <span className="field-label">Descripción comercial (visible en la web)</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => setForm({ ...form, description: event.target.value })}
+              className="field min-h-[74px] resize-y"
+              placeholder="Describe el producto para el catálogo público."
+              maxLength={1200}
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="field-label">Notas internas (no se publican)</span>
+            <textarea
+              value={form.internalNotes}
+              onChange={(event) => setForm({ ...form, internalNotes: event.target.value })}
+              className="field min-h-[62px] resize-y"
+              placeholder="Proveedor habitual, detalles de compra, observaciones del taller…"
+              maxLength={2000}
+            />
+          </label>
           <label className="flex items-end">
             <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
               <input
@@ -1146,20 +1345,15 @@ export function InventoryPage() {
             <input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} className="field" />
           </label>
           <div className="sm:col-span-2">
-            <ProductImageField
-              previewUrl={
-                editForm.removeImage
-                  ? null
-                  : editForm.imageDataUrl || selected?.imageUrl || null
+            <ProductGalleryField
+              images={selected?.images ?? []}
+              disabled={saving || gallerySaving}
+              onAdd={(dataUrl, thumbnailDataUrl) =>
+                void addGalleryImage(dataUrl, thumbnailDataUrl)
               }
-              hasExisting={Boolean(selected?.imageUrl) && !editForm.removeImage}
-              disabled={saving}
-              onChange={(imageDataUrl, imageThumbnailDataUrl) =>
-                setEditForm({ ...editForm, imageDataUrl, imageThumbnailDataUrl, removeImage: false })
-              }
-              onRemove={() =>
-                setEditForm({ ...editForm, imageDataUrl: null, imageThumbnailDataUrl: null, removeImage: true })
-              }
+              onRemove={(imageId) => void removeGalleryImage(imageId)}
+              onCover={(imageId) => void setGalleryCover(imageId)}
+              onMove={(imageId, direction) => void moveGalleryImage(imageId, direction)}
             />
           </div>
           <div className="block">
@@ -1250,6 +1444,26 @@ export function InventoryPage() {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="field-label">Descripción comercial (visible en la web)</span>
+            <textarea
+              value={editForm.description}
+              onChange={(event) => setEditForm({ ...editForm, description: event.target.value })}
+              className="field min-h-[74px] resize-y"
+              placeholder="Describe el producto para el catálogo público."
+              maxLength={1200}
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="field-label">Notas internas (no se publican)</span>
+            <textarea
+              value={editForm.internalNotes}
+              onChange={(event) => setEditForm({ ...editForm, internalNotes: event.target.value })}
+              className="field min-h-[62px] resize-y"
+              placeholder="Proveedor habitual, detalles de compra, observaciones del taller…"
+              maxLength={2000}
+            />
           </label>
           <label className="flex items-end">
             <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">

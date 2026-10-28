@@ -79,6 +79,7 @@ import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
 import { listGeminiModels, scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
 import { resolveInternalSku } from './sku'
 import { cleanProductText } from './productText'
+import { slugify, uniqueSlug } from './slug'
 import {
   PRODUCT_IMAGE_FOLDER,
   prepareProductImage,
@@ -2095,12 +2096,20 @@ function createProductFromPurchaseReview(
   const warrantyDays = Math.max(0, Math.round(aiNumber(input?.warrantyDays, 0)))
   const supplierSku =
     typeof input?.supplierSku === 'string' ? input.supplierSku.trim().slice(0, 60) : ''
+  const slug = uniqueSlug(
+    slugify(name) || slugify(sku),
+    new Set(
+      db
+        .all<{ slug: string }>("SELECT slug FROM products WHERE slug <> ''")
+        .map((row) => row.slug)
+    )
+  )
   const id = `prod_${sha256(`${sku}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
   db.run(
     `INSERT INTO products
       (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
-       warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, NULL, 1, 'rotativo', 1, ?, ?)`,
+       slug, warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, 0, NULL, 1, 'rotativo', 1, ?, ?)`,
     id,
     name,
     sku,
@@ -2112,6 +2121,7 @@ function createProductFromPurchaseReview(
     typeof input?.origin === 'string' ? input.origin.trim().slice(0, 80) : '',
     unitCostCents,
     priceCents,
+    slug,
     warrantyDays,
     nowIso,
     nowIso
@@ -3953,6 +3963,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
         service && typeof payload?.serviceType === 'string' && payload.serviceType.trim()
           ? text(payload.serviceType, 'Tipo de servicio', 1, 80)
           : null
+      const description =
+        typeof payload?.description === 'string' ? payload.description.trim().slice(0, 1200) : ''
+      const internalNotes =
+        typeof payload?.internalNotes === 'string'
+          ? payload.internalNotes.trim().slice(0, 2000)
+          : ''
+      const slug = uniqueSlug(
+        slugify(name) || slugify(sku),
+        new Set(
+          db
+            .all<{ slug: string }>("SELECT slug FROM products WHERE slug <> ''")
+            .map((row) => row.slug)
+        )
+      )
       if (serviceType) {
         const serviceNode = db.get<any>(
           "SELECT id FROM dictionary_nodes WHERE type = 'service_type' AND name = ? COLLATE NOCASE AND active = 1",
@@ -3982,9 +4006,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
           db.run(
             `INSERT INTO products
               (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
-               image_path, image_thumb_path, image_updated_at,
+               image_path, image_thumb_path, image_updated_at, description, internal_notes, slug,
                warranty_days, is_service, service_type, alert_enabled, publish_web, rotation, active, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             id,
             name,
             sku,
@@ -4001,6 +4025,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
             preparedImage?.imagePath ?? null,
             preparedImage?.imageThumbPath ?? null,
             preparedImage ? nowIso : null,
+            description,
+            internalNotes,
+            slug,
             Math.max(0, Math.round(numberValue(payload?.warrantyDays ?? 0, 'Garantía', { min: 0 }))),
             service ? 1 : 0,
             serviceType,
@@ -4010,6 +4037,19 @@ export async function handleRpc(command: string, payload: Payload, token: string
             nowIso,
             nowIso
           )
+          if (preparedImage) {
+            db.run(
+              `INSERT INTO product_images
+                (id, product_id, image_path, image_thumb_path, alt, sort_order, is_cover, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, 1, ?)`,
+              `pimg_${sha256(`${id}|cover`).slice(0, 20)}`,
+              id,
+              preparedImage.imagePath,
+              preparedImage.imageThumbPath,
+              name,
+              nowIso
+            )
+          }
           if (stock > 0) {
             db.run(
               `INSERT INTO stock_movements
@@ -4123,6 +4163,40 @@ export async function handleRpc(command: string, payload: Payload, token: string
         params.push(typeof payload.origin === 'string' ? payload.origin.trim().slice(0, 80) : '')
         changed.push('origen')
       }
+      if (payload?.description !== undefined) {
+        updates.push('description = ?')
+        params.push(
+          typeof payload.description === 'string'
+            ? payload.description.trim().slice(0, 1200)
+            : ''
+        )
+        changed.push('descripción')
+      }
+      if (payload?.internalNotes !== undefined) {
+        updates.push('internal_notes = ?')
+        params.push(
+          typeof payload.internalNotes === 'string'
+            ? payload.internalNotes.trim().slice(0, 2000)
+            : ''
+        )
+        changed.push('notas internas')
+      }
+      if (!String(product.slug ?? '').trim()) {
+        const slug = uniqueSlug(
+          slugify(String(payload?.name ?? product.name)) || slugify(String(product.sku)),
+          new Set(
+            db
+              .all<{ slug: string }>(
+                "SELECT slug FROM products WHERE slug <> '' AND id <> ?",
+                productId
+              )
+              .map((row) => row.slug)
+          )
+        )
+        updates.push('slug = ?')
+        params.push(slug)
+        changed.push('slug')
+      }
       if (payload?.minStock !== undefined) {
         updates.push('min_stock = ?')
         params.push(numberValue(payload.minStock, 'Stock mínimo', { min: 0 }))
@@ -4226,10 +4300,29 @@ export async function handleRpc(command: string, payload: Payload, token: string
           fail(error instanceof Error ? error.message : 'No se pudo preparar la imagen del producto.')
         }
       }
+      const existingGallery = db.all<any>(
+        'SELECT * FROM product_images WHERE product_id = ? ORDER BY is_cover DESC, sort_order ASC, created_at ASC',
+        productId
+      )
+      let replacedCoverPaths: string[] = []
       if (removeImage && !preparedImage) {
-        updates.push('image_path = NULL', 'image_thumb_path = NULL', 'image_updated_at = NULL')
+        replacedCoverPaths = existingGallery.flatMap((image) => [
+          String(image.image_path),
+          String(image.image_thumb_path)
+        ])
+        updates.push(
+          'image_path = NULL',
+          'image_thumb_path = NULL',
+          'image_updated_at = NULL'
+        )
         changed.push('imagen eliminada')
       } else if (preparedImage) {
+        const coverRows = existingGallery.filter((image) => Boolean(image.is_cover))
+        const rowsToReplace = coverRows.length ? coverRows : existingGallery.slice(0, 1)
+        replacedCoverPaths = rowsToReplace.flatMap((image) => [
+          String(image.image_path),
+          String(image.image_thumb_path)
+        ])
         updates.push('image_path = ?', 'image_thumb_path = ?', 'image_updated_at = ?')
         params.push(
           preparedImage.imagePath,
@@ -4241,10 +4334,34 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (!updates.length) fail('No hay cambios para guardar')
       updates.push('updated_at = ?')
       params.push(new Date().toISOString())
-      const oldImagePaths = [product.image_path, product.image_thumb_path].filter(Boolean)
+      const oldImagePaths = [
+        ...replacedCoverPaths,
+        product.image_path,
+        product.image_thumb_path
+      ].filter(Boolean)
       try {
         db.tx(() => {
           db.run(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`, ...params, productId)
+          if (removeImage && !preparedImage) {
+            db.run('DELETE FROM product_images WHERE product_id = ?', productId)
+          } else if (preparedImage) {
+            const rowsToReplace = existingGallery.filter((image) => Boolean(image.is_cover))
+            const removeRows = rowsToReplace.length ? rowsToReplace : existingGallery.slice(0, 1)
+            for (const image of removeRows) {
+              db.run('DELETE FROM product_images WHERE id = ?', image.id)
+            }
+            db.run(
+              `INSERT INTO product_images
+                (id, product_id, image_path, image_thumb_path, alt, sort_order, is_cover, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, 1, ?)`,
+              `pimg_${sha256(`${productId}|cover|${Date.now()}`).slice(0, 20)}`,
+              productId,
+              preparedImage.imagePath,
+              preparedImage.imageThumbPath,
+              String(payload?.name ?? product.name),
+              new Date().toISOString()
+            )
+          }
           audit(
             db,
             session,
@@ -4264,12 +4381,17 @@ export async function handleRpc(command: string, payload: Payload, token: string
         throw error
       }
       if (preparedImage || removeImage) {
-        const nextImagePaths = new Set(
-          preparedImage ? [preparedImage.imagePath, preparedImage.imageThumbPath] : []
+        const usedPaths = new Set(
+          db
+            .all<{ image_path: string; image_thumb_path: string }>(
+              'SELECT image_path, image_thumb_path FROM product_images WHERE product_id = ?',
+              productId
+            )
+            .flatMap((image) => [image.image_path, image.image_thumb_path])
         )
         removeProductImageFiles(
           runtime.userDataPath,
-          oldImagePaths.filter((item) => !nextImagePaths.has(String(item)))
+          oldImagePaths.filter((item) => !usedPaths.has(String(item)))
         )
       }
       scheduleCatalogPublish(db, runtime)
@@ -4313,6 +4435,272 @@ export async function handleRpc(command: string, payload: Payload, token: string
       })
       scheduleCatalogPublish(db, runtime)
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', productId), true)
+    }
+
+    case 'inventory.addImage': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      const productId = text(payload?.productId, 'Producto', 1, 80)
+      const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', productId)
+      if (!product) fail('Producto no encontrado', 'NOT_FOUND')
+      const count = Number(
+        db.get<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM product_images WHERE product_id = ?',
+          productId
+        )?.count ?? 0
+      )
+      if (count >= 8) fail('Cada producto admite hasta 8 imágenes.')
+      let preparedImage: ReturnType<typeof prepareProductImage> | null = null
+      try {
+        preparedImage = prepareProductImage({
+          userDataPath: runtime.userDataPath,
+          productId,
+          dataUrl: payload?.dataUrl,
+          thumbnailDataUrl: payload?.thumbnailDataUrl
+        })
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'No se pudo preparar la imagen.')
+      }
+      if (!preparedImage) fail('No se pudo preparar la imagen.')
+      const nowIso = new Date().toISOString()
+      const imageId = `pimg_${sha256(`${productId}|${preparedImage.imagePath}|${Date.now()}`).slice(0, 20)}`
+      const isCover = count === 0
+      const nextSort =
+        Number(
+          db.get<{ next: number }>(
+            'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM product_images WHERE product_id = ?',
+            productId
+          )?.next ?? 0
+        )
+      try {
+        db.tx(() => {
+          db.run(
+            `INSERT INTO product_images
+              (id, product_id, image_path, image_thumb_path, alt, sort_order, is_cover, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            imageId,
+            productId,
+            preparedImage!.imagePath,
+            preparedImage!.imageThumbPath,
+            typeof payload?.alt === 'string' ? payload.alt.trim().slice(0, 160) : product.name,
+            nextSort,
+            isCover ? 1 : 0,
+            nowIso
+          )
+          if (isCover) {
+            db.run(
+              'UPDATE products SET image_path = ?, image_thumb_path = ?, image_updated_at = ?, updated_at = ? WHERE id = ?',
+              preparedImage!.imagePath,
+              preparedImage!.imageThumbPath,
+              nowIso,
+              nowIso,
+              productId
+            )
+          }
+          audit(
+            db,
+            session,
+            'Imagen de producto agregada',
+            'Producto',
+            `${product.name} · ${isCover ? 'portada' : 'galería'}`,
+            productId
+          )
+        })
+      } catch (error) {
+        removeProductImageFiles(runtime.userDataPath, [
+          preparedImage.imagePath,
+          preparedImage.imageThumbPath
+        ])
+        throw error
+      }
+      scheduleCatalogPublish(db, runtime)
+      return productDto(
+        db,
+        db.get<any>('SELECT * FROM products WHERE id = ?', productId),
+        canSession(session, 'viewCosts')
+      )
+    }
+
+    case 'inventory.removeImage': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      const productId = text(payload?.productId, 'Producto', 1, 80)
+      const imageId = text(payload?.imageId, 'Imagen', 1, 80)
+      const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', productId)
+      if (!product) fail('Producto no encontrado', 'NOT_FOUND')
+      const image = db.get<any>(
+        'SELECT * FROM product_images WHERE id = ? AND product_id = ?',
+        imageId,
+        productId
+      )
+      if (!image) fail('Imagen no encontrada', 'NOT_FOUND')
+      const remaining = db
+        .all<any>(
+          'SELECT * FROM product_images WHERE product_id = ? AND id <> ? ORDER BY is_cover DESC, sort_order ASC, created_at ASC',
+          productId,
+          imageId
+        )
+      const nextCover = image.is_cover ? remaining[0] ?? null : null
+      const paths = [String(image.image_path), String(image.image_thumb_path)]
+      const nowIso = new Date().toISOString()
+      db.tx(() => {
+        db.run('DELETE FROM product_images WHERE id = ?', imageId)
+        if (image.is_cover) {
+          if (nextCover) {
+            db.run('UPDATE product_images SET is_cover = 1 WHERE id = ?', nextCover.id)
+            db.run(
+              'UPDATE products SET image_path = ?, image_thumb_path = ?, image_updated_at = ?, updated_at = ? WHERE id = ?',
+              nextCover.image_path,
+              nextCover.image_thumb_path,
+              nowIso,
+              nowIso,
+              productId
+            )
+          } else {
+            db.run(
+              'UPDATE products SET image_path = NULL, image_thumb_path = NULL, image_updated_at = NULL, updated_at = ? WHERE id = ?',
+              nowIso,
+              productId
+            )
+          }
+        }
+        audit(
+          db,
+          session,
+          'Imagen de producto eliminada',
+          'Producto',
+          `${product.name} · ${image.alt || 'imagen'}`,
+          productId
+        )
+      })
+      const used = db.get<any>(
+        'SELECT id FROM product_images WHERE product_id = ? AND (image_path = ? OR image_thumb_path = ?) LIMIT 1',
+        productId,
+        image.image_path,
+        image.image_thumb_path
+      )
+      if (!used) removeProductImageFiles(runtime.userDataPath, paths)
+      scheduleCatalogPublish(db, runtime)
+      return productDto(
+        db,
+        db.get<any>('SELECT * FROM products WHERE id = ?', productId),
+        canSession(session, 'viewCosts')
+      )
+    }
+
+    case 'inventory.setCoverImage': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      const productId = text(payload?.productId, 'Producto', 1, 80)
+      const imageId = text(payload?.imageId, 'Imagen', 1, 80)
+      const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', productId)
+      if (!product) fail('Producto no encontrado', 'NOT_FOUND')
+      const image = db.get<any>(
+        'SELECT * FROM product_images WHERE id = ? AND product_id = ?',
+        imageId,
+        productId
+      )
+      if (!image) fail('Imagen no encontrada', 'NOT_FOUND')
+      const nowIso = new Date().toISOString()
+      db.tx(() => {
+        db.run('UPDATE product_images SET is_cover = 0 WHERE product_id = ?', productId)
+        db.run('UPDATE product_images SET is_cover = 1 WHERE id = ?', imageId)
+        db.run(
+          'UPDATE products SET image_path = ?, image_thumb_path = ?, image_updated_at = ?, updated_at = ? WHERE id = ?',
+          image.image_path,
+          image.image_thumb_path,
+          nowIso,
+          nowIso,
+          productId
+        )
+        audit(
+          db,
+          session,
+          'Portada de producto actualizada',
+          'Producto',
+          `${product.name} · ${image.alt || 'imagen'}`,
+          productId
+        )
+      })
+      scheduleCatalogPublish(db, runtime)
+      return productDto(
+        db,
+        db.get<any>('SELECT * FROM products WHERE id = ?', productId),
+        canSession(session, 'viewCosts')
+      )
+    }
+
+    case 'inventory.reorderImages': {
+      requireModuleAccess(session, 'inventory')
+      requireCap(session, 'editInventory')
+      const productId = text(payload?.productId, 'Producto', 1, 80)
+      const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', productId)
+      if (!product) fail('Producto no encontrado', 'NOT_FOUND')
+      const imageIds = schema(
+        payload?.imageIds,
+        z.array(z.string().min(1)).max(8)
+      )
+      const rows = db.all<any>('SELECT id FROM product_images WHERE product_id = ?', productId)
+      if (rows.length !== imageIds.length || rows.some((row) => !imageIds.includes(row.id))) {
+        fail('El orden de imágenes no coincide con la galería actual.')
+      }
+      db.tx(() => {
+        imageIds.forEach((id, index) => {
+          db.run(
+            'UPDATE product_images SET sort_order = ? WHERE id = ? AND product_id = ?',
+            index,
+            id,
+            productId
+          )
+        })
+        audit(
+          db,
+          session,
+          'Orden de imágenes actualizado',
+          'Producto',
+          `${product.name} · ${imageIds.length} imágenes`,
+          productId
+        )
+      })
+      scheduleCatalogPublish(db, runtime)
+      return productDto(
+        db,
+        db.get<any>('SELECT * FROM products WHERE id = ?', productId),
+        canSession(session, 'viewCosts')
+      )
+    }
+
+    case 'inventory.purchaseHistory': {
+      requireModuleAccess(session, 'inventory')
+      const productId = text(payload?.productId, 'Producto', 1, 80)
+      const product = db.get<any>('SELECT id FROM products WHERE id = ?', productId)
+      if (!product) fail('Producto no encontrado', 'NOT_FOUND')
+      return db
+        .all<any>(
+          `SELECT pi.id, pi.purchase_id, p.number AS purchase_number, s.name AS supplier,
+                  p.purchase_date, pi.quantity, pi.unit_price_cents, pi.iva_rate,
+                  p.status, p.payment_status
+           FROM purchase_items pi
+           JOIN purchases p ON p.id = pi.purchase_id
+           LEFT JOIN suppliers s ON s.id = p.supplier_id
+           WHERE pi.product_id = ?
+           ORDER BY p.purchase_date DESC, p.created_at DESC
+           LIMIT 20`,
+          productId
+        )
+        .map((row) => ({
+          id: row.id,
+          purchaseId: row.purchase_id,
+          purchaseNumber: row.purchase_number,
+          supplier: row.supplier ?? 'Sin proveedor',
+          date: row.purchase_date,
+          quantity: Number(row.quantity),
+          unitCost: money(row.unit_price_cents),
+          ivaRate: Number(row.iva_rate ?? 0),
+          lineTotal: money(Number(row.unit_price_cents) * Number(row.quantity)),
+          status: row.status,
+          paymentStatus: row.payment_status
+        }))
     }
 
     case 'orders.technicians': {

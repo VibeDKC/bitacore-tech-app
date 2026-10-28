@@ -164,6 +164,9 @@ CREATE TABLE IF NOT EXISTS products (
   image_path TEXT,
   image_thumb_path TEXT,
   image_updated_at TEXT,
+  description TEXT NOT NULL DEFAULT '',
+  internal_notes TEXT NOT NULL DEFAULT '',
+  slug TEXT NOT NULL DEFAULT '',
   warranty_days INTEGER NOT NULL DEFAULT 0,
   is_service INTEGER NOT NULL DEFAULT 0,
   service_type TEXT,
@@ -183,6 +186,19 @@ CREATE TABLE IF NOT EXISTS product_serials (
   created_at TEXT NOT NULL,
   UNIQUE (product_id, serial)
 );
+
+CREATE TABLE IF NOT EXISTS product_images (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  image_path TEXT NOT NULL,
+  image_thumb_path TEXT NOT NULL,
+  alt TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_cover INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_id);
 
 CREATE TABLE IF NOT EXISTS stock_movements (
   id TEXT PRIMARY KEY,

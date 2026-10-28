@@ -22,6 +22,7 @@ export type Product = {
   sku: string
   slug: string
   name: string
+  description?: string
   category: string
   categorySlug: string
   regularPrice: number | null
@@ -30,6 +31,7 @@ export type Product = {
   condition: string
   warrantyDays: number
   image: string | null
+  images?: string[]
   bestSeller?: boolean
   promotion: Promotion | null
   stockVisibility?: CatalogStockVisibility
@@ -60,6 +62,7 @@ export type Catalog = {
   stats: {
     products: number
     withImage: number
+    images?: number
     categories: number
   }
   bestSellers?: BestSeller[]

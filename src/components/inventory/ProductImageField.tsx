@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp', 'image/bmp']
 const MAX_BYTES = 8 * 1024 * 1024
 
-async function resizeImage(file: File) {
+export async function prepareProductImageFile(file: File) {
   const bitmap = await createImageBitmap(file)
   const mainSize = 1200
   const mainScale = Math.min(1, mainSize / Math.max(bitmap.width, bitmap.height))
@@ -67,7 +67,7 @@ export function ProductImageField({
       }
       setBusy(true)
       try {
-        const result = await resizeImage(file)
+        const result = await prepareProductImageFile(file)
         onChange(result.dataUrl, result.thumbnailDataUrl)
       } catch (error) {
         toast.error('No se pudo procesar la imagen', {
@@ -127,8 +127,9 @@ export function ProductImageField({
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold text-ink">Imagen principal</p>
           <p className="mt-0.5 text-[9px] leading-relaxed text-slate-400">
-            Una foto por referencia. Se guarda en este equipo y se incluye en los respaldos completos.
-            Puedes cargar un archivo, arrastrarlo o pegarlo con Ctrl+V.
+            Se usa como portada. Después de guardar la referencia puedes agregar más imágenes
+            desde la galería. Se incluye en los respaldos completos. Puedes cargar un archivo,
+            arrastrarlo o pegarlo con Ctrl+V.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button

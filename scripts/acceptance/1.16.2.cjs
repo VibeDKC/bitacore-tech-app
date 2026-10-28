@@ -164,8 +164,8 @@ async function main() {
     await page.getByText('Ventas hoy', { exact: true }).first().waitFor({ timeout: 30000 })
     check('login normal después de la actualización', true)
     check(
-      'versión visible 1.16.2',
-      (await page.getByText(/v1\.16\.2/i).count()) >= 1
+      'versión visible actual',
+      (await page.getByText(/v1\.17\.0/i).count()) >= 1
     )
     await page.screenshot({ path: path.join(shots, 'dashboard.png') })
 

@@ -116,6 +116,8 @@ En modo desarrollo no uses `127.0.0.1` para la prueba de humo: Next bloquea el H
 - Promociones con alcance por SKU/categoría/todo, vigencia, prioridad y publicación web.
 - Publicación remota en Supabase y respaldo local.
 - Servicios sin precio por hora; revisión inicial sujeta a cotización.
+- Galería de hasta 8 imágenes y descripción comercial por producto.
+- Compatibilidad con catálogos anteriores que solo tienen una imagen.
 - Consulta real de OT por número (solo dígitos) y clave; la clave se valida por hash y nunca se publica en texto plano.
 - Diseño responsive y contacto por WhatsApp en la barra superior y el pie.
 

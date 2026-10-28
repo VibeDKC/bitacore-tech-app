@@ -122,6 +122,19 @@ export function equipmentDto(row: any) {
 export function productDto(db: Database, row: any, includeCost = true) {  const serials = db
     .all<{ serial: string }>('SELECT serial FROM product_serials WHERE product_id = ? ORDER BY created_at ASC', row.id)
     .map((item) => item.serial)
+  const imageRows = db.all<any>(
+    'SELECT * FROM product_images WHERE product_id = ? ORDER BY is_cover DESC, sort_order ASC, created_at ASC',
+    row.id
+  )
+  const images = imageRows.map((image) => ({
+    id: image.id,
+    url: productImageUrl(String(image.image_path)),
+    thumbnailUrl: productImageUrl(String(image.image_thumb_path || image.image_path)),
+    alt: image.alt ?? '',
+    sortOrder: Number(image.sort_order ?? 0),
+    isCover: bool(image.is_cover),
+    createdAt: image.created_at
+  }))
 
   return {
     id: row.id,
@@ -137,6 +150,9 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     minStock: Number(row.min_stock),
     ...(includeCost ? { cost: money(row.cost_cents) } : {}),
     price: money(row.price_cents),
+    description: row.description ?? '',
+    internalNotes: row.internal_notes ?? '',
+    slug: row.slug ?? '',
     imageUrl: row.image_path ? productImageUrl(String(row.image_path)) : null,
     imageThumbnailUrl: row.image_thumb_path
       ? productImageUrl(String(row.image_thumb_path))
@@ -144,6 +160,7 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
         ? productImageUrl(String(row.image_path))
         : null,
     imageUpdatedAt: row.image_updated_at ?? null,
+    images,
     warrantyDays: Number(row.warranty_days),
     serials,
     service: bool(row.is_service),

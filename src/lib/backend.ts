@@ -37,6 +37,7 @@ import type {
   Promotion,
   PromotionInput,
   PromotionPreview,
+  ProductPurchaseHistoryRow,
   CatalogSyncStatus,
   CatalogPublishResult,
   CatalogConnectionResult,
@@ -342,6 +343,32 @@ export const api = {
     },
     async adjust(productId: string, quantity: number, reason: string) {
       return hydrateProduct(await rpc<ApiProduct>('inventory.adjust', { productId, quantity, reason }))
+    },
+    async addImage(input: {
+      productId: string
+      dataUrl: string
+      thumbnailDataUrl?: string
+      alt?: string
+    }) {
+      return hydrateProduct(await rpc<ApiProduct>('inventory.addImage', input))
+    },
+    async removeImage(productId: string, imageId: string) {
+      return hydrateProduct(
+        await rpc<ApiProduct>('inventory.removeImage', { productId, imageId })
+      )
+    },
+    async setCoverImage(productId: string, imageId: string) {
+      return hydrateProduct(
+        await rpc<ApiProduct>('inventory.setCoverImage', { productId, imageId })
+      )
+    },
+    async reorderImages(productId: string, imageIds: string[]) {
+      return hydrateProduct(
+        await rpc<ApiProduct>('inventory.reorderImages', { productId, imageIds })
+      )
+    },
+    purchaseHistory(productId: string) {
+      return rpc<ProductPurchaseHistoryRow[]>('inventory.purchaseHistory', { productId })
     },
     suggestSku(input: { name: string; supplierSku?: string; productId?: string }) {
       return rpc<{ sku: string; source: string; warning: string | null }>(

@@ -125,6 +125,13 @@ async function main() {
     if (product.image?.startsWith('/products/')) {
       product.image = `${mock.baseUrl}${product.image}`
     }
+    if (Array.isArray(product.images)) {
+      product.images = product.images.map((image) =>
+        typeof image === 'string' && image.startsWith('/products/')
+          ? `${mock.baseUrl}${image}`
+          : image
+      )
+    }
   }
   const env = { CATALOG_URL: catalogUrl, CATALOG_REVALIDATE_SECONDS: '30' }
   let next

@@ -8,6 +8,7 @@ import { SCHEMA_V1 } from './schema'
 import { ensureDictionaries, ensureReferenceData } from './seed'
 import { ALL_CAPABILITIES, ALL_MODULES, capabilitiesForRole, roleModulesForRole } from './permissions'
 import { OWNER_ACCOUNT } from './owner'
+import { slugify, uniqueSlug } from './slug'
 
 export const APP_DATA_FOLDER = 'BitacoreTech'
 export const LEGACY_APP_DATA_FOLDER = 'octestr-taller'
@@ -70,6 +71,9 @@ export class Database {
     const hadSchema15 = Boolean(
       this.get<{ version: number }>('SELECT version FROM schema_migrations WHERE version = 15')
     )
+    const hadSchema18 = Boolean(
+      this.get<{ version: number }>('SELECT version FROM schema_migrations WHERE version = 18')
+    )
     this.ensureColumn('backups', 'format', "TEXT NOT NULL DEFAULT 'db'")
     this.ensureColumn('work_order_evidence', 'source', "TEXT NOT NULL DEFAULT 'archivo'")
     this.ensureColumn('users', 'document_type', 'TEXT')
@@ -118,6 +122,9 @@ export class Database {
     this.ensureColumn('products', 'image_path', 'TEXT')
     this.ensureColumn('products', 'image_thumb_path', 'TEXT')
     this.ensureColumn('products', 'image_updated_at', 'TEXT')
+    this.ensureColumn('products', 'description', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('products', 'internal_notes', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('products', 'slug', "TEXT NOT NULL DEFAULT ''")
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'publish_web', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
@@ -178,8 +185,12 @@ export class Database {
       )
     }
     this.backfillEquipment()
+    if (!hadSchema18) {
+      this.backfillProductImages()
+      this.backfillProductSlugs()
+    }
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -188,6 +199,60 @@ export class Database {
     const columns = this.all<{ name: string }>(`PRAGMA table_info(${table})`)
     if (!columns.some((item) => item.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+    }
+  }
+
+  private backfillProductImages() {
+    const rows = this.all<any>(
+      "SELECT id, name, image_path, image_thumb_path, image_updated_at FROM products WHERE image_path IS NOT NULL AND image_path <> ''"
+    )
+    const now = new Date().toISOString()
+    for (const row of rows) {
+      const existing = this.get(
+        'SELECT id FROM product_images WHERE product_id = ? LIMIT 1',
+        row.id
+      )
+      if (existing) continue
+      this.run(
+        `INSERT INTO product_images
+          (id, product_id, image_path, image_thumb_path, alt, sort_order, is_cover, created_at)
+         VALUES (?, ?, ?, ?, ?, 0, 1, ?)`,
+        `pimg_${sha256(String(row.id)).slice(0, 20)}`,
+        row.id,
+        row.image_path,
+        row.image_thumb_path || row.image_path,
+        String(row.name ?? ''),
+        row.image_updated_at || now
+      )
+    }
+  }
+
+  private backfillProductSlugs() {
+    const rows = this.all<any>(
+      `SELECT id, name, sku, slug FROM products
+       ORDER BY CASE
+         WHEN active = 1 AND is_service = 0 AND publish_web = 1
+          AND condition IN ('Nuevo', 'Reacondicionado')
+          AND category <> 'Insumos de taller'
+          AND sku <> '00000000000'
+         THEN 0 ELSE 1 END ASC,
+       category ASC, price_cents DESC, name ASC`
+    )
+    const used = new Set<string>()
+    for (const row of rows) {
+      let slug = String(row.slug ?? '').trim()
+      if (slug) {
+        if (used.has(slug)) {
+          slug = uniqueSlug(slug, used)
+        } else {
+          used.add(slug)
+        }
+      } else {
+        slug = uniqueSlug(slugify(String(row.name ?? '')) || slugify(String(row.sku ?? '')), used)
+      }
+      if (slug !== row.slug) {
+        this.run('UPDATE products SET slug = ? WHERE id = ?', slug, row.id)
+      }
     }
   }
 

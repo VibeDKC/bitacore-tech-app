@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.17.0 — 2026-10-28
+
+### Inventario
+- Descripción comercial y notas internas por producto.
+- Galería de hasta 8 imágenes con portada, orden, eliminación y cambio de portada.
+- Slug estable para las URLs del catálogo; no cambia al renombrar.
+- Historial de compras por producto con proveedor, fecha, cantidad y costo.
+- Miniatura del producto en la búsqueda y el carrito del POS.
+
+### Compras
+- El costo actual se actualiza con las compras recibidas.
+- Los productos nuevos creados desde la revisión de compras reciben slug.
+- El historial de compras se consulta desde la ficha del producto.
+
+### Catálogo
+- `catalog.json` publica descripción comercial, galería y slug estable.
+- Las notas internas no se publican.
+- La web muestra galería con miniaturas y descripción.
+- Compatibilidad con snapshots antiguos sin `images`.
+- Se publican todas las imágenes y se limpian las huérfanas.
+
+### Calidad
+- Aceptación 1.17.0: 20/20.
+- Migración 1.17.0 sobre base real: OK.
+- Regresión 1.16.2: 16/16.
+- Regresión 1.16.0: 36/36.
+- Regresión 1.15.0: 44/44.
+- Regresión 1.14.1: 19/19 sin propietario.
+- Regresión 1.13.1: 23/23.
+- Regresión 1.13.0: 30/30.
+- Web local: 39/39.
+- Web remota: 7/7.
+- Migración 18: descripción, notas, slug y galería.
+
 ## 1.16.2 — 2026-10-28
 
 ### Acceso inicial y actualización

@@ -8,7 +8,7 @@ import {
   ShieldCheck
 } from 'lucide-react'
 import { ProductCard } from '@/components/product-card'
-import { ProductImage } from '@/components/product-image'
+import { ProductGallery } from '@/components/product-gallery'
 import { AddToCart } from '@/components/add-to-cart'
 import {
   formatPrice,
@@ -41,13 +41,17 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
   if (!product) return { title: 'Producto no encontrado' }
   return {
     title: product.name,
-    description: `${product.name} · ${formatPrice(product.price)} · ${product.category}. Consulta disponibilidad por WhatsApp.`,
+    description: product.description
+      ? `${product.name} · ${product.description}`.slice(0, 160)
+      : `${product.name} · ${formatPrice(product.price)} · ${product.category}. Consulta disponibilidad por WhatsApp.`,
     alternates: {
       canonical: productHref(product)
     },
     openGraph: {
       title: product.name,
-      description: `${product.category} · ${formatPrice(product.price)}. Consulta disponibilidad por WhatsApp.`,
+      description: product.description
+        ? product.description.slice(0, 160)
+        : `${product.category} · ${formatPrice(product.price)}. Consulta disponibilidad por WhatsApp.`,
       images: product.image ? [{ url: product.image }] : undefined
     }
   }
@@ -85,7 +89,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <span className="badge badge-condition">{product.condition}</span>
             ) : null}
           </span>
-          <ProductImage product={product} eager />
+          <ProductGallery product={product} />
         </div>
 
         <div className="detail-info">
@@ -123,8 +127,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
           </p>
 
           <p className="detail-copy">
-            Consulta disponibilidad y precio final por WhatsApp. Te confirmamos el
-            stock y coordinamos la recogida en tienda en Medellín.
+            {product.description ||
+              'Consulta disponibilidad y precio final por WhatsApp. Te confirmamos el stock y coordinamos la recogida en tienda en Medellín.'}
           </p>
 
           <div className="detail-facts">

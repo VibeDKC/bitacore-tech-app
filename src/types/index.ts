@@ -60,6 +60,30 @@ export type ProductCategory =
 
 export type ProductRotation = 'rotativo' | 'no_rotativo' | 'prueba'
 
+export interface ProductImage {
+  id: string
+  url: string
+  thumbnailUrl: string
+  alt: string
+  sortOrder: number
+  isCover: boolean
+  createdAt: string
+}
+
+export interface ProductPurchaseHistoryRow {
+  id: string
+  purchaseId: string
+  purchaseNumber: string
+  supplier: string
+  date: string
+  quantity: number
+  unitCost: number
+  ivaRate: number
+  lineTotal: number
+  status: string
+  paymentStatus: string
+}
+
 export interface Product {
   id: string
   name: string
@@ -76,9 +100,13 @@ export interface Product {
   /** El backend lo omite para roles sin permiso de costos. */
   cost?: number
   price: number
+  description?: string
+  internalNotes?: string
+  slug?: string
   imageUrl?: string | null
   imageThumbnailUrl?: string | null
   imageUpdatedAt?: string | null
+  images?: ProductImage[]
   warrantyDays: number
   serials: string[]
   alertEnabled: boolean

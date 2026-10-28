@@ -593,8 +593,16 @@ export function POSPage() {
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className={cn('flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br', product.tone)}>
-                      <Icon className="h-5 w-5" />
+                    <span className={cn('flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br', product.tone)}>
+                      {product.imageThumbnailUrl ? (
+                        <img
+                          src={product.imageThumbnailUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Icon className="h-5 w-5" />
+                      )}
                     </span>
                     {inCart ? (
                       <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[10px] font-bold text-white">
@@ -719,8 +727,16 @@ export function POSPage() {
                   const Icon = line.product.icon
                   return (
                     <div key={line.product.id} className="flex gap-3">
-                      <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br', line.product.tone)}>
-                        <Icon className="h-[17px] w-[17px]" />
+                      <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br', line.product.tone)}>
+                        {line.product.imageThumbnailUrl ? (
+                          <img
+                            src={line.product.imageThumbnailUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <Icon className="h-[17px] w-[17px]" />
+                        )}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-1 text-[12px] font-semibold text-ink">{line.product.name}</p>
