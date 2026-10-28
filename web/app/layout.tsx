@@ -6,6 +6,7 @@ import { SiteTopBar } from '@/components/site-topbar'
 import { SiteHeader } from '@/components/site-header'
 import { SearchStrip } from '@/components/search-strip'
 import { SiteFooter } from '@/components/site-footer'
+import { CartProvider } from '@/components/cart-provider'
 import { getCatalog } from '@/lib/catalog-server'
 
 const siteUrl =
@@ -52,11 +53,13 @@ export default async function RootLayout({
   return (
     <html lang="es" data-scroll-behavior="smooth">
       <body>
-        <SiteTopBar />
-        <SiteHeader categories={catalog.categories} />
-        <SearchStrip categories={catalog.categories} />
-        <main className="site-main">{children}</main>
-        <SiteFooter categories={catalog.categories} />
+        <CartProvider>
+          <SiteTopBar />
+          <SiteHeader categories={catalog.categories} />
+          <SearchStrip categories={catalog.categories} />
+          <main className="site-main">{children}</main>
+          <SiteFooter categories={catalog.categories} />
+        </CartProvider>
       </body>
     </html>
   )

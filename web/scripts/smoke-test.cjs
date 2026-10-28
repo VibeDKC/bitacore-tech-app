@@ -155,6 +155,9 @@ async function main() {
   checkData('el JSON no publica el precio de servicios', () => {
     assert.equal(Object.prototype.hasOwnProperty.call(catalog, 'service'), false)
   })
+  checkData('stock oculto por defecto en la web', () => {
+    assert.equal(catalog.stockVisibility, 'outOnly')
+  })
   checkData('3 órdenes demo', () => {
     assert.equal(orders.orders.length, 3)
     assert.deepEqual(
@@ -367,7 +370,7 @@ async function main() {
     })
 
     await check('Desplegable de categorías del header', async () => {
-      await page.getByRole('button', { name: 'Catálogo' }).hover()
+      await page.locator('.main-nav').getByRole('button', { name: 'Catálogo' }).hover()
       await page.locator('#catalog-menu').waitFor()
       assert.equal(await page.locator('#catalog-menu a').count(), 4)
       const href = await page.getByRole('menuitem', { name: /Almacenamiento/i }).getAttribute('href')
@@ -469,20 +472,52 @@ async function main() {
         assert.equal(await page.locator('.detail-price-old').count(), 0)
         assert.equal(await page.locator('.detail-promo').count(), 0)
       }
-      assert.match(await page.locator('.detail-stock').innerText(), /Última unidad|Pocas unidades|Disponible/i)
+      assert.equal(await page.locator('.detail-stock').count(), 0)
       const facts = await page.locator('.detail-facts').innerText()
       assert.match(facts, /Nuevo/)
       assert.match(facts, /30 días/)
       assert.match(facts, new RegExp(sample.sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-      const href = await page.getByRole('link', { name: /Solicitar cotización/i }).getAttribute('href')
+      const href = await page.getByRole('link', { name: /Pedir por WhatsApp/i }).getAttribute('href')
       assert.match(href, /^https:\/\/wa\.me\/573246381768\?text=/)
       const message = decodeURIComponent(href.split('?text=')[1])
       assert.match(message, new RegExp(sample.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(message, /recoger en tienda/i)
       assert.match(message, sample.promotion ? /Precio promocional/i : /Precio:/i)
       assert.ok((await page.locator('.related-section .product-card').count()) >= 2)
     })
 
     await page.screenshot({ path: path.join(shotsDir, '03-ficha-promo-desktop.png') })
+
+    await check('Carrito: agregar, persistir y mensaje de WhatsApp', async () => {
+      const sample = fixedPromoProduct ?? regularProduct
+      assert.ok(sample)
+      await goto(`/producto/${sample.slug}`)
+      await page.locator('.detail-title').waitFor()
+      await page.getByRole('button', { name: 'Añadir al carrito' }).click()
+      await page.locator('.cart-count').waitFor()
+      assert.equal((await page.locator('.cart-count').innerText()).trim(), '1')
+      await page.locator('.cart-link').click()
+      await page.waitForURL('**/carrito')
+      await page.locator('.cart-row').waitFor()
+      assert.equal(await page.locator('.cart-row').count(), 1)
+      assert.match(
+        await page.locator('.cart-row-name').innerText(),
+        new RegExp(sample.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      )
+      const href = await page.getByRole('link', { name: /Pedir por WhatsApp/i }).getAttribute('href')
+      assert.match(href, /^https:\/\/wa\.me\/573246381768\?text=/)
+      const message = decodeURIComponent(href.split('?text=')[1])
+      assert.match(message, new RegExp(sample.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(message, new RegExp(sample.sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(message, /recoger en tienda/i)
+      assert.match(message, /Total referencias/i)
+      await page.screenshot({ path: path.join(shotsDir, '03b-carrito-desktop.png') })
+      await page.reload()
+      await page.locator('.cart-row').waitFor()
+      assert.equal(await page.locator('.cart-row').count(), 1)
+      await page.getByRole('button', { name: 'Vaciar carrito' }).click()
+      await page.locator('.cart-empty').waitFor()
+    })
 
     await check('Ficha: promoción porcentual o sin promoción', async () => {
       const sample = percentPromoProduct ?? regularProduct
@@ -643,6 +678,7 @@ async function main() {
       const routes = [
         ['/catalogo', '.product-card'],
         ['/producto/power-bank-adata-c100-10000mah-tipo-c-negro', '.detail-title'],
+        ['/carrito', '.cart-empty'],
         ['/servicios', '.quote-form'],
         ['/buscar-orden', '.order-search-form'],
         ['/seguimiento/DEMO-01', '.order-status-card']
@@ -676,6 +712,7 @@ async function main() {
       for (const [route, selector] of [
         ['/', '.hero-title'],
         ['/catalogo', '.product-card'],
+        ['/carrito', '.cart-empty'],
         ['/buscar-orden', '.order-search-form']
       ]) {
         await narrowPage.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' })

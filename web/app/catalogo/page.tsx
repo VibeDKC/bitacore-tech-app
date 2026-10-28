@@ -28,7 +28,8 @@ export default async function CatalogPage({
           <h1 className="catalog-title">Tecnología disponible en Medellín</h1>
           <p className="catalog-subtitle">
             {catalog.stats.products} referencias de periféricos, almacenamiento y
-            accesorios. Consulta disponibilidad, precio final y entrega por WhatsApp.
+            accesorios. Consulta disponibilidad y precio final por WhatsApp; la
+            recogida es en tienda.
           </p>
           <CatalogExplorer
             products={catalog.products}

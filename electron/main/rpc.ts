@@ -150,6 +150,12 @@ function text(value: unknown, field: string, min = 1, max = 2000) {
   return trimmed
 }
 
+const WEB_PRODUCT_CONDITIONS = new Set(['Nuevo', 'Reacondicionado'])
+
+function isWebProductCondition(value: string) {
+  return WEB_PRODUCT_CONDITIONS.has(value.trim())
+}
+
 function numberValue(value: unknown, field: string, options: { min?: number; max?: number; integer?: boolean } = {}) {
   const parsed = typeof value === 'string' ? Number(value.replace(/[^0-9.-]/g, '')) : Number(value)
   if (!Number.isFinite(parsed)) fail(`${field} debe ser numérico`)
@@ -3544,8 +3550,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const minStock = numberValue(payload?.minStock ?? 0, 'Stock mínimo', { min: 0 })
       const rotation = schema(payload?.rotation ?? 'rotativo', z.enum(['rotativo', 'no_rotativo', 'prueba']))
       const alertEnabled = payload?.alertEnabled === undefined ? rotation === 'rotativo' : Boolean(payload.alertEnabled)
-      const publishWeb = payload?.publishWeb === undefined ? true : Boolean(payload.publishWeb)
+      const condition =
+        typeof payload?.condition === 'string' ? payload.condition.trim().slice(0, 80) : ''
       const service = Boolean(payload?.service)
+      const publishWeb =
+        !service &&
+        isWebProductCondition(condition) &&
+        (payload?.publishWeb === undefined ? true : Boolean(payload.publishWeb))
       const serviceType =
         service && typeof payload?.serviceType === 'string' && payload.serviceType.trim()
           ? text(payload.serviceType, 'Tipo de servicio', 1, 80)
@@ -3589,7 +3600,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             supplierSku,
             text(payload?.category ?? 'Repuestos', 'Categoría', 2, 80),
             text(payload?.location ?? 'Bodega A', 'Ubicación', 2, 80),
-            typeof payload?.condition === 'string' ? payload.condition.trim().slice(0, 80) : '',
+            condition,
             typeof payload?.origin === 'string' ? payload.origin.trim().slice(0, 80) : '',
             stock,
             minStock,
@@ -3707,9 +3718,12 @@ export async function handleRpc(command: string, payload: Payload, token: string
         params.push(text(payload.location, 'Ubicación', 2, 80))
         changed.push('ubicación')
       }
+      let nextCondition = String(product.condition ?? '')
       if (payload?.condition !== undefined) {
+        nextCondition =
+          typeof payload.condition === 'string' ? payload.condition.trim().slice(0, 80) : ''
         updates.push('condition = ?')
-        params.push(typeof payload.condition === 'string' ? payload.condition.trim().slice(0, 80) : '')
+        params.push(nextCondition)
         changed.push('condición')
       }
       if (payload?.origin !== undefined) {
@@ -3769,6 +3783,26 @@ export async function handleRpc(command: string, payload: Payload, token: string
           changed.push('tipo de servicio retirado')
         }
       }
+      const publishWebAllowed = !nextService && isWebProductCondition(nextCondition)
+      const nextPublishWeb = publishWebAllowed
+        ? payload?.publishWeb !== undefined
+          ? Boolean(payload.publishWeb)
+          : Boolean(product.publish_web)
+        : false
+      if (
+        payload?.publishWeb !== undefined ||
+        nextPublishWeb !== Boolean(product.publish_web)
+      ) {
+        updates.push('publish_web = ?')
+        params.push(nextPublishWeb ? 1 : 0)
+        changed.push(
+          nextPublishWeb
+            ? 'publicación web activada'
+            : publishWebAllowed
+              ? 'publicación web desactivada'
+              : 'publicación web desactivada por condición'
+        )
+      }
       if (payload?.rotation !== undefined) {
         const rotation = schema(payload.rotation, z.enum(['rotativo', 'no_rotativo', 'prueba']))
         updates.push('rotation = ?')
@@ -3779,11 +3813,6 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updates.push('alert_enabled = ?')
         params.push(payload.alertEnabled ? 1 : 0)
         changed.push(payload.alertEnabled ? 'alerta activada' : 'alerta desactivada')
-      }
-      if (payload?.publishWeb !== undefined) {
-        updates.push('publish_web = ?')
-        params.push(payload.publishWeb ? 1 : 0)
-        changed.push(payload.publishWeb ? 'publicación web activada' : 'publicación web desactivada')
       }
       if (payload?.active !== undefined) {
         updates.push('active = ?')
@@ -6969,6 +6998,10 @@ export async function handleRpc(command: string, payload: Payload, token: string
         updateCatalogConfig(db, runtime, {
           targetPath: typeof value.targetPath === 'string' ? value.targetPath : undefined,
           autoPublish: value.autoPublish === undefined ? undefined : Boolean(value.autoPublish),
+          stockVisibility:
+            value.stockVisibility === 'always' || value.stockVisibility === 'outOnly'
+              ? value.stockVisibility
+              : undefined,
           remote: remote
             ? {
                 enabled:

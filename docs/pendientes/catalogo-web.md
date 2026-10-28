@@ -2,7 +2,7 @@
 
 Fecha: 28 de octubre de 2026
 
-Este archivo registra lo que queda fuera de 1.13.0 y los siguientes pasos del catálogo público. Los pendientes de la aplicación están en `docs/pendientes/1.13.0.md`.
+Este archivo registra lo que queda fuera de 1.13.1 y los siguientes pasos del catálogo público. Los pendientes de la aplicación están en `docs/pendientes/1.13.1.md`.
 
 ## Estado actual
 
@@ -13,6 +13,8 @@ Este archivo registra lo que queda fuera de 1.13.0 y los siguientes pasos del ca
 - El bucket es público de lectura; la escritura usa una clave secreta cifrada en la app.
 - Las promociones demo fueron eliminadas; la web usa promociones reales.
 - La regla de “Más vendido” está implementada: 30 días, mínimo 2 unidades.
+- El carrito local y el mensaje de WhatsApp están implementados; la recogida es en tienda.
+- La visibilidad de stock es configurable (`always` u `outOnly`).
 
 ## Promociones
 
@@ -80,7 +82,7 @@ Pendiente:
 - Falta `NEXT_PUBLIC_SITE_URL` de producción.
 - Falta revisar la política de caché de imágenes, páginas y JSON.
 - Falta definir qué pasa si Supabase está caído: hoy se usa el snapshot local.
-- Falta carrito, pedidos en línea, pagos y cuentas de cliente.
+- Faltan pedidos en línea, pagos y cuentas de cliente; el carrito solo envía el pedido por WhatsApp.
 - Falta analítica, cookies, aviso legal y política de privacidad.
 - Falta validar Safari/iOS y Firefox; la prueba actual usa Edge.
 

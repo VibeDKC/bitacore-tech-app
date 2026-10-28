@@ -79,6 +79,16 @@ fs.mkdirSync(path.dirname(outputData), { recursive: true })
 fs.mkdirSync(outputImages, { recursive: true })
 
 const db = new DatabaseSync(databasePath, { readOnly: true })
+let stockVisibility = 'outOnly'
+try {
+  const catalogConfigRow = db
+    .prepare("SELECT value FROM app_settings WHERE key = 'catalog_config'")
+    .get()
+  const catalogConfig = catalogConfigRow ? JSON.parse(catalogConfigRow.value) : null
+  stockVisibility = catalogConfig?.stockVisibility === 'always' ? 'always' : 'outOnly'
+} catch {
+  stockVisibility = 'outOnly'
+}
 const today = todayInBogota()
 const rows = db
   .prepare(
@@ -88,6 +98,7 @@ const rows = db
      WHERE active = 1
        AND is_service = 0
        AND publish_web = 1
+       AND condition IN ('Nuevo', 'Reacondicionado')
        AND category <> 'Insumos de taller'
        AND sku <> '00000000000'
      ORDER BY category ASC, price_cents DESC, name ASC`
@@ -293,6 +304,7 @@ const ordersDemo = {
 const payload = {
   generatedAt: new Date().toISOString(),
   source: 'OCTESTR',
+  stockVisibility,
   business,
   stats: {
     products: products.length,

@@ -22,7 +22,7 @@ export default async function HomePage() {
           <SectionHeading
             eyebrow="Categorías"
             title="Encuentra lo que buscas"
-            subtitle="Periféricos, almacenamiento y accesorios disponibles en Medellín. Cada referencia se confirma por WhatsApp antes de la compra."
+            subtitle="Periféricos, almacenamiento y accesorios disponibles en Medellín. Cada referencia se confirma por WhatsApp y se recoge en tienda."
             href="/catalogo"
             linkLabel="Ver todo el catálogo"
           />

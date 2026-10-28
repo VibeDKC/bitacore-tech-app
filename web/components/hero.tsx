@@ -33,6 +33,7 @@ export function Hero({ products }: { products: Product[] }) {
 
   const total = products.length
   const product = products[index] ?? products[0]
+  const stock = stockLabel(product.stock, product.stockVisibility)
   const goTo = (next: number) => setIndex((next + total) % total)
 
   return (
@@ -99,7 +100,8 @@ export function Hero({ products }: { products: Product[] }) {
             <div className="hero-product">
               <div className="hero-product-info">
                 <p className="hero-product-label">
-                  {product.category} · {stockLabel(product.stock)}
+                  {product.category}
+                  {stock ? ` · ${stock}` : ''}
                 </p>
                 <p className="hero-product-name">{product.name}</p>
                 <div className="hero-product-price-row">

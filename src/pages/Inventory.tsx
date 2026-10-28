@@ -25,6 +25,7 @@ import { toast } from 'sonner'
 import type { Product, ProductRotation, StockMovement, StockStatus } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
+import { isWebEligibleCondition } from '@/lib/products'
 import { formatCurrency, formatNumber, formatDateTime } from '@/lib/format'
 import { getStockStatus } from '@/lib/status'
 import { downloadCsv } from '@/lib/download'
@@ -54,7 +55,6 @@ const defaultCategories = [
   'Servicios'
 ]
 const defaultLocations = ['Bodega A', 'Bodega B', 'Mostrador', 'Taller']
-
 const movementSeed = [
   { id: 'mv1', type: 'Venta', quantity: -1, detail: 'FV-000184 · Camila Ríos', date: '25 oct 2026 · 10:42' },
   { id: 'mv2', type: 'Consumo en OT', quantity: -2, detail: 'OT-002341 · Julián Vélez', date: '24 oct 2026 · 16:20' },
@@ -201,11 +201,13 @@ export function InventoryPage() {
 
   function openCreate() {
     const firstCategory = categoryOptions.find((item) => item !== 'Todas') ?? 'Repuestos'
+    const firstCondition = conditionOptions[0] ?? ''
     setForm({
       ...emptyProductForm,
       category: firstCategory,
       location: locationOptions[0] ?? 'Bodega A',
-      condition: conditionOptions[0] ?? '',
+      condition: firstCondition,
+      publishWeb: isWebEligibleCondition(firstCondition),
       origin: originOptions[0] ?? ''
     })
     setCreateOpen(true)
@@ -958,7 +960,14 @@ export function InventoryPage() {
             <span className="field-label">Condición</span>
             <select
               value={form.condition}
-              onChange={(event) => setForm({ ...form, condition: event.target.value })}
+              onChange={(event) => {
+                const condition = event.target.value
+                setForm({
+                  ...form,
+                  condition,
+                  publishWeb: isWebEligibleCondition(condition) ? form.publishWeb : false
+                })
+              }}
               className="field"
             >
               <option value="">Sin especificar</option>
@@ -1074,13 +1083,17 @@ export function InventoryPage() {
               <input
                 type="checkbox"
                 checked={form.publishWeb}
-                disabled={form.service}
+                disabled={form.service || !isWebEligibleCondition(form.condition)}
                 onChange={(event) => setForm({ ...form, publishWeb: event.target.checked })}
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
               />
               <span className="text-[11px] font-semibold text-ink">Publicar en catálogo web</span>
             </span>
           </label>
+          <p className="text-[9px] leading-relaxed text-slate-400 sm:col-span-2">
+            Solo Nuevo o Reacondicionado se publican en la web. Usados, Para repuesto y Otro
+            quedan fuera del catálogo público.
+          </p>
           <label className="block">
             <span className="field-label">Costo unitario</span>
             <div className="relative">
@@ -1205,7 +1218,14 @@ export function InventoryPage() {
             <span className="field-label">Condición</span>
             <select
               value={editForm.condition}
-              onChange={(event) => setEditForm({ ...editForm, condition: event.target.value })}
+              onChange={(event) => {
+                const condition = event.target.value
+                setEditForm({
+                  ...editForm,
+                  condition,
+                  publishWeb: isWebEligibleCondition(condition) ? editForm.publishWeb : false
+                })
+              }}
               className="field"
             >
               <option value="">Sin especificar</option>
@@ -1320,13 +1340,17 @@ export function InventoryPage() {
               <input
                 type="checkbox"
                 checked={editForm.publishWeb}
-                disabled={editForm.service}
+                disabled={editForm.service || !isWebEligibleCondition(editForm.condition)}
                 onChange={(event) => setEditForm({ ...editForm, publishWeb: event.target.checked })}
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
               />
               <span className="text-[11px] font-semibold text-ink">Publicar en catálogo web</span>
             </span>
           </label>
+          <p className="text-[9px] leading-relaxed text-slate-400 sm:col-span-2">
+            Solo Nuevo o Reacondicionado se publican en la web. Usados, Para repuesto y Otro
+            quedan fuera del catálogo público.
+          </p>
           <label className="block">
             <span className="field-label">Costo unitario</span>
             <input

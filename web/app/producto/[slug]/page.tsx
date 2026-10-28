@@ -9,10 +9,12 @@ import {
 } from 'lucide-react'
 import { ProductCard } from '@/components/product-card'
 import { ProductImage } from '@/components/product-image'
+import { AddToCart } from '@/components/add-to-cart'
 import {
   formatPrice,
   getProductBySlug,
   getRelatedProducts,
+  productAvailabilityWhatsAppUrl,
   productHref,
   productWhatsAppUrl,
   stockLabel,
@@ -59,6 +61,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   const related = getRelatedProducts(catalog, product, 4)
   const tone = stockTone(product.stock)
+  const stock = stockLabel(product.stock, product.stockVisibility)
+  const soldOut = product.stock <= 0
 
   return (
     <div className="container">
@@ -99,10 +103,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <span className="detail-price-old">{formatPrice(product.regularPrice)}</span>
             ) : null}
             <p className="detail-price">{formatPrice(product.price)}</p>
-            <span className={`detail-stock ${tone}`}>
-              <ShieldCheck aria-hidden="true" />
-              {stockLabel(product.stock)}
-            </span>
+            {stock ? (
+              <span className={`detail-stock ${tone}`}>
+                <ShieldCheck aria-hidden="true" />
+                {stock}
+              </span>
+            ) : null}
             {product.promotion ? (
               <span className="detail-promo">{product.promotion.badge}</span>
             ) : null}
@@ -117,8 +123,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
           </p>
 
           <p className="detail-copy">
-            Consulta disponibilidad, precio final y entrega directamente por
-            WhatsApp. Te confirmamos el stock y coordinamos la entrega en Medellín.
+            Consulta disponibilidad y precio final por WhatsApp. Te confirmamos el
+            stock y coordinamos la recogida en tienda en Medellín.
           </p>
 
           <div className="detail-facts">
@@ -145,13 +151,14 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <div className="detail-actions">
             <a
               className="btn btn-whatsapp"
-              href={productWhatsAppUrl(product)}
+              href={soldOut ? productAvailabilityWhatsAppUrl(product) : productWhatsAppUrl(product)}
               target="_blank"
               rel="noreferrer"
             >
               <MessageCircle aria-hidden="true" />
-              Solicitar cotización
+              {soldOut ? 'Consultar disponibilidad' : 'Pedir por WhatsApp'}
             </a>
+            {soldOut ? null : <AddToCart product={product} />}
             <Link className="btn btn-outline" href="/catalogo">
               <ArrowLeft aria-hidden="true" />
               Seguir explorando
@@ -161,7 +168,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <p className="detail-note">
             <ShieldCheck aria-hidden="true" />
             Producto del catálogo de BitacoreTech. La disponibilidad y el valor
-            final se confirman por WhatsApp antes de la compra.
+            final se confirman por WhatsApp antes de la recogida en tienda.
           </p>
         </div>
       </article>

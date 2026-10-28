@@ -3,6 +3,8 @@
 > **Actualización 1.12.0:** las promociones demo fueron reemplazadas por promociones reales y el catálogo se publica localmente desde la app. Ver `docs/actas/1.12.0.md`.
 >
 > **Actualización 1.13.0:** el catálogo se publica en Supabase Storage y la web lo lee con `CATALOG_URL`. Ver `docs/actas/1.13.0.md`.
+>
+> **Actualización 1.13.1:** la web incorpora carrito, recogida en tienda, stock configurable y solo publica Nuevo/Reacondicionado. Ver `docs/actas/1.13.1.md`.
 
 | Dato | Valor |
 | --- | --- |

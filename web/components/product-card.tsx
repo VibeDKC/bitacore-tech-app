@@ -8,9 +8,11 @@ import {
   stockTone
 } from '@/lib/catalog'
 import { ProductImage } from '@/components/product-image'
+import { AddToCart } from '@/components/add-to-cart'
 
 export function ProductCard({ product }: { product: Product }) {
   const tone = stockTone(product.stock)
+  const stock = stockLabel(product.stock, product.stockVisibility)
 
   return (
     <article className="product-card">
@@ -38,7 +40,9 @@ export function ProductCard({ product }: { product: Product }) {
               </span>
             ) : null}
           </div>
-          <span className={`badge badge-stock ${tone}`}>{stockLabel(product.stock)}</span>
+          {stock ? (
+            <span className={`badge badge-stock ${tone}`}>{stock}</span>
+          ) : null}
         </div>
         <ProductImage product={product} />
       </Link>
@@ -65,14 +69,17 @@ export function ProductCard({ product }: { product: Product }) {
             <div className="product-price">{formatPrice(product.price)}</div>
             <div className="product-price-note">COP · Precio publicado</div>
           </div>
-          <Link
-            className="product-view"
-            href={productHref(product)}
-            aria-label={`Ver ${product.name}`}
-            title="Ver producto"
-          >
-            <ArrowRight aria-hidden="true" />
-          </Link>
+          <div className="product-actions">
+            <AddToCart product={product} compact />
+            <Link
+              className="product-view"
+              href={productHref(product)}
+              aria-label={`Ver ${product.name}`}
+              title="Ver producto"
+            >
+              <ArrowRight aria-hidden="true" />
+            </Link>
+          </div>
         </div>
       </div>
     </article>

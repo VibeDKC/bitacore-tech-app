@@ -111,6 +111,12 @@ export class Database {
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'publish_web', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
+    this.run(
+      `UPDATE products
+       SET publish_web = 0
+       WHERE is_service = 1
+          OR COALESCE(condition, '') NOT IN ('Nuevo', 'Reacondicionado')`
+    )
     this.ensureColumn('promotions', 'scope', "TEXT NOT NULL DEFAULT 'all'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
     this.ensureColumn('invoice_items', 'original_unit_price_cents', 'INTEGER NOT NULL DEFAULT 0')

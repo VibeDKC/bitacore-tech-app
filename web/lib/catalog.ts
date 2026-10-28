@@ -15,6 +15,8 @@ export type BestSeller = {
   quantity: number
 }
 
+export type CatalogStockVisibility = 'always' | 'outOnly'
+
 export type Product = {
   id: string
   sku: string
@@ -30,6 +32,7 @@ export type Product = {
   image: string | null
   bestSeller?: boolean
   promotion: Promotion | null
+  stockVisibility?: CatalogStockVisibility
   createdAt: string
   updatedAt: string
 }
@@ -44,6 +47,7 @@ export type Category = {
 export type Catalog = {
   generatedAt: string
   source: string
+  stockVisibility?: CatalogStockVisibility
   business: {
     name: string
     descriptor: string
@@ -68,11 +72,15 @@ export type Catalog = {
 const categoryOrder = ['Periféricos', 'Almacenamiento', 'Accesorios']
 
 export function normalizeCatalog(data: Catalog): Catalog {
+  const stockVisibility: CatalogStockVisibility =
+    data.stockVisibility === 'always' ? 'always' : 'outOnly'
   return {
     ...data,
+    stockVisibility,
     categories: [...data.categories].sort(
       (a, b) => categoryOrder.indexOf(a.name) - categoryOrder.indexOf(b.name)
-    )
+    ),
+    products: data.products.map((product) => ({ ...product, stockVisibility }))
   }
 }
 
@@ -95,6 +103,11 @@ export function whatsappUrl(message: string) {
   return `https://wa.me/${business.whatsapp}?text=${encodeURIComponent(message)}`
 }
 
+export type CartWhatsAppItem = {
+  product: Product
+  quantity: number
+}
+
 export function productWhatsAppUrl(product: Product) {
   const priceLine = product.promotion
     ? `• Precio promocional: ${formatPrice(product.price)} (antes ${formatPrice(
@@ -103,13 +116,48 @@ export function productWhatsAppUrl(product: Product) {
     : `• Precio: ${formatPrice(product.price)}`
   return whatsappUrl(
     [
-      'Hola BitacoreTech, me interesa este producto:',
+      'Hola BitacoreTech, quiero pedir este producto para recoger en tienda:',
       '',
       `• ${product.name}`,
-      `• Código: ${product.sku}`,
+      `• Referencia: ${product.sku}`,
       priceLine,
       '',
-      '¿Está disponible para entrega en Medellín?'
+      '¿Está disponible para recoger en tienda en Medellín?'
+    ].join('\n')
+  )
+}
+
+export function productAvailabilityWhatsAppUrl(product: Product) {
+  return whatsappUrl(
+    [
+      'Hola BitacoreTech, quiero consultar disponibilidad:',
+      '',
+      `• ${product.name}`,
+      `• Referencia: ${product.sku}`,
+      '',
+      '¿Me confirmas si está disponible y cuándo puedo recogerlo en tienda?'
+    ].join('\n')
+  )
+}
+
+export function cartWhatsAppUrl(items: CartWhatsAppItem[]) {
+  const lines = items.map(({ product, quantity }) => {
+    const lineTotal = product.price * quantity
+    const promotion = product.promotion ? ` · ${product.promotion.badge}` : ''
+    return `• ${product.name} · Ref. ${product.sku}${promotion}\n  ${quantity} x ${formatPrice(
+      product.price
+    )} = ${formatPrice(lineTotal)}`
+  })
+  const total = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0)
+  return whatsappUrl(
+    [
+      'Hola BitacoreTech, quiero pedir estas referencias para recoger en tienda:',
+      '',
+      ...lines,
+      '',
+      `Total referencias: ${formatPrice(total)}`,
+      'Recogida en tienda en Medellín.',
+      '¿Me confirman disponibilidad y forma de pago?'
     ].join('\n')
   )
 }
@@ -164,8 +212,12 @@ export function getRelatedProducts(data: Catalog, product: Product, limit = 4) {
     .slice(0, limit)
 }
 
-export function stockLabel(stock: number) {
+export function stockLabel(
+  stock: number,
+  visibility: CatalogStockVisibility = 'outOnly'
+) {
   if (stock <= 0) return 'Agotado'
+  if (visibility === 'outOnly') return ''
   if (stock === 1) return 'Última unidad'
   if (stock <= 3) return 'Pocas unidades'
   return 'Disponible'

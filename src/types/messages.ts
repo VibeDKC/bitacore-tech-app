@@ -19,7 +19,7 @@ export const DEFAULT_MESSAGES = {
   initial:
     'Hola {{cliente}}, recibimos tu {{equipo}} {{marca}} {{modelo}} en {{taller}}. OT {{ot}}. Estado actual: {{estado}}. Diagnóstico inicial: {{diagnostico}}. Presupuesto estimado: {{presupuesto}}. Quedamos atentos.',
   ready:
-    'Hola {{cliente}}, tu {{equipo}} {{marca}} {{modelo}} (OT {{ot}}) ya está listo para entrega. Total: {{total}}. Saldo: {{saldo}}. Te esperamos en {{taller}}.'
+    'Hola {{cliente}}, tu {{equipo}} {{marca}} {{modelo}} (OT {{ot}}) ya está listo para recoger en tienda. Total: {{total}}. Saldo: {{saldo}}. Te esperamos en {{taller}}.'
 }
 
 export type MessageTemplates = typeof DEFAULT_MESSAGES

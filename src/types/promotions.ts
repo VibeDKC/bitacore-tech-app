@@ -88,6 +88,7 @@ export interface PromotionPreview {
 }
 
 export type CatalogSyncState = 'idle' | 'success' | 'error' | 'pending'
+export type CatalogStockVisibility = 'always' | 'outOnly'
 
 export interface CatalogRemoteStatus {
   enabled: boolean
@@ -106,6 +107,7 @@ export interface CatalogRemoteStatus {
 export interface CatalogSyncStatus {
   targetPath: string
   autoPublish: boolean
+  stockVisibility: CatalogStockVisibility
   lastPublishedAt: string | null
   lastStatus: CatalogSyncState
   lastMessage: string

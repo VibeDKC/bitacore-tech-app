@@ -151,6 +151,7 @@ export function catalogStatus(db: Database, runtime: { userDataPath: string }): 
   return {
     targetPath: String(stored.targetPath || defaultTargetPath(runtime)),
     autoPublish: stored.autoPublish === true,
+    stockVisibility: stored.stockVisibility === 'always' ? 'always' : 'outOnly',
     lastPublishedAt: stored.lastPublishedAt ?? null,
     lastStatus: syncState(stored.lastStatus),
     lastMessage: String(stored.lastMessage ?? ''),
@@ -179,6 +180,7 @@ export function updateCatalogConfig(
   patch: {
     targetPath?: string
     autoPublish?: boolean
+    stockVisibility?: 'always' | 'outOnly'
     remote?: { enabled?: boolean; supabaseUrl?: string; bucket?: string }
   }
 ) {
@@ -210,6 +212,9 @@ export function updateCatalogConfig(
       ? { targetPath: String(patch.targetPath).trim() || defaultTargetPath(runtime) }
       : {}),
     ...(patch.autoPublish !== undefined ? { autoPublish: Boolean(patch.autoPublish) } : {}),
+    ...(patch.stockVisibility !== undefined
+      ? { stockVisibility: patch.stockVisibility === 'always' ? 'always' : 'outOnly' }
+      : {}),
     remote: nextRemote
   }
   db.setSetting('catalog_config', next)
@@ -370,6 +375,7 @@ function buildCatalogData(
   const rows = db.all<any>(
     `SELECT * FROM products
      WHERE active = 1 AND is_service = 0 AND publish_web = 1
+       AND condition IN ('Nuevo', 'Reacondicionado')
        AND category <> 'Insumos de taller'
        AND sku <> '00000000000'
      ORDER BY category ASC, price_cents DESC, name ASC`
@@ -507,6 +513,7 @@ function buildCatalogData(
     catalog: {
       generatedAt: new Date().toISOString(),
       source: 'OCTESTR',
+      stockVisibility: storedConfig(db).stockVisibility === 'always' ? 'always' : 'outOnly',
       business: BUSINESS,
       stats: {
         products: products.length,

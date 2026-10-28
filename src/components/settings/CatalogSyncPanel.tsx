@@ -45,6 +45,7 @@ export function CatalogSyncPanel() {
   const [remoteUrl, setRemoteUrl] = useState('')
   const [remoteBucket, setRemoteBucket] = useState('')
   const [remoteEnabled, setRemoteEnabled] = useState(false)
+  const [stockVisibility, setStockVisibility] = useState<'always' | 'outOnly'>('outOnly')
   const [connection, setConnection] = useState<CatalogConnectionResult | null>(null)
 
   function applyStatus(next: CatalogSyncStatus) {
@@ -52,6 +53,7 @@ export function CatalogSyncPanel() {
     setRemoteUrl(next.remote.supabaseUrl)
     setRemoteBucket(next.remote.bucket)
     setRemoteEnabled(next.remote.enabled)
+    setStockVisibility(next.stockVisibility === 'always' ? 'always' : 'outOnly')
   }
 
   function load() {
@@ -185,6 +187,25 @@ export function CatalogSyncPanel() {
       applyStatus(updated.catalog)
     } catch (failure) {
       toast.error('No se pudo actualizar la publicación automática', {
+        description: errorMessage(failure)
+      })
+    }
+  }
+
+  async function updateStockVisibility(value: 'always' | 'outOnly') {
+    const previous = stockVisibility
+    setStockVisibility(value)
+    try {
+      const updated = await api.settings.updateSection('catalog', { stockVisibility: value })
+      applyStatus(updated.catalog)
+      toast.success(
+        value === 'always'
+          ? 'La web mostrará las cantidades disponibles'
+          : 'La web solo mostrará “Agotado” cuando no haya unidades'
+      )
+    } catch (failure) {
+      setStockVisibility(previous)
+      toast.error('No se pudo actualizar la visibilidad del stock', {
         description: errorMessage(failure)
       })
     }
@@ -501,6 +522,60 @@ export function CatalogSyncPanel() {
               <p className="mt-2 text-[10px] text-slate-500">
                 {status.lastMessage || 'Aún no se ha publicado localmente.'}
               </p>
+            </div>
+
+            <div className="rounded-2xl border border-line p-4">
+              <div>
+                <h3 className="text-[12px] font-semibold text-ink">Stock en la web</h3>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
+                  Controla si la web muestra las cantidades disponibles o solo avisa cuando
+                  una referencia está agotada.
+                </p>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <label
+                  className={`cursor-pointer rounded-xl border p-3 transition ${
+                    stockVisibility === 'always'
+                      ? 'border-brand-300 bg-brand-50/70'
+                      : 'border-line bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="stock-visibility"
+                    checked={stockVisibility === 'always'}
+                    onChange={() => void updateStockVisibility('always')}
+                    className="h-4 w-4 border-slate-300 text-brand-600"
+                  />
+                  <span className="ml-2 text-[11px] font-semibold text-ink">
+                    Mostrar cantidades disponibles
+                  </span>
+                  <span className="mt-1 block pl-6 text-[9px] leading-relaxed text-slate-500">
+                    La web muestra “Disponible”, “Última unidad” o “Pocas unidades”.
+                  </span>
+                </label>
+                <label
+                  className={`cursor-pointer rounded-xl border p-3 transition ${
+                    stockVisibility === 'outOnly'
+                      ? 'border-brand-300 bg-brand-50/70'
+                      : 'border-line bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="stock-visibility"
+                    checked={stockVisibility === 'outOnly'}
+                    onChange={() => void updateStockVisibility('outOnly')}
+                    className="h-4 w-4 border-slate-300 text-brand-600"
+                  />
+                  <span className="ml-2 text-[11px] font-semibold text-ink">
+                    Mostrar solo “Agotado”
+                  </span>
+                  <span className="mt-1 block pl-6 text-[9px] leading-relaxed text-slate-500">
+                    Las referencias con stock no muestran cantidad; las agotadas sí se marcan.
+                  </span>
+                </label>
+              </div>
             </div>
 
             <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-3">

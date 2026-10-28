@@ -1,4 +1,4 @@
-import { DEFAULT_MESSAGES, type CatalogSyncState } from '@shared/index'
+import { DEFAULT_MESSAGES, type CatalogStockVisibility, type CatalogSyncState } from '@shared/index'
 
 export interface LegalConfig {
   businessName: string
@@ -93,6 +93,7 @@ export const DEFAULT_SETTINGS = {
   catalog: {
     targetPath: '',
     autoPublish: false,
+    stockVisibility: 'outOnly' as CatalogStockVisibility,
     lastPublishedAt: null as string | null,
     lastStatus: 'idle' as CatalogSyncState,
     lastMessage: '',

@@ -57,7 +57,10 @@ Se excluyen:
 - Insumos de taller.
 - Productos inactivos.
 - Productos con `publish_web = 0`.
+- Productos `Usado`, `Para repuesto`, `Otro` o sin condición.
 - El producto de pruebas `USB GENERIC` (`00000000000`).
+
+La casilla **Publicar en catálogo web** de cada referencia es la que decide dentro de las condiciones elegibles. Solo `Nuevo` y `Reacondicionado` pueden publicarse; `Usado`, `Para repuesto`, `Otro` y las referencias sin condición quedan bloqueadas y desmarcadas. El `catalog.json` incluye `stockVisibility` con el valor `always` u `outOnly` configurado en la app.
 
 El JSON público no incluye el precio del servicio “Hora Servicio Técnico”. Las promociones se leen de las tablas `promotions` y `promotion_targets`; solo salen las activas, vigentes y publicadas en web.
 
@@ -70,7 +73,7 @@ cd web
 npm run test:smoke
 ```
 
-Cubre home, carrusel, header, catálogo, ficha, servicios, órdenes, 404, móvil y movimiento reducido. Usa Microsoft Edge headless y guarda capturas en `%TEMP%\opencode\catalogo-web-shots`.
+Cubre home, carrusel, header, catálogo, ficha, carrito, servicios, órdenes, 404, móvil y movimiento reducido. Usa Microsoft Edge headless y guarda capturas en `%TEMP%\opencode\catalogo-web-shots`.
 
 Para validar la lectura remota, sin tocar Supabase real:
 
@@ -98,7 +101,8 @@ En modo desarrollo no uses `127.0.0.1` para la prueba de humo: Next bloquea el H
 - Etiqueta “Más vendido” con ventas de los últimos 30 días y mínimo 2 unidades.
 - 39 referencias activas, 24 con imagen y 15 con placeholder.
 - Búsqueda por nombre, SKU o categoría sin exigir tildes.
-- Categorías, orden y disponibilidad.
+- Categorías, orden y disponibilidad configurable.
+- Carrito local con mensaje de WhatsApp y pedido para recoger en tienda.
 - Precio, condición y garantía reales del snapshot.
 - Promociones con alcance por SKU/categoría/todo, vigencia, prioridad y publicación web.
 - Publicación remota en Supabase y respaldo local.
@@ -106,4 +110,4 @@ En modo desarrollo no uses `127.0.0.1` para la prueba de humo: Next bloquea el H
 - Consulta demo de OT con número y código.
 - Diseño responsive y contacto por WhatsApp en la barra superior y el pie.
 
-No incluye carrito, pagos, cuentas, portal de OT con datos reales ni edición del catálogo desde la web. Eso queda para fases posteriores.
+No incluye pagos en línea, cuentas de cliente, portal de OT con datos reales ni edición del catálogo desde la web. Eso queda para fases posteriores.

@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.13.1 — 2026-10-28
+
+### Web
+- Carrito local persistente con contador, cambio de cantidades y vaciado.
+- Pedido por WhatsApp con referencias, cantidades, precios y total.
+- Botón “Pedir por WhatsApp” en la ficha; “Consultar disponibilidad” si está agotado.
+- Recogida en tienda en textos, carrito y mensajes; se retiró la entrega a domicilio.
+- Visibilidad de stock configurable: cantidades o solo “Agotado”.
+- El número exacto de stock puede seguir en el JSON para el límite del carrito.
+- Página `/carrito` marcada como `noindex`.
+
+### Catálogo
+- La casilla `publish_web` es el interruptor por referencia.
+- Solo `Nuevo` y `Reacondicionado` son elegibles; en `Usado`, `Para repuesto`, `Otro` o sin condición la casilla queda bloqueada.
+- La migración despublica referencias no elegibles que estuvieran marcadas.
+- El publicador remoto y el exportador local respetan `publish_web` y la condición elegible.
+- `catalog.json` incluye `stockVisibility`.
+- Configuración **Stock en la web** en Configuración → Catálogo web.
+- Sin migración nueva: esquema 14.
+
+### Calidad
+- Aceptación 1.13.1: 23/23.
+- Smoke empaquetado 1.13.1: 23/23.
+- Regresión 1.13.0: 30/30.
+- Web local: 39/39.
+- Web remota: 7/7.
+- Typecheck y build de app y web: OK.
+- Instalador `BitacoreTech-1.13.1-x64.exe` generado.
+
 ## 1.13.0 — 2026-10-28
 
 ### Catálogo remoto

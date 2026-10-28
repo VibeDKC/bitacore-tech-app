@@ -17,8 +17,8 @@ const items = [
     icon: Wrench
   },
   {
-    title: 'Disponibilidad',
-    text: 'Stock del catálogo',
+    title: 'Recoge en tienda',
+    text: 'Recogida presencial en Medellín',
     icon: PackageCheck
   }
 ]

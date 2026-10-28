@@ -1,6 +1,7 @@
 {
-  "generatedAt": "2026-10-28T04:10:06.185Z",
+  "generatedAt": "2026-10-28T07:39:32.900Z",
   "source": "OCTESTR",
+  "stockVisibility": "outOnly",
   "business": {
     "name": "BitacoreTech",
     "descriptor": "Taller & POS",

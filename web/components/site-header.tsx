@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ArrowRight, ChevronDown, Menu, X } from 'lucide-react'
 import type { Category } from '@/lib/catalog'
+import { CartLink } from '@/components/cart-link'
 
 export function SiteHeader({ categories }: { categories: Category[] }) {
   const pathname = usePathname()
@@ -95,6 +96,7 @@ export function SiteHeader({ categories }: { categories: Category[] }) {
         </nav>
 
         <div className="header-actions">
+          <CartLink />
           <button
             type="button"
             className="mobile-toggle"
@@ -150,6 +152,10 @@ export function SiteHeader({ categories }: { categories: Category[] }) {
           </Link>
           <Link href="/buscar-orden" onClick={closeAll}>
             Buscar orden
+            <ArrowRight aria-hidden="true" />
+          </Link>
+          <Link href="/carrito" onClick={closeAll}>
+            Carrito
             <ArrowRight aria-hidden="true" />
           </Link>
         </div>
