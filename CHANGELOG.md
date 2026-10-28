@@ -1,5 +1,22 @@
 # Changelog
 
+## Catálogo web demo — 2026-10-27
+
+- Demo Next.js en `web/`, separada de la aplicación Electron.
+- 39 referencias activas exportadas desde la base local; 24 con imagen y 15 con placeholder.
+- Home con hero editorial, barra de confianza, categorías y carrusel de 9 destacados dentro del hero, uno a uno (3 promociones + 6 destacados).
+- Título enfocado en mantenimiento y reparación, con subtexto de atención presencial.
+- Carrusel cada 4 segundos, con pausa al pasar el mouse o enfocar y modo manual con movimiento reducido.
+- Eliminada la sección inferior de “Promociones y destacados”; el carrusel quedó solo en el hero.
+- 3 promociones de demostración: una fija y dos porcentuales.
+- Catálogo con búsqueda por nombre/SKU/categoría sin exigir tildes, filtro por categoría y orden por precio o nombre.
+- Ficha con precio, condición, garantía, stock y cotización por WhatsApp.
+- Servicios sin precio por hora; revisión inicial sujeta a cotización.
+- Consulta demo de OT con 3 códigos y página `/seguimiento/[code]`.
+- QR de seguimiento inactivo por defecto, presentado solo como nota de demo.
+- Build con 39 fichas estáticas; typecheck y prueba de humo con Playwright/Edge.
+- Sin Supabase, despliegue ni módulo real de promociones.
+
 ## 1.11.0 — 2026-10-27
 
 ### Cuentas de pago

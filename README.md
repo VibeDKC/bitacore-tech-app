@@ -26,6 +26,20 @@ npm run build
 npm start
 ```
 
+## Catálogo web (demo)
+
+La carpeta `web/` contiene una demo del catálogo público en Next.js, separada de la aplicación Electron. Usa un snapshot de la base local con 39 referencias activas, 24 imágenes y 3 promociones de demostración. Incluye home con hero y carrusel de destacados uno a uno, catálogo con búsqueda/filtro/orden, ficha de producto, servicios sin precio por hora y consulta demo de OT con número y código.
+
+Para abrirla desde la raíz:
+
+```text
+Abrir-demo-catalogo.bat
+```
+
+Queda en `http://localhost:3001`. La documentación de la demo está en `web/README.md`, el contrato en `docs/plan/14-contrato-catalogo-web.md` y los pendientes en `docs/pendientes/catalogo-web.md`.
+
+La demo **no** tiene Supabase, despliegue, promociones reales ni portal de OT con datos reales. Esos puntos siguen pendientes.
+
 ## Primer arranque
 
 La primera vez **no se crean usuarios ni credenciales por defecto**. La aplicación muestra la pantalla **Configura tu taller**, donde se registra:
