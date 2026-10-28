@@ -201,9 +201,9 @@ export function LoginPage() {
         <div className="flex flex-col justify-center p-6 sm:p-10 lg:p-12 xl:p-16">
           <div className="mx-auto w-full max-w-[400px]">
             <div className="mb-8 flex items-center justify-between lg:hidden">
-              <Logo />
+              <Logo full />
               <span className="rounded-full border border-line bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                v1.16.0
+                v1.16.1
               </span>
             </div>
 

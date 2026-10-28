@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.16.1 — 2026-10-28
+
+### Marca
+- Logo oficial integrado en la app: login, barra lateral y pantalla 404.
+- Símbolo sin texto para usos compactos.
+- Nuevo icono del instalador y de la ventana, 512×512, con fondo transparente.
+- Nuevo favicon 256×256.
+- Versión visible actualizada a 1.16.1.
+
+### Búsqueda web de órdenes
+- El cliente escribe solo el número de OT, sin `#OT-`; por ejemplo `002332`.
+- Se aceptan minúsculas y claves sin el prefijo `SG-`.
+- La búsqueda sigue exigiendo número + clave de seguimiento por seguridad.
+- Se actualizaron textos, ayudas y pruebas del portal.
+
+### Calidad
+- Aceptación 1.16.1 de marca: 6/6.
+- Regresión 1.16.0: 36/36.
+- Regresión 1.15.0: 44/44.
+- Web local: 39/39.
+- Web remota: 7/7.
+- Typecheck y build de app y web: OK.
+- Sin migración de base de datos.
+
 ## 1.16.0 — 2026-10-28
 
 ### Cartera

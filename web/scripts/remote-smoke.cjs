@@ -162,7 +162,7 @@ async function main() {
     )
     await check(
       'Seguimiento usa órdenes remotas',
-      `http://127.0.0.1:${PORT}/seguimiento/DEMO-01`,
+      `http://127.0.0.1:${PORT}/seguimiento/demo-01`,
       'DEMO-01'
     )
 

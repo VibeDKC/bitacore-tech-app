@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { DemoOrder } from '@/lib/orders-demo'
+import { normalizeOrderNumber, normalizeTrackingCode } from '@/lib/order-format'
 
 export function hashTrackingCode(code: string) {
-  return createHash('sha256').update(code.trim().toUpperCase(), 'utf8').digest('hex')
+  return createHash('sha256')
+    .update(normalizeTrackingCode(code), 'utf8')
+    .digest('hex')
 }
 
 export function findPortalOrder(
@@ -11,7 +14,8 @@ export function findPortalOrder(
   code: string
 ) {
   const codeHash = hashTrackingCode(code)
-  const normalizedNumber = number.trim().toUpperCase()
+  const normalizedNumber = normalizeOrderNumber(number)
+  if (!normalizedNumber) return undefined
   return orders.find(
     (order) =>
       order.number.toUpperCase() === normalizedNumber && order.codeHash === codeHash

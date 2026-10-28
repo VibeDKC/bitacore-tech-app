@@ -46,8 +46,10 @@ NEXT_PUBLIC_SITE_URL=https://bitacore-tech-app.vercel.app
 
 `orders-demo.json` ya no contiene códigos en texto plano. Cada orden publica
 `codeHash` (SHA-256 del código), estado, tipo de equipo, marca, modelo y fechas.
-La web valida número + código en `/api/seguimiento` y en
-`/seguimiento/[code]`; el código nunca se envía al catálogo público.
+La web valida número + clave en `/api/seguimiento` y en `/seguimiento/[code]`;
+el código nunca se envía al catálogo público. El cliente escribe el número de OT
+solo con dígitos (sin `#OT-`) y la clave puede ir en minúsculas o sin `SG-`.
+La consulta solo con el número no devuelve datos.
 
 ## Regenerar el snapshot local
 
@@ -114,7 +116,7 @@ En modo desarrollo no uses `127.0.0.1` para la prueba de humo: Next bloquea el H
 - Promociones con alcance por SKU/categoría/todo, vigencia, prioridad y publicación web.
 - Publicación remota en Supabase y respaldo local.
 - Servicios sin precio por hora; revisión inicial sujeta a cotización.
-- Consulta real de OT por número y código; el código se valida por hash y nunca se publica en texto plano.
+- Consulta real de OT por número (solo dígitos) y clave; la clave se valida por hash y nunca se publica en texto plano.
 - Diseño responsive y contacto por WhatsApp en la barra superior y el pie.
 
-No incluye pagos en línea, cuentas de cliente ni edición del catálogo desde la web. El portal de OT ya consulta estados reales por número y código validado por hash.
+No incluye pagos en línea, cuentas de cliente ni edición del catálogo desde la web. El portal de OT ya consulta estados reales por número (solo dígitos) y clave validada por hash.

@@ -7,7 +7,7 @@ export const revalidate = 60
 export const metadata: Metadata = {
   title: 'Buscar orden',
   description:
-    'Consulta el estado de tu orden de trabajo con el número de OT y el código de seguimiento.'
+    'Consulta el estado de tu orden de trabajo con el número de OT y la clave de seguimiento.'
 }
 
 export default function OrderSearchPage() {
@@ -17,8 +17,9 @@ export default function OrderSearchPage() {
         <p className="eyebrow">Seguimiento</p>
         <h1 className="order-title">Consulta el estado de tu equipo</h1>
         <p className="order-subtitle">
-          Ingresa el número de OT y el código de seguimiento que aparece en tu orden o
-          comprobante. El código se valida de forma segura y no se publica en el catálogo.
+          Ingresa el número de OT (solo números) y la clave de seguimiento que aparece en
+          tu orden o comprobante. No necesitas escribir el prefijo #OT-. La clave se valida
+          de forma segura y no se publica en el catálogo.
         </p>
         <div className="order-privacy">
           <ShieldCheck aria-hidden="true" />

@@ -45,7 +45,7 @@ Incluye:
 - Visibilidad de stock configurable: mostrar cantidades o solo “Agotado”.
 - Etiqueta “Más vendido” con la regla de 30 días y mínimo 2 unidades (solo cuando hay datos).
 - Servicios sin precio por hora.
-- Consulta real de OT por número y código validado por hash.
+- Consulta real de OT por número (solo dígitos) y clave de seguimiento validada por hash.
 - Promociones por SKU/categoría/todo, porcentaje o monto fijo, vigencia, prioridad y publicación web.
 - Exclusión de servicios, inactivos, insumos de taller, productos con `publish_web = 0` y condiciones no elegibles (`Usado`, `Para repuesto`, `Otro`).
 
@@ -55,9 +55,9 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/20-contrato-1.16.0.md`, el acta en `docs/actas/1.16.0.md` y los pendientes en `docs/pendientes/1.16.0.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/21-contrato-1.16.1.md`, el acta en `docs/actas/1.16.1.md` y los pendientes en `docs/pendientes/1.16.1.md`.
 
-Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales ya consulta por número y código, sin publicar el código en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
+Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales consulta por número (solo dígitos, sin `#OT-`) y clave de seguimiento, sin publicar la clave en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
 ## Punto de venta
 
@@ -86,6 +86,15 @@ Desde 1.16.0 el taller incorpora:
 
 La cartera aplica a las entregas a crédito de OT. Las ventas de POS siguen cobrándose con los métodos actuales.
 
+## Marca
+
+Desde 1.16.1 la app usa el logo oficial de BitacoreTech:
+
+- Logo completo en el login móvil y la pantalla 404.
+- Símbolo + wordmark en la barra lateral y el login de escritorio.
+- Icono sin texto para el instalador, la ventana y los accesos directos.
+- Favicon propio en el renderer.
+- La web conserva sus assets de marca alineados con el mismo logo.
 
 ## Primer arranque
 
@@ -242,6 +251,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.14.1` | Facturación, entrega, crédito, reportes, purga y seguimiento por hash. |
 | `npm run test:acceptance:1.15.0` | Servicios manuales, cliente rápido, atajos del POS y comprobante digital obligatorio. |
 | `npm run test:acceptance:1.16.0` | Cartera, cupo de crédito, vencimientos, abonos, garantías y abandono. |
+| `npm run test:acceptance:1.16.1` | Logo, símbolo, icono, favicon y wordmark en la app. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.16.0` | Migración 17 de cartera, cupo de crédito y vencimientos sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
@@ -279,6 +289,7 @@ npm run test:acceptance:1.14.0
 npm run test:acceptance:1.14.1
 npm run test:acceptance:1.15.0
 npm run test:acceptance:1.16.0
+npm run test:acceptance:1.16.1
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -293,7 +304,7 @@ npm run test:migration:1.12.0
 npm run test:migration:1.16.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44` y `36/36`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36` y `6/6`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -301,7 +312,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.16.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.16.1-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -315,6 +326,8 @@ El instalador queda en `release/` como `BitacoreTech-1.16.0-x64.exe`. La configu
 - Los servicios manuales del POS no crean productos ni mueven stock; se guardan como líneas `servicio` con `product_id = NULL`.
 - El comprobante en pagos digitales es configurable y, cuando está activo, exige adjunto en Transferencia y Tarjeta. Está desactivado por defecto.
 - La cartera agrupa las facturas de OT entregadas a crédito; el cupo por cliente se valida antes de autorizar y 0 significa sin límite.
+- La búsqueda web de OT acepta el número sin `#OT-` y la clave sin distinguir mayúsculas; ambos datos siguen siendo obligatorios.
+- El logo oficial se usa en la app y el icono del instalador es el símbolo sin texto.
 - Los abonos de cartera usan los mismos métodos de pago que la caja y respetan la regla de comprobante digital.
 - La garantía de una OT entregada se calcula con los días del snapshot legal; los repuestos conservan su garantía individual.
 - El riesgo de abandono se calcula con los días del snapshot legal y se muestra en la OT y en las notificaciones.

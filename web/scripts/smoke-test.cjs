@@ -583,23 +583,24 @@ async function main() {
     await page.waitForTimeout(300)
     await page.screenshot({ path: path.join(shotsDir, '04b-servicios-formulario.png') })
 
-    await check('Buscar orden: código y error controlado', async () => {
+    await check('Buscar orden: número y clave con error controlado', async () => {
       await goto('/buscar-orden')
       await page.locator('.order-search-form').waitFor()
-      assert.match(await page.locator('.order-subtitle').innerText(), /código de seguimiento/i)
+      assert.match(await page.locator('.order-subtitle').innerText(), /clave de seguimiento/i)
       assert.match(await page.locator('.order-qr-note').innerText(), /inactivo por defecto/i)
       assert.equal(await page.locator('.order-demo-list').count(), 0)
-      await page.locator('.order-search-form input').first().fill('OT-000000')
+      await page.locator('.order-search-form input').first().fill('000000')
       await page.locator('.order-search-form input').nth(1).fill('XXXX-00')
       await page.locator('.order-search-form button[type="submit"]').click()
       await page.locator('.order-error').waitFor()
       assert.match(await page.locator('.order-error').innerText(), /No encontramos una orden/i)
     })
 
-    await check('Buscar orden: código válido muestra estado', async () => {
+    await check('Buscar orden: acepta número sin #OT- y clave en minúsculas', async () => {
       await goto('/buscar-orden')
-      await page.locator('.order-search-form input').first().fill('OT-002332')
-      await page.locator('.order-search-form input').nth(1).fill('DEMO-01')
+      await page.locator('.order-search-form input').first().fill('#OT-002332')
+      assert.equal(await page.locator('.order-search-form input').first().inputValue(), '002332')
+      await page.locator('.order-search-form input').nth(1).fill('demo-01')
       await page.locator('.order-search-form button[type="submit"]').click()
       await page.locator('.order-status-card').waitFor()
       assert.match(await page.locator('.order-number').innerText(), /OT-002332/)
@@ -607,8 +608,8 @@ async function main() {
 
     await page.screenshot({ path: path.join(shotsDir, '05-buscar-orden-desktop.png') })
 
-    await check('Seguimiento directo por código y noindex', async () => {
-      const response = await goto('/seguimiento/DEMO-02')
+    await check('Seguimiento directo por clave en minúsculas y noindex', async () => {
+      const response = await goto('/seguimiento/demo-02')
       assert.equal(response.status(), 200)
       await page.locator('.order-status-card').waitFor()
       assert.match(await page.locator('.order-number').innerText(), /OT-002341/)

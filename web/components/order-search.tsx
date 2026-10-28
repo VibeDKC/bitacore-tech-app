@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Search } from 'lucide-react'
 import { OrderStatusCard } from '@/components/order-status-card'
 import type { DemoOrder } from '@/lib/orders-demo'
+import { normalizeOrderNumber, normalizeTrackingCode } from '@/lib/order-format'
 
 export function OrderSearch() {
   const [number, setNumber] = useState('')
@@ -16,24 +17,30 @@ export function OrderSearch() {
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
+    const normalizedNumber = normalizeOrderNumber(number)
+    const normalizedCode = normalizeTrackingCode(code)
+    if (!normalizedNumber || !normalizedCode) {
+      setError('Escribe el número de la OT y la clave de seguimiento.')
+      return
+    }
     setLoading(true)
     try {
       const response = await fetch(
-        `/api/seguimiento?numero=${encodeURIComponent(number.trim())}&codigo=${encodeURIComponent(
-          code.trim()
-        )}`,
+        `/api/seguimiento?numero=${encodeURIComponent(
+          normalizedNumber
+        )}&codigo=${encodeURIComponent(normalizedCode)}`,
         { cache: 'no-store' }
       )
       if (!response.ok) {
         setResult(null)
         setError(
-          'No encontramos una orden con esos datos. Verifica el número y el código impreso en tu OT.'
+          'No encontramos una orden con ese número y clave. Verifica los datos impresos en tu OT.'
         )
         return
       }
       const order = (await response.json()) as DemoOrder
       setResult(order)
-      setSubmittedCode(code.trim().toUpperCase())
+      setSubmittedCode(normalizedCode)
     } catch {
       setResult(null)
       setError('No se pudo consultar la orden. Revisa tu conexión e inténtalo de nuevo.')
@@ -46,20 +53,24 @@ export function OrderSearch() {
     <div className="order-search">
       <form className="order-search-form" onSubmit={submit}>
         <label>
-          <span className="field-label">Número de OT</span>
+          <span className="field-label">Número de OT (solo números)</span>
           <input
             value={number}
-            onChange={(event) => setNumber(event.target.value)}
-            placeholder="Ej. OT-002332"
+            onChange={(event) =>
+              setNumber(event.target.value.replace(/\D/g, '').slice(0, 12))
+            }
+            placeholder="Ej. 002332"
+            inputMode="numeric"
+            pattern="[0-9]*"
             autoComplete="off"
             required
           />
         </label>
         <label>
-          <span className="field-label">Código de seguimiento</span>
+          <span className="field-label">Clave de seguimiento</span>
           <input
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            onChange={(event) => setCode(event.target.value.toUpperCase())}
             placeholder="Ej. SG-AB12CD34EF56"
             autoComplete="off"
             required
@@ -72,10 +83,11 @@ export function OrderSearch() {
       </form>
 
       <div className="order-demo-box">
-        <p className="order-demo-title">¿Dónde está mi código?</p>
+        <p className="order-demo-title">¿Dónde están mis datos?</p>
         <p className="order-demo-help">
-          El código de seguimiento está impreso en tu orden de trabajo y en el comprobante
-          de ingreso. Por seguridad no se puede consultar solo con el número de OT.
+          El número de OT está impreso sin el prefijo #OT-, por ejemplo 002332. La clave
+          de seguimiento comienza con SG- y aparece en tu orden y en el comprobante de
+          ingreso. Por seguridad necesitamos ambos datos.
         </p>
       </div>
 

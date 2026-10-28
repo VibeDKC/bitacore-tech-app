@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
 import { getOrdersDemo } from '@/lib/orders-demo-server'
+import { normalizeOrderNumber, normalizeTrackingCode } from '@/lib/order-format'
 import { findPortalOrder } from '@/lib/orders-hash'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const number = (url.searchParams.get('numero') || '').trim()
-  const code = (url.searchParams.get('codigo') || '').trim()
+  const number = normalizeOrderNumber(url.searchParams.get('numero') || '')
+  const code = normalizeTrackingCode(url.searchParams.get('codigo') || '')
   if (!number || !code) {
-    return NextResponse.json({ error: 'Número y código requeridos.' }, { status: 400 })
+    return NextResponse.json({ error: 'Número y clave requeridos.' }, { status: 400 })
   }
   const data = await getOrdersDemo()
   const order = findPortalOrder(data.orders, number, code)

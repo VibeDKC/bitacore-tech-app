@@ -12,7 +12,7 @@ export function NotFoundPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#eef0f7] via-[#e7e9f3] to-[#dfe4f0] p-5">
       <div className="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-8 text-center shadow-shell">
         <div className="flex justify-center">
-          <Logo />
+          <Logo full className="h-12" />
         </div>
         <span className="mx-auto mt-8 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
           <Compass className="h-7 w-7" />
