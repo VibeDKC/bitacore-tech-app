@@ -55,7 +55,7 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/21-contrato-1.16.1.md`, el acta en `docs/actas/1.16.1.md` y los pendientes en `docs/pendientes/1.16.1.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/22-contrato-1.16.2.md`, el acta en `docs/actas/1.16.2.md` y los pendientes en `docs/pendientes/1.16.2.md`.
 
 Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales consulta por número (solo dígitos, sin `#OT-`) y clave de seguimiento, sin publicar la clave en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
@@ -108,6 +108,10 @@ La base se crea con una cuenta **Propietario** oculta y protegida. La primera ve
 La configuración inicial registra la auditoría y genera un respaldo completo. En ese momento se puede elegir **Cargar datos de demostración** para probar la aplicación con productos, clientes y OT ficticias. Las cuentas demo reciben contraseñas aleatorias; no se publican credenciales conocidas.
 
 La cuenta Propietario no aparece en la lista de usuarios para los administradores. Se usa solo para auditoría y recuperación. Los administradores pueden crear otros administradores, técnicos y cajeros desde **Configuración → Usuarios y roles**.
+
+Si ya tienes una cuenta, en la pantalla de primer arranque puedes pulsar **“¿Ya tienes una cuenta? Inicia sesión”**. El acceso del propietario permite crear el administrador o restaurar un respaldo sin crear una cuenta nueva. Si en el equipo ya existe un administrador, la app abre directamente en login aunque la marca interna de configuración falte por una migración o un respaldo antiguo.
+
+Para recuperar una contraseña, usa **“¿Olvidaste tu clave?”**. La app indica contactar a un administrador o al propietario y, si el negocio tiene teléfono configurado, ofrece un botón para escribir al taller por WhatsApp.
 
 Si actualizas desde una instalación anterior, la base existente conserva sus usuarios y datos. La migración agrega los módulos de permisos, los códigos de seguimiento, la cartera con cupo/días de crédito y los vencimientos sin borrar información. La cuenta raíz existente se migra a las credenciales privadas de 1.14 y pasa a llamarse `propietario` cuando ese usuario está disponible.
 
@@ -252,6 +256,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.15.0` | Servicios manuales, cliente rápido, atajos del POS y comprobante digital obligatorio. |
 | `npm run test:acceptance:1.16.0` | Cartera, cupo de crédito, vencimientos, abonos, garantías y abandono. |
 | `npm run test:acceptance:1.16.1` | Logo, símbolo, icono, favicon y wordmark en la app. |
+| `npm run test:acceptance:1.16.2` | Actualización con base existente, acceso del propietario y recuperación de clave. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.16.0` | Migración 17 de cartera, cupo de crédito y vencimientos sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
@@ -290,6 +295,7 @@ npm run test:acceptance:1.14.1
 npm run test:acceptance:1.15.0
 npm run test:acceptance:1.16.0
 npm run test:acceptance:1.16.1
+npm run test:acceptance:1.16.2
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -304,7 +310,7 @@ npm run test:migration:1.12.0
 npm run test:migration:1.16.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36` y `6/6`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36`, `6/6` y `16/16`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -312,7 +318,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.16.1-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.16.2-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -328,6 +334,8 @@ El instalador queda en `release/` como `BitacoreTech-1.16.1-x64.exe`. La configu
 - La cartera agrupa las facturas de OT entregadas a crédito; el cupo por cliente se valida antes de autorizar y 0 significa sin límite.
 - La búsqueda web de OT acepta el número sin `#OT-` y la clave sin distinguir mayúsculas; ambos datos siguen siendo obligatorios.
 - El logo oficial se usa en la app y el icono del instalador es el símbolo sin texto.
+- Una base con administradores no vuelve a mostrar configuración inicial aunque falte la marca de setup.
+- El login no muestra OT activas, datos del equipo ni el pie de instalación local.
 - Los abonos de cartera usan los mismos métodos de pago que la caja y respetan la regla de comprobante digital.
 - La garantía de una OT entregada se calcula con los días del snapshot legal; los repuestos conservan su garantía individual.
 - El riesgo de abandono se calcula con los días del snapshot legal y se muestra en la OT y en las notificaciones.

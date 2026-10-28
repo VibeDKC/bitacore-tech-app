@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.16.2 — 2026-10-28
+
+### Acceso inicial y actualización
+- Una base con administradores ya no vuelve a pedir “Configura tu taller”.
+- La detección de configuración depende de la existencia de un administrador, no solo de la marca de setup.
+- El propietario puede iniciar sesión antes de crear el administrador.
+- Botón **“¿Ya tienes una cuenta? Inicia sesión”** en primer arranque.
+- Después del acceso del propietario se abre Configuración para crear el administrador o restaurar un respaldo.
+- Los demás usuarios siguen bloqueados hasta que exista un administrador.
+
+### Login
+- Se eliminaron la OT activa y los nombres/círculos del equipo de la pantalla de acceso.
+- Se eliminó la descripción del aviso “Acceso protegido”.
+- Se eliminó el pie de “Instalación local. Tus datos permanecen en este equipo”.
+- El login de escritorio quedó más limpio y equilibrado.
+
+### Recuperación
+- “¿Olvidaste tu clave?” abre un modal con instrucciones.
+- Botón **“Escribir al taller”** por WhatsApp usando el teléfono público del negocio.
+- `auth.status` expone solo nombre y teléfono del taller.
+
+### Calidad
+- Aceptación 1.16.2: 16/16.
+- Regresión 1.16.1: 6/6.
+- Regresión 1.16.0: 36/36.
+- Regresión 1.15.0: 44/44.
+- Typecheck y build de app: OK.
+- Sin migración de base de datos.
+
 ## 1.16.1 — 2026-10-28
 
 ### Marca

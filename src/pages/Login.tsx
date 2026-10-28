@@ -1,11 +1,11 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
-  CheckCircle2,
   Eye,
   EyeOff,
   LockKeyhole,
+  MessageCircle,
   PackageCheck,
   ShieldCheck,
   ShoppingCart,
@@ -16,7 +16,8 @@ import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
 import { Logo } from '@/components/ui/Logo'
 import { Button } from '@/components/ui/Button'
-import { Avatar } from '@/components/ui/Avatar'
+import { Modal } from '@/components/ui/Modal'
+import { api } from '@/lib/backend'
 
 const features = [
   {
@@ -60,6 +61,32 @@ export function LoginPage() {
     demo: false
   })
   const [setupError, setSetupError] = useState('')
+  const [showOwnerLogin, setShowOwnerLogin] = useState(false)
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [contact, setContact] = useState({ businessName: 'BitacoreTech', phone: '' })
+
+  useEffect(() => {
+    api.auth
+      .status()
+      .then((status) => {
+        setContact({
+          businessName: status.businessName || 'BitacoreTech',
+          phone: status.phone || ''
+        })
+      })
+      .catch(() => {
+        // El contacto del taller es opcional; el login sigue funcionando sin él.
+      })
+  }, [])
+
+  const setupMode = setupRequired && !showOwnerLogin
+  const phoneDigits = contact.phone.replace(/\D/g, '')
+  const whatsappPhone =
+    phoneDigits.length >= 11 && phoneDigits.startsWith('57')
+      ? phoneDigits
+      : phoneDigits.length >= 7
+        ? `57${phoneDigits}`
+        : ''
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />
@@ -123,6 +150,15 @@ export function LoginPage() {
         description: `Sesión iniciada como ${session.roleLabel}.`
       })
 
+      if (setupRequired) {
+        toast.info('Acceso del propietario', {
+          description:
+            'Crea el administrador desde Configuración → Usuarios o restaura un respaldo.'
+        })
+        navigate('/configuracion', { replace: true })
+        return
+      }
+
       const from = (location.state as { from?: string } | null)?.from
       navigate(from && from !== '/login' ? from : '/', { replace: true })
     } catch (loginError) {
@@ -130,6 +166,15 @@ export function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  function openWorkshopWhatsApp() {
+    if (!whatsappPhone) return
+    const message = `Hola, necesito ayuda para recuperar mi acceso a ${contact.businessName} Taller & POS.`
+    window.open(
+      `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`,
+      '_blank'
+    )
   }
 
   return (
@@ -173,29 +218,6 @@ export function LoginPage() {
               })}
             </div>
           </div>
-
-          <div className="relative mt-10">
-            <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.05] p-3.5 backdrop-blur-sm">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/20 text-brand-200">
-                <Wrench className="h-[18px] w-[18px]" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[11px] font-semibold text-white/90">OT-002341 · MacBook Pro</p>
-                  <span className="rounded-full bg-brand-400/15 px-2 py-0.5 text-[9px] font-semibold text-brand-200">En reparación</span>
-                </div>
-                <p className="mt-1 text-[10px] text-white/40">Julián Vélez · Diagnóstico completado</p>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-2.5">
-              <div className="flex -space-x-2">
-                {['Camila Ríos', 'Julián Vélez', 'Andrea Salazar'].map((name) => (
-                  <Avatar key={name} name={name} size="xs" className="ring-2 ring-[#11152c]" />
-                ))}
-              </div>
-              <p className="text-[10px] text-white/40">Un equipo, una sola fuente de verdad.</p>
-            </div>
-          </div>
         </div>
 
         <div className="flex flex-col justify-center p-6 sm:p-10 lg:p-12 xl:p-16">
@@ -203,25 +225,33 @@ export function LoginPage() {
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Logo full />
               <span className="rounded-full border border-line bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                v1.16.1
+                v1.16.2
               </span>
             </div>
 
             <div className="hidden items-center gap-2 lg:flex">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-slate-50 text-slate-500">
-                {setupRequired ? <Sparkles className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
+                {setupMode ? <Sparkles className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
               </span>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  {setupRequired ? 'Configuración inicial' : 'Acceso privado'}
+                  {setupMode
+                    ? 'Configuración inicial'
+                    : showOwnerLogin
+                      ? 'Acceso del propietario'
+                      : 'Acceso privado'}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  {setupRequired ? 'Crea la cuenta del administrador' : 'Solo personal autorizado'}
+                  {setupMode
+                    ? 'Crea la cuenta del administrador'
+                    : showOwnerLogin
+                      ? 'Configura o restaura el taller'
+                      : 'Solo personal autorizado'}
                 </p>
               </div>
             </div>
 
-            {setupRequired ? (
+            {setupMode ? (
               <>
                 <h2 className="mt-8 font-display text-[30px] font-bold tracking-[-0.03em] text-ink">Configura tu taller</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-500">
@@ -326,12 +356,30 @@ export function LoginPage() {
                     Crear cuenta y entrar
                   </Button>
                 </form>
+
+                <div className="mt-4 border-t border-line pt-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="lg"
+                    className="w-full"
+                    onClick={() => {
+                      setShowOwnerLogin(true)
+                      setSetupError('')
+                      setError('')
+                    }}
+                  >
+                    ¿Ya tienes una cuenta? Inicia sesión
+                  </Button>
+                </div>
               </>
             ) : (
               <>
                 <h2 className="mt-8 font-display text-[30px] font-bold tracking-[-0.03em] text-ink">Bienvenido de nuevo</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                  Ingresa con tu cuenta para administrar el taller y el punto de venta.
+                  {showOwnerLogin
+                    ? 'Acceso del propietario para crear el administrador o restaurar un respaldo.'
+                    : 'Ingresa con tu cuenta para administrar el taller y el punto de venta.'}
                 </p>
 
                 <form onSubmit={handleSubmit} className="mt-7 space-y-4">
@@ -375,11 +423,7 @@ export function LoginPage() {
                     </span>
                     <button
                       type="button"
-                      onClick={() =>
-                        toast('Recuperación de acceso', {
-                          description: 'Solicita al propietario o a un administrador que restablezca tu contraseña desde Configuración → Usuarios.'
-                        })
-                      }
+                      onClick={() => setRecoveryOpen(true)}
                       className="text-xs font-semibold text-brand-600 hover:text-brand-700"
                     >
                       ¿Olvidaste tu clave?
@@ -396,31 +440,65 @@ export function LoginPage() {
                     Ingresar al taller
                   </Button>
                 </form>
+
+                {showOwnerLogin ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowOwnerLogin(false)
+                      setError('')
+                    }}
+                    className="mt-4 w-full text-center text-[10px] font-semibold text-slate-400 transition hover:text-slate-600"
+                  >
+                    Volver a la configuración inicial
+                  </button>
+                ) : null}
               </>
             )}
 
-            <div className="mt-6 rounded-2xl border border-line bg-slate-50/70 p-3.5">
-              <div className="flex items-start gap-2.5">
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm">
-                  <ShieldCheck className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-[11px] font-semibold text-ink">Acceso protegido</p>
-                  <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-                    {setupRequired
-                      ? 'La cuenta del administrador se guarda con hash scrypt y la configuración inicial queda registrada en la auditoría.'
-                      : 'Las contraseñas se guardan con hash scrypt y cada inicio de sesión queda registrado en la auditoría.'}
-                  </p>
-                </div>
-              </div>
+            <div className="mt-6 flex items-center gap-2.5 rounded-2xl border border-line bg-slate-50/70 p-3.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-brand-600 shadow-sm">
+                <ShieldCheck className="h-4 w-4" />
+              </span>
+              <p className="text-[11px] font-semibold text-ink">Acceso protegido</p>
             </div>
-
-            <p className="mt-8 text-center text-[10px] leading-relaxed text-slate-400">
-              BitacoreTech Taller & POS · Instalación local. Tus datos permanecen en este equipo.
-            </p>
           </div>
         </div>
       </div>
+
+      <Modal
+        open={recoveryOpen}
+        onClose={() => setRecoveryOpen(false)}
+        title="Recuperar acceso"
+        size="sm"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setRecoveryOpen(false)}>
+              Entendido
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm leading-relaxed text-slate-600">
+            Por seguridad, la contraseña no se recupera desde aquí. Pide a un administrador o al
+            propietario que la restablezca desde Configuración → Usuarios y roles.
+          </p>
+          {whatsappPhone ? (
+            <Button
+              className="w-full"
+              onClick={openWorkshopWhatsApp}
+              leftIcon={<MessageCircle className="h-4 w-4" />}
+            >
+              Escribir al taller
+            </Button>
+          ) : (
+            <p className="text-[10px] leading-relaxed text-slate-400">
+              El taller no tiene un número de contacto configurado.
+            </p>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

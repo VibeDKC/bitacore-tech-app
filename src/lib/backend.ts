@@ -152,6 +152,9 @@ export interface SetupStatus {
   setupRequired: boolean
   hasUsers: boolean
   hasAdmin?: boolean
+  hasActiveAdmin?: boolean
+  businessName: string
+  phone: string
 }
 
 export interface SetupInput {

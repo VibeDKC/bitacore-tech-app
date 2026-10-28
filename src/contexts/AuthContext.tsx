@@ -38,15 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true
     async function restore() {
+      let setupPending = false
       try {
         const status = await api.auth.status()
         if (!active) return
-        if (status.setupRequired) {
-          setAuthToken(null)
-          setSetupRequired(true)
-          setRestoring(false)
-          return
-        }
+        setupPending = status.setupRequired
+        setSetupRequired(setupPending)
       } catch {
         // Si el estado falla, se intenta restaurar la sesión normal.
       }
@@ -73,7 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setEffectiveModules(info.modules)
       } catch {
         setAuthToken(null)
-        if (active) setSession(null)
+        if (active) {
+          setSession(null)
+          setSetupRequired(setupPending)
+        }
       } finally {
         if (active) setRestoring(false)
       }

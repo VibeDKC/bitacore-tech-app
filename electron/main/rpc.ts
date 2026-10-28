@@ -3118,26 +3118,39 @@ export async function handleRpc(command: string, payload: Payload, token: string
   if (command === 'auth.status') {
     const db = currentSession()
     const users = db.count('users')
-    const admin = db.get<{ id: string }>(
+    const activeAdmin = db.get<{ id: string }>(
       "SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1"
+    )
+    const anyAdmin = db.get<{ id: string }>(
+      "SELECT id FROM users WHERE role = 'admin' LIMIT 1"
     )
     const setup = db.get<{ value: string }>(
       "SELECT value FROM meta WHERE key = 'setup_completed'"
     )
-    const setupRequired = setup?.value !== '1' || !admin
-    return { setupRequired, hasUsers: users > 0, hasAdmin: Boolean(admin) }
+    // Una base existente con administradores no debe volver a pedir configuración
+    // aunque la marca de setup falte por una migración o un respaldo antiguo.
+    const setupRequired = !anyAdmin && setup?.value !== '1'
+    const legal = getLegal(db)
+    return {
+      setupRequired,
+      hasUsers: users > 0,
+      hasAdmin: Boolean(anyAdmin),
+      hasActiveAdmin: Boolean(activeAdmin),
+      businessName: legal.businessName,
+      phone: legal.phone
+    }
   }
 
   if (command === 'auth.setup') {
     const db = currentSession()
     const currentAdmin = db.get<{ id: string }>(
-      "SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1"
+      "SELECT id FROM users WHERE role = 'admin' LIMIT 1"
     )
     const setup = db.get<{ value: string }>(
       "SELECT value FROM meta WHERE key = 'setup_completed'"
     )
-    if (setup?.value === '1' && currentAdmin) {
-      fail('La aplicación ya está configurada.', 'ALREADY_SETUP')
+    if (setup?.value === '1' || currentAdmin) {
+      fail('La aplicación ya está configurada. Inicia sesión con tu cuenta.', 'ALREADY_SETUP')
     }
     if (!db.get("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) {
       fail('No se encontró la cuenta raíz protegida. Reinstala o restaura un respaldo válido.', 'OWNER_MISSING')
@@ -3235,15 +3248,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
   if (command === 'auth.login') {
     const db = currentSession()
-    const setupAdmin = db.get<{ id: string }>(
+    const activeAdmin = db.get<{ id: string }>(
       "SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1"
     )
-    const setup = db.get<{ value: string }>(
-      "SELECT value FROM meta WHERE key = 'setup_completed'"
-    )
-    if (!setupAdmin || setup?.value !== '1') {
-      fail('La aplicación aún no está configurada. Crea la cuenta del administrador.', 'SETUP_REQUIRED')
-    }
     const username = text(payload?.username, 'Usuario', 3, 80).toLowerCase()
     const password = typeof payload?.password === 'string' ? payload.password : ''
     if (!password) fail('La contraseña es obligatoria')
@@ -3254,6 +3261,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
     }
 
     const user = db.get<any>('SELECT * FROM users WHERE username = ? COLLATE NOCASE', username)
+    // En una instalación nueva solo el propietario puede entrar antes de crear
+    // el administrador. Si ya hay un administrador, el login es normal.
+    if (!activeAdmin && user?.role !== 'superadmin') {
+      fail(
+        'La aplicación aún no tiene un administrador activo. Inicia sesión como propietario para crear uno o restaurar un respaldo.',
+        'SETUP_REQUIRED'
+      )
+    }
     const matches = Boolean(user?.active) && verifyPassword(password, user.password_hash)
     if (!matches) {
       const current = loginAttempts.get(username) ?? { fails: 0, blockedUntil: 0 }
