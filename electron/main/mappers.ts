@@ -89,7 +89,9 @@ export function customerDto(db: Database, row: any) {
     loyaltyDiscountValue: Number(row.loyalty_discount_value ?? 0),
     loyaltyValidUntil: row.loyalty_valid_until ?? null,
     loyaltyNotes: row.loyalty_notes ?? '',
-    creditEnabled: bool(row.credit_enabled)
+    creditEnabled: bool(row.credit_enabled),
+    creditLimit: money(row.credit_limit_cents),
+    creditDays: Number(row.credit_days ?? 30)
   }
 }
 
@@ -262,6 +264,8 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
     createdAt: row.created_at,
     createdByName: row.created_by_name ?? null,
     createdByRole: row.created_by_role ?? null,
+    dueDate: row.due_date ?? null,
+    creditAuthorized: bool(row.credit_authorized),
     incomeAccountName: payment?.income_account_name ?? null,
     paymentId: payment?.id ?? null,
     paymentReceipt: receipt
@@ -340,6 +344,45 @@ export function orderDto(db: Database, row: any) {
   const isNoChargeDelivery = row.status === 'entregado' && isExceptionInvoice
   const balanceCents = isNoChargeDelivery ? 0 : Math.max(totalCents - paidCents, 0)
   const balance = money(balanceCents)
+  const dayMs = 24 * 60 * 60 * 1000
+  const legal = db.getSetting<any>('legal_config', { warrantyDays: 90, abandonmentDays: 45 })
+  const warrantyDays = Math.max(
+    0,
+    Math.round(Number(intake?.legal?.warrantyDays ?? legal?.warrantyDays ?? 0))
+  )
+  let warranty: any = null
+  if (row.status === 'entregado' && row.delivered_at && warrantyDays > 0) {
+    const startsAt = new Date(row.delivered_at)
+    if (Number.isFinite(startsAt.getTime())) {
+      const until = new Date(startsAt.getTime() + warrantyDays * dayMs)
+      const daysLeft = Math.ceil((until.getTime() - Date.now()) / dayMs)
+      warranty = {
+        days: warrantyDays,
+        startsAt: startsAt.toISOString(),
+        until: until.toISOString(),
+        daysLeft,
+        status: daysLeft < 0 ? 'vencida' : daysLeft <= 30 ? 'por_vencer' : 'vigente'
+      }
+    }
+  }
+  const abandonmentDays = Math.max(
+    1,
+    Math.round(Number(intake?.legal?.abandonmentDays ?? legal?.abandonmentDays ?? 45))
+  )
+  let abandonment: any = null
+  if (!['entregado', 'no_reparado'].includes(row.status) && row.created_at) {
+    const createdAt = new Date(row.created_at)
+    if (Number.isFinite(createdAt.getTime())) {
+      const at = new Date(createdAt.getTime() + abandonmentDays * dayMs)
+      const daysLeft = Math.ceil((at.getTime() - Date.now()) / dayMs)
+      abandonment = {
+        days: abandonmentDays,
+        at: at.toISOString(),
+        daysLeft,
+        atRisk: daysLeft <= 0
+      }
+    }
+  }
 
   let settlement: any
   if (row.status === 'entregado') {
@@ -348,14 +391,23 @@ export function orderDto(db: Database, row: any) {
       ? String(invoiceRow.notes ?? '').replace(/^Excepción:\s*/i, '')
       : undefined
     settlement = isCreditInvoice
-      ? {
-          status: 'credito',
-          amount: money(invoiceRow?.total_cents ?? paidCents),
-          method: 'Crédito',
-          paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
-          invoiceNumber: invoiceRow?.number,
-          creditAuthorizedBy: invoiceRow?.credit_authorized_by ?? null
-        }
+      ? balanceCents > 0
+        ? {
+            status: 'credito',
+            amount: money(invoiceRow?.total_cents ?? paidCents),
+            method: 'Crédito',
+            paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
+            invoiceNumber: invoiceRow?.number,
+            creditAuthorizedBy: invoiceRow?.credit_authorized_by ?? null
+          }
+        : {
+            status: 'pagado',
+            amount: money(invoiceRow?.total_cents ?? paidCents),
+            method: 'Crédito',
+            paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
+            invoiceNumber: invoiceRow?.number,
+            creditAuthorizedBy: invoiceRow?.credit_authorized_by ?? null
+          }
       : isException
         ? {
             status: 'exento',
@@ -433,6 +485,8 @@ export function orderDto(db: Database, row: any) {
     evidenceSetHash: evidenceSetHash(evidenceRows),
     evidenceVerified:
       activeEvidence.length > 0 && activeEvidence.every((item) => Boolean(item.verified_at)),
+    warranty,
+    abandonment,
     statusOrder: STATUS_ORDER
   }
 }

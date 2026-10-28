@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import {
   ChartNoAxesCombined,
   ChevronDown,
+  HandCoins,
   LayoutDashboard,
   Package,
   Settings,
@@ -44,6 +45,7 @@ const navItems: NavItem[] = [
   { key: 'customers', label: 'Clientes', path: '/clientes', icon: Users },
   { key: 'purchases', label: 'Compras', path: '/compras', icon: Truck },
   { key: 'cash', label: 'Caja', path: '/caja', icon: Wallet },
+  { key: 'receivables', label: 'Cartera', path: '/cartera', icon: HandCoins },
   { key: 'reports', label: 'Reportes', path: '/reportes', icon: ChartNoAxesCombined },
   { key: 'audit', label: 'Auditoría', path: '/auditoria', icon: ShieldCheck },
   { key: 'settings', label: 'Configuración', path: '/configuracion', icon: Settings }

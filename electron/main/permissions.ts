@@ -23,6 +23,7 @@ export type BackendCapability =
   | 'diagnoseOrder'
   | 'assignTechnician'
   | 'settleOrder'
+  | 'collectReceivables'
   | 'manageLoyalty'
   | 'viewAudit'
   | 'viewFullAudit'
@@ -62,6 +63,7 @@ export const ALL_CAPABILITIES: BackendCapability[] = [
   'assignTechnician',
   'manageLoyalty',
   'settleOrder',
+  'collectReceivables',
   'viewAudit',
   'viewFullAudit',
   'exportAudit',
@@ -100,10 +102,10 @@ export function roleModulesForRole(role: Role): ModuleKey[] {
 }
 
 const roleModules: Record<Role, ModuleKey[]> = {
-  superadmin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'audit', 'promotions', 'settings'],
-  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'promotions', 'settings'],
+  superadmin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'receivables', 'reports', 'audit', 'promotions', 'settings'],
+  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'receivables', 'reports', 'promotions', 'settings'],
   tecnico: ['dashboard', 'orders', 'inventory', 'customers', 'promotions'],
-  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash', 'promotions']
+  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash', 'receivables', 'promotions']
 }
 
 const roleCapabilities: Record<Role, BackendCapability[]> = {
@@ -131,6 +133,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'assignTechnician',
     'manageLoyalty',
     'settleOrder',
+    'collectReceivables',
     'viewAudit',
     'viewFullAudit',
     'exportAudit',
@@ -164,6 +167,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'assignTechnician',
     'manageLoyalty',
     'settleOrder',
+    'collectReceivables',
     'useAI',
     'applyDiscount',
     'managePromotions',
@@ -176,7 +180,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'exportEvidence'
   ],
   tecnico: ['createOrder', 'diagnoseOrder', 'useAI', 'manageEvidence'],
-  cajero: ['closeCash', 'settleOrder', 'applyDiscount']
+  cajero: ['closeCash', 'settleOrder', 'collectReceivables', 'applyDiscount']
 }
 
 export function can(role: Role, capability: BackendCapability) {

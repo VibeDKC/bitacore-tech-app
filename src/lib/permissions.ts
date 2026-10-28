@@ -18,7 +18,7 @@ export const roleDescriptions: Record<Role, string> = {
   superadmin: 'Acceso total, configuración maestra y acciones destructivas.',
   admin: 'Operación completa, personal base y reportes brutos.',
   tecnico: 'Recepción, diagnóstico y repuestos. Sin costos ni anulaciones.',
-  cajero: 'POS, caja y clientes. Sin costos ni reportes financieros.'
+  cajero: 'POS, caja, clientes y cartera. Sin costos ni reportes financieros.'
 }
 
 const roleModules: Record<Role, ModuleKey[]> = {
@@ -30,14 +30,15 @@ const roleModules: Record<Role, ModuleKey[]> = {
     'customers',
     'purchases',
     'cash',
+    'receivables',
     'reports',
     'audit',
     'promotions',
     'settings'
   ],
-  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'promotions', 'settings'],
+  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'receivables', 'reports', 'promotions', 'settings'],
   tecnico: ['dashboard', 'orders', 'inventory', 'customers', 'promotions'],
-  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash', 'promotions']
+  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash', 'receivables', 'promotions']
 }
 
 const roleCapabilities: Record<Role, Capability[]> = {
@@ -65,6 +66,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'assignTechnician',
     'manageLoyalty',
     'settleOrder',
+    'collectReceivables',
     'authorizeNoCharge',
     'authorizeCredit',
     'viewAudit',
@@ -98,6 +100,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'assignTechnician',
     'manageLoyalty',
     'settleOrder',
+    'collectReceivables',
     'authorizeNoCharge',
     'authorizeCredit',
     'useAI',
@@ -110,7 +113,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'exportEvidence'
   ],
   tecnico: ['createOrder', 'diagnoseOrder', 'useAI', 'manageEvidence'],
-  cajero: ['closeCash', 'settleOrder', 'applyDiscount']
+  cajero: ['closeCash', 'settleOrder', 'collectReceivables', 'applyDiscount']
 }
 
 export function canAccessModule(role: Role, module: ModuleKey) {
@@ -158,6 +161,7 @@ export const capabilityLabels: Record<Capability, string> = {
   assignTechnician: 'Reasignar técnico',
   manageLoyalty: 'Configurar fidelidad',
   settleOrder: 'Cobrar y entregar',
+  collectReceivables: 'Registrar abonos de cartera',
   viewAudit: 'Ver auditoría',
   viewFullAudit: 'Ver auditoría completa',
   exportAudit: 'Exportar auditoría',
@@ -256,6 +260,12 @@ export const moduleCatalog: Array<{
     label: 'Caja',
     description: 'Turnos, arqueo y traslados.',
     capabilities: ['closeCash']
+  },
+  {
+    key: 'receivables',
+    label: 'Cartera',
+    description: 'Créditos, vencimientos y abonos.',
+    capabilities: ['collectReceivables']
   },
   {
     key: 'reports',

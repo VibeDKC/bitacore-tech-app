@@ -32,6 +32,7 @@ export type Capability =
   | 'diagnoseOrder'
   | 'assignTechnician'
   | 'settleOrder'
+  | 'collectReceivables'
   | 'manageLoyalty'
   | 'authorizeNoCharge'
   | 'authorizeCredit'
@@ -124,6 +125,8 @@ export interface Customer {
   loyaltyValidUntil?: string | null
   loyaltyNotes?: string
   creditEnabled?: boolean
+  creditLimit: number
+  creditDays: number
 }
 
 export interface Equipment {
@@ -391,6 +394,21 @@ export interface TechnicianOption {
   name: string
 }
 
+export interface WorkOrderWarranty {
+  days: number
+  startsAt: string
+  until: string
+  daysLeft: number
+  status: 'vigente' | 'por_vencer' | 'vencida'
+}
+
+export interface WorkOrderAbandonment {
+  days: number
+  at: string
+  daysLeft: number
+  atRisk: boolean
+}
+
 export interface WorkOrder {
   id: string
   number: string
@@ -433,6 +451,8 @@ export interface WorkOrder {
   evidenceBytes?: number
   evidenceSetHash?: string | null
   evidenceVerified?: boolean
+  warranty?: WorkOrderWarranty | null
+  abandonment?: WorkOrderAbandonment | null
 }
 
 export type PaymentMethod = 'Efectivo' | 'Transferencia' | 'Tarjeta' | 'Mixto'
@@ -472,6 +492,8 @@ export interface Invoice {
   createdAt?: string
   createdByName?: string
   createdByRole?: string
+  dueDate?: string | null
+  creditAuthorized?: boolean
   incomeAccountName?: string | null
   paymentId?: string | null
   paymentReceipt?: PaymentReceipt | null
@@ -969,6 +991,53 @@ export interface ReportData {
   invoices: Invoice[]
   payments: Payment[]
   permissions: { grossMargin: boolean; netProfit: boolean }
+}
+
+export interface ReceivableRow {
+  invoiceId: string
+  invoiceNumber: string
+  orderId: string
+  orderNumber: string
+  customerId: string
+  customerName: string
+  customerPhone: string
+  total: number
+  paid: number
+  balance: number
+  createdAt: string
+  deliveredAt: string | null
+  dueDate: string
+  daysOverdue: number
+  creditDays: number
+  creditAuthorizedBy: string | null
+  status: 'al_dia' | 'por_vencer' | 'vencida'
+  bucket: 'al_dia' | 'd1_30' | 'd31_60' | 'd61_90' | 'd90'
+}
+
+export interface ReceivablesSummary {
+  total: number
+  overdue: number
+  dueSoon: number
+  current: number
+  count: number
+  overdueCount: number
+  dueSoonCount: number
+  aging: {
+    d1_30: number
+    d31_60: number
+    d61_90: number
+    d90: number
+  }
+}
+
+export interface ReceivablesData {
+  generatedAt: string
+  summary: ReceivablesSummary
+  rows: ReceivableRow[]
+}
+
+export interface ReceivableDetail extends ReceivableRow {
+  payments: Payment[]
 }
 
 export interface StatusSetting {

@@ -12,6 +12,7 @@ import { PromotionsPage } from '@/pages/Promotions'
 import { CustomersPage } from '@/pages/Customers'
 import { PurchasesPage } from '@/pages/Purchases'
 import { CashPage } from '@/pages/Cash'
+import { ReceivablesPage } from '@/pages/Receivables'
 import { ReportsPage } from '@/pages/Reports'
 import { AuditPage } from '@/pages/Audit'
 import { SettingsPage } from '@/pages/Settings'
@@ -107,6 +108,14 @@ export function App() {
           element={
             <ModuleGuard module="cash">
               <CashPage />
+            </ModuleGuard>
+          }
+        />
+        <Route
+          path="cartera"
+          element={
+            <ModuleGuard module="receivables">
+              <ReceivablesPage />
             </ModuleGuard>
           }
         />

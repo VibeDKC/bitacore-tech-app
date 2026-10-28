@@ -895,6 +895,171 @@ function orderPaidTotal(db: Database, orderId: string) {
   return db.get<{ total: number }>('SELECT COALESCE(SUM(amount_cents), 0) AS total FROM payments WHERE order_id = ?', orderId)?.total ?? 0
 }
 
+function customerCreditExposure(db: Database, customerId: string, excludeOrderId = '') {
+  const rows = db.all<any>(
+    `SELECT i.order_id, i.total_cents,
+       COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = i.order_id), 0) AS paid_cents
+     FROM invoices i
+     WHERE i.customer_id = ? AND i.status = 'activa' AND i.credit_authorized = 1`,
+    customerId
+  )
+  return rows.reduce((sum, row) => {
+    if (excludeOrderId && row.order_id === excludeOrderId) return sum
+    return sum + Math.max(Number(row.total_cents) - Number(row.paid_cents), 0)
+  }, 0)
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function parseDateValue(value: unknown) {
+  if (!value) return null
+  const raw = String(value)
+  const normalized = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`
+  const date = new Date(normalized)
+  return Number.isFinite(date.getTime()) ? date : null
+}
+
+function receivableRows(db: Database) {
+  const now = new Date()
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const rows = db.all<any>(
+    `SELECT i.id AS invoice_id, i.number AS invoice_number, i.order_id, i.customer_id,
+            i.customer_name, i.total_cents, i.created_at, i.due_date, i.credit_authorized_by,
+            w.number AS order_number, w.delivered_at,
+            COALESCE(c.phone, '—') AS customer_phone, COALESCE(c.credit_days, 30) AS credit_days,
+            COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.order_id = i.order_id), 0) AS paid_cents
+     FROM invoices i
+     JOIN work_orders w ON w.id = i.order_id
+     LEFT JOIN customers c ON c.id = i.customer_id
+     WHERE i.status = 'activa' AND i.credit_authorized = 1`
+  )
+  return rows
+    .map((row) => {
+      const totalCents = Number(row.total_cents)
+      const paidCents = Number(row.paid_cents)
+      const balanceCents = Math.max(totalCents - paidCents, 0)
+      const creditDays = Math.max(1, Math.min(365, Math.round(Number(row.credit_days ?? 30))))
+      const baseDate =
+        parseDateValue(row.delivered_at) ?? parseDateValue(row.created_at) ?? now
+      const dueDate =
+        parseDateValue(row.due_date) ??
+        new Date(baseDate.getTime() + creditDays * DAY_MS)
+      const dueUtc = Date.UTC(
+        dueDate.getFullYear(),
+        dueDate.getMonth(),
+        dueDate.getDate()
+      )
+      const daysOverdue = Math.floor((todayUtc - dueUtc) / DAY_MS)
+      const status: 'al_dia' | 'por_vencer' | 'vencida' =
+        daysOverdue > 0 ? 'vencida' : daysOverdue >= -7 ? 'por_vencer' : 'al_dia'
+      const bucket: 'al_dia' | 'd1_30' | 'd31_60' | 'd61_90' | 'd90' =
+        daysOverdue <= 0
+          ? 'al_dia'
+          : daysOverdue <= 30
+            ? 'd1_30'
+            : daysOverdue <= 60
+              ? 'd31_60'
+              : daysOverdue <= 90
+                ? 'd61_90'
+                : 'd90'
+      return {
+        invoiceId: String(row.invoice_id),
+        invoiceNumber: String(row.invoice_number),
+        orderId: String(row.order_id),
+        orderNumber: String(row.order_number),
+        customerId: String(row.customer_id ?? ''),
+        customerName: String(row.customer_name ?? ''),
+        customerPhone: String(row.customer_phone ?? '—'),
+        totalCents,
+        paidCents,
+        balanceCents,
+        createdAt: String(row.created_at ?? ''),
+        deliveredAt: row.delivered_at ? String(row.delivered_at) : null,
+        dueDate: dueDate.toISOString(),
+        daysOverdue,
+        creditDays,
+        creditAuthorizedBy: row.credit_authorized_by ? String(row.credit_authorized_by) : null,
+        status,
+        bucket
+      }
+    })
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+}
+
+function receivableDto(row: ReturnType<typeof receivableRows>[number]) {
+  return {
+    invoiceId: row.invoiceId,
+    invoiceNumber: row.invoiceNumber,
+    orderId: row.orderId,
+    orderNumber: row.orderNumber,
+    customerId: row.customerId,
+    customerName: row.customerName,
+    customerPhone: row.customerPhone,
+    total: money(row.totalCents),
+    paid: money(row.paidCents),
+    balance: money(row.balanceCents),
+    createdAt: row.createdAt,
+    deliveredAt: row.deliveredAt,
+    dueDate: row.dueDate,
+    daysOverdue: row.daysOverdue,
+    creditDays: row.creditDays,
+    creditAuthorizedBy: row.creditAuthorizedBy,
+    status: row.status,
+    bucket: row.bucket
+  }
+}
+
+function receivablesPayload(db: Database) {
+  const rows = receivableRows(db).filter((row) => row.balanceCents > 0)
+  const summary = rows.reduce(
+    (acc, row) => {
+      acc.totalCents += row.balanceCents
+      acc.count += 1
+      if (row.status === 'vencida') {
+        acc.overdueCents += row.balanceCents
+        acc.overdueCount += 1
+      } else if (row.status === 'por_vencer') {
+        acc.dueSoonCents += row.balanceCents
+        acc.dueSoonCount += 1
+      }
+      if (row.bucket !== 'al_dia') {
+        acc.aging[row.bucket] += row.balanceCents
+      }
+      return acc
+    },
+    {
+      totalCents: 0,
+      overdueCents: 0,
+      dueSoonCents: 0,
+      count: 0,
+      overdueCount: 0,
+      dueSoonCount: 0,
+      aging: { d1_30: 0, d31_60: 0, d61_90: 0, d90: 0 }
+    }
+  )
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      total: money(summary.totalCents),
+      overdue: money(summary.overdueCents),
+      dueSoon: money(summary.dueSoonCents),
+      current: money(
+        Math.max(summary.totalCents - summary.overdueCents - summary.dueSoonCents, 0)
+      ),
+      count: summary.count,
+      overdueCount: summary.overdueCount,
+      dueSoonCount: summary.dueSoonCount,
+      aging: {
+        d1_30: money(summary.aging.d1_30),
+        d31_60: money(summary.aging.d31_60),
+        d61_90: money(summary.aging.d61_90),
+        d90: money(summary.aging.d90)
+      }
+    },
+    rows: rows.map(receivableDto)
+  }
+}
+
 function loyaltyDiscountFor(customer: any) {
   if (!customer?.loyalty_active) return null
   if (customer.loyalty_valid_until) {
@@ -2396,6 +2561,53 @@ function notificationData(db: Database, session?: Session) {
     })
   }
   if (session) {
+    const modules = effectiveModules(
+      db,
+      session.userId,
+      session.role,
+      session.role !== session.actualRole
+    )
+    if (modules.includes('receivables')) {
+      const overdue = receivableRows(db).filter(
+        (row) => row.balanceCents > 0 && row.status === 'vencida'
+      )
+      if (overdue.length) {
+        const total = overdue.reduce((sum, row) => sum + row.balanceCents, 0)
+        data.push({
+          id: 'receivables-overdue',
+          title: `${overdue.length} factura${overdue.length === 1 ? '' : 's'} vencida${overdue.length === 1 ? '' : 's'} en cartera`,
+          description: `Saldo vencido: ${new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: 'COP',
+            maximumFractionDigits: 0
+          }).format(total / 100)}. Revisa Cartera.`,
+          time: 'Ahora',
+          tone: 'danger'
+        })
+      }
+    }
+    if (modules.includes('orders')) {
+      const legal = db.getSetting<any>('legal_config', { abandonmentDays: 45 })
+      const days = Math.max(1, Math.round(Number(legal?.abandonmentDays ?? 45)))
+      const threshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+      const abandonment = Number(
+        db.get<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM work_orders WHERE status NOT IN ('entregado','no_reparado') AND created_at <= ?",
+          threshold
+        )?.count ?? 0
+      )
+      if (abandonment > 0) {
+        data.push({
+          id: 'orders-abandonment',
+          title: `${abandonment} equipo${abandonment === 1 ? '' : 's'} en riesgo de abandono`,
+          description: `Superaron ${days} días sin entrega. Contacta al cliente o registra el cierre.`,
+          time: 'Ahora',
+          tone: 'warning'
+        })
+      }
+    }
+  }
+  if (session) {
     const transfers = pendingTransfersFor(db, session.userId)
     if (transfers.length) {
       data.push({
@@ -3243,14 +3455,30 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const primaryPhone = phones.find((item) => item.isPrimary)?.phone ?? '—'
       const creditEnabled = Boolean(payload?.creditEnabled)
       if (creditEnabled) requireCap(session, 'manageLoyalty')
+      const creditLimitCents =
+        payload?.creditLimit === undefined
+          ? 0
+          : toCents(
+              numberValue(payload.creditLimit, 'Cupo de crédito', {
+                min: 0,
+                max: 999999999999
+              })
+            )
+      const creditDays =
+        payload?.creditDays === undefined
+          ? 30
+          : Math.round(numberValue(payload.creditDays, 'Días de crédito', { min: 1, max: 365 }))
+      if (payload?.creditLimit !== undefined || payload?.creditDays !== undefined) {
+        requireCap(session, 'manageLoyalty')
+      }
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO customers
             (id, name, document_type, document, phone, email, address, is_final_consumer, is_foreign_document,
              document_missing, loyalty_active, loyalty_discount_type, loyalty_discount_value, loyalty_valid_until,
-             loyalty_notes, credit_enabled, created_at, updated_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?, ?)`,
+             loyalty_notes, credit_enabled, credit_limit_cents, credit_days, created_at, updated_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
           id,
           name,
           documentType,
@@ -3261,6 +3489,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           isForeignDocument ? 1 : 0,
           documentMissing ? 1 : 0,
           creditEnabled ? 1 : 0,
+          creditLimitCents,
+          creditDays,
           nowIso,
           nowIso,
           session.userId
@@ -3338,6 +3568,25 @@ export async function handleRpc(command: string, payload: Payload, token: string
         requireCap(session, 'manageLoyalty')
         updates.push('credit_enabled = ?')
         params.push(payload.creditEnabled ? 1 : 0)
+      }
+      if (payload?.creditLimit !== undefined) {
+        requireCap(session, 'manageLoyalty')
+        updates.push('credit_limit_cents = ?')
+        params.push(
+          toCents(
+            numberValue(payload.creditLimit, 'Cupo de crédito', {
+              min: 0,
+              max: 999999999999
+            })
+          )
+        )
+      }
+      if (payload?.creditDays !== undefined) {
+        requireCap(session, 'manageLoyalty')
+        updates.push('credit_days = ?')
+        params.push(
+          Math.round(numberValue(payload.creditDays, 'Días de crédito', { min: 1, max: 365 }))
+        )
       }
       const loyaltyFields = [
         'loyaltyActive',
@@ -5080,6 +5329,25 @@ export async function handleRpc(command: string, payload: Payload, token: string
         ? Number(existingInvoice.total_cents)
         : subtotalCents - discountCents
       const paidCents = Number(orderPaidTotal(db, row.id))
+      const creditDays = Math.max(
+        1,
+        Math.min(365, Math.round(Number(customer?.credit_days ?? 30)))
+      )
+      const creditDueDate = new Date(Date.now() + creditDays * 24 * 60 * 60 * 1000).toISOString()
+      if (credit && customer) {
+        const limitCents = Number(customer.credit_limit_cents ?? 0)
+        if (limitCents > 0) {
+          const exposureCents = customerCreditExposure(db, customer.id, row.id)
+          const currentBalanceCents = Math.max(totalCents - paidCents, 0)
+          if (exposureCents + currentBalanceCents > limitCents) {
+            fail(
+              `El cupo de crédito del cliente es ${money(limitCents)} y ya tiene ${money(
+                exposureCents
+              )} en cartera. Disponible: ${money(Math.max(limitCents - exposureCents, 0))}.`
+            )
+          }
+        }
+      }
       const method = schema(payload?.method ?? 'Efectivo', z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
       const exceptionReason = noCharge ? text(payload?.exceptionReason, 'Motivo de la excepción', 5, 500) : ''
       const balanceCents = Math.max(totalCents - paidCents, 0)
@@ -5130,9 +5398,10 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
         if (credit && invoice) {
           db.run(
-            'UPDATE invoices SET credit_authorized = 1, credit_authorized_by = ?, credit_authorized_at = ? WHERE id = ?',
+            'UPDATE invoices SET credit_authorized = 1, credit_authorized_by = ?, credit_authorized_at = ?, due_date = ? WHERE id = ?',
             displayUser(session).name,
             nowIso,
+            creditDueDate,
             invoice.id
           )
         }
@@ -5537,6 +5806,125 @@ export async function handleRpc(command: string, payload: Payload, token: string
         paymentId
       )
       return { opened: true }
+    }
+
+    case 'receivables.list': {
+      requireModuleAccess(session, 'receivables')
+      return receivablesPayload(db)
+    }
+
+    case 'receivables.detail': {
+      requireModuleAccess(session, 'receivables')
+      const invoiceId = text(payload?.invoiceId, 'Factura', 1, 80)
+      const row = receivableRows(db).find((item) => item.invoiceId === invoiceId)
+      if (!row) fail('La factura no está en cartera.', 'NOT_FOUND')
+      const payments = db
+        .all<any>(
+          'SELECT * FROM payments WHERE order_id = ? ORDER BY created_at ASC, rowid ASC',
+          row.orderId
+        )
+        .map((payment) => paymentDto(db, payment))
+      return { ...receivableDto(row), payments }
+    }
+
+    case 'receivables.addPayment': {
+      requireModuleAccess(session, 'receivables')
+      requireCap(session, 'collectReceivables')
+      const invoice = db.get<any>(
+        "SELECT * FROM invoices WHERE id = ? AND status = 'activa' AND credit_authorized = 1",
+        text(payload?.invoiceId, 'Factura', 1, 80)
+      )
+      if (!invoice) fail('La factura no está activa en cartera.', 'NOT_FOUND')
+      const order = db.get<any>('SELECT * FROM work_orders WHERE id = ?', invoice.order_id)
+      if (!order) fail('La OT asociada no existe.', 'NOT_FOUND')
+      if (order.status !== 'entregado') {
+        fail('El abono de cartera solo aplica a OTs entregadas.')
+      }
+      const balanceCents = Math.max(
+        Number(invoice.total_cents) - Number(orderPaidTotal(db, order.id)),
+        0
+      )
+      if (balanceCents <= 0) fail('La factura ya está pagada en su totalidad.')
+      const amountCents = toCents(
+        numberValue(payload?.amount, 'Valor del abono', { min: 0.01 })
+      )
+      if (amountCents > balanceCents) {
+        fail(`El abono supera el saldo pendiente (${money(balanceCents)}).`)
+      }
+      const method = schema(
+        payload?.method,
+        z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto'])
+      )
+      assertDigitalReceipt(db, method, payload?.receipt)
+      requireCashSession(db)
+      const number = db.paymentNumber()
+      const id = `pay_${sha256(`${order.id}|${number}|${Date.now()}`).slice(0, 20)}`
+      const incomeAccount =
+        method === 'Efectivo' || method === 'Mixto' ? null : requireIncomeAccount(db)
+      const preparedReceipt = prepareReceiptFromPayload(runtime, id, payload?.receipt)
+      const nowIso = new Date().toISOString()
+      const reference =
+        typeof payload?.reference === 'string' ? payload.reference.trim().slice(0, 160) : ''
+      try {
+        db.tx(() => {
+          db.run(
+            `INSERT INTO payments
+              (id, number, kind, order_id, invoice_id, method, amount_cents, received_cents, change_cents, reference,
+               income_account_id, income_account_name, is_exception, created_by, created_by_name, created_by_role, created_at)
+             VALUES (?, ?, 'saldo', ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?, ?, ?)`,
+            id,
+            number,
+            order.id,
+            invoice.id,
+            method,
+            amountCents,
+            amountCents,
+            reference || null,
+            incomeAccount?.id ?? null,
+            incomeAccount?.name ?? null,
+            session.userId,
+            displayUser(session).name,
+            session.actualRole,
+            nowIso
+          )
+          insertPaymentReceipt(db, session, id, preparedReceipt)
+          if (incomeAccount) {
+            recordAccountMovement(db, session, {
+              accountId: incomeAccount.id,
+              accountName: incomeAccount.name,
+              type: 'ingreso',
+              amountCents,
+              description: `Abono cartera ${invoice.number} · ${order.number} · ${order.customer_name} · ${method}`,
+              referenceType: 'payment',
+              referenceId: id,
+              createdAt: nowIso
+            })
+          }
+          recordCash(db, session, {
+            type: 'ingreso',
+            method,
+            amountCents,
+            reason: `Abono cartera ${invoice.number} · ${order.number} · ${order.customer_name}`,
+            referenceType: 'payment',
+            referenceId: id,
+            createdAt: nowIso
+          })
+          audit(
+            db,
+            session,
+            'Abono a cartera',
+            'Factura',
+            `${invoice.number} · ${order.number} · ${order.customer_name} · ${money(amountCents)} · ${method}${preparedReceipt ? ' · comprobante' : ''}`,
+            invoice.id
+          )
+        })
+      } catch (error) {
+        if (preparedReceipt) {
+          removePaymentReceiptFiles(runtime.userDataPath, [preparedReceipt.relativePath])
+        }
+        throw error
+      }
+      return { paymentId: id, number }
     }
 
     case 'invoices.history': {

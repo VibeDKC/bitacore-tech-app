@@ -86,6 +86,8 @@ export class Database {
     this.ensureColumn('customers', 'loyalty_valid_until', 'TEXT')
     this.ensureColumn('customers', 'loyalty_notes', 'TEXT')
     this.ensureColumn('customers', 'credit_enabled', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('customers', 'credit_limit_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('customers', 'credit_days', 'INTEGER NOT NULL DEFAULT 30')
     this.ensureColumn('suppliers', 'is_foreign_nit', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('work_orders', 'equipment_id', 'TEXT REFERENCES equipment(id)')
     this.ensureColumn('invoices', 'discount_type', "TEXT NOT NULL DEFAULT 'percent'")
@@ -139,6 +141,19 @@ export class Database {
     this.ensureColumn('invoices', 'credit_authorized', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('invoices', 'credit_authorized_by', 'TEXT')
     this.ensureColumn('invoices', 'credit_authorized_at', 'TEXT')
+    this.ensureColumn('invoices', 'due_date', 'TEXT')
+    this.run(
+      "UPDATE invoices SET credit_authorized = 1 WHERE payment_method = 'Crédito' AND credit_authorized = 0"
+    )
+    this.run(
+      `UPDATE invoices
+       SET due_date = strftime(
+         '%Y-%m-%dT%H:%M:%fZ',
+         COALESCE((SELECT delivered_at FROM work_orders w WHERE w.id = invoices.order_id), created_at),
+         '+30 days'
+       )
+       WHERE credit_authorized = 1 AND (due_date IS NULL OR due_date = '')`
+    )
     this.ensureColumn('purchases', 'discount_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'adjustment_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'ai_metadata_json', 'TEXT')
@@ -164,7 +179,7 @@ export class Database {
     }
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }

@@ -75,7 +75,9 @@ export function CustomersPage() {
     loyaltyDiscountType: 'percent' as 'percent' | 'amount',
     loyaltyDiscountValue: '0',
     loyaltyValidUntil: '',
-    loyaltyNotes: ''
+    loyaltyNotes: '',
+    creditLimit: '0',
+    creditDays: '30'
   })
   const [equipmentOpen, setEquipmentOpen] = useState(false)
   const [editingEquipment, setEditingEquipment] = useState<Equipment | null>(null)
@@ -262,7 +264,9 @@ export function CustomersPage() {
       loyaltyDiscountValue: String(selected.loyaltyDiscountValue ?? 0),
       loyaltyValidUntil: selected.loyaltyValidUntil?.slice(0, 10) ?? '',
       loyaltyNotes: selected.loyaltyNotes ?? '',
-      creditEnabled: Boolean(selected.creditEnabled)
+      creditEnabled: Boolean(selected.creditEnabled),
+      creditLimit: String(selected.creditLimit ?? 0),
+      creditDays: String(selected.creditDays ?? 30)
     })
     setEditOpen(true)
   }
@@ -312,6 +316,8 @@ export function CustomersPage() {
         payload.loyaltyValidUntil = editForm.loyaltyValidUntil || null
         payload.loyaltyNotes = editForm.loyaltyNotes.trim()
         payload.creditEnabled = editForm.creditEnabled
+        payload.creditLimit = Number(editForm.creditLimit) || 0
+        payload.creditDays = Math.max(1, Math.min(365, Math.round(Number(editForm.creditDays) || 30)))
       }
       const updated = await api.customers.update(selected.id, payload)
       setData((current) =>
@@ -648,6 +654,14 @@ export function CustomersPage() {
                       Cliente fiel · {selected.loyaltyDiscountType === 'percent'
                         ? `${selected.loyaltyDiscountValue ?? 0}%`
                         : formatCurrency(selected.loyaltyDiscountValue ?? 0)}
+                    </Badge>
+                  ) : null}
+                  {selected.creditEnabled ? (
+                    <Badge variant="danger">
+                      Crédito {selected.creditDays ?? 30} días
+                      {selected.creditLimit
+                        ? ` · cupo ${formatCurrency(selected.creditLimit)}`
+                        : ' · sin límite'}
                     </Badge>
                   ) : null}
                   {selected.orders > 0 ? <Badge variant="brand">{selected.orders} OTs</Badge> : null}
@@ -990,6 +1004,45 @@ export function CustomersPage() {
                   </span>
                 </span>
               </label>
+              {editForm.creditEnabled ? (
+                <div className="mt-3 grid gap-3 rounded-xl border border-line bg-white/70 p-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="field-label">Cupo de crédito (COP)</span>
+                    <input
+                      value={editForm.creditLimit}
+                      onChange={(event) =>
+                        setEditForm({
+                          ...editForm,
+                          creditLimit: event.target.value.replace(/\D/g, '')
+                        })
+                      }
+                      inputMode="numeric"
+                      className="field text-right tabular"
+                      placeholder="0 = sin límite"
+                    />
+                    <span className="mt-1 block text-[9px] text-slate-400">
+                      0 significa sin límite. Se valida antes de autorizar una entrega a crédito.
+                    </span>
+                  </label>
+                  <label className="block">
+                    <span className="field-label">Días de crédito</span>
+                    <input
+                      value={editForm.creditDays}
+                      onChange={(event) =>
+                        setEditForm({
+                          ...editForm,
+                          creditDays: event.target.value.replace(/\D/g, '')
+                        })
+                      }
+                      inputMode="numeric"
+                      className="field text-right tabular"
+                    />
+                    <span className="mt-1 block text-[9px] text-slate-400">
+                      Se usa para calcular el vencimiento en cartera.
+                    </span>
+                  </label>
+                </div>
+              ) : null}
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="field-label">Tipo de descuento</span>

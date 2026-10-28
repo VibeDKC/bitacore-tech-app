@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.16.0 — 2026-10-28
+
+### Cartera
+- Nuevo módulo **Cartera** con saldo total, vencido, por vencer y al día.
+- Distribución de la deuda vencida en rangos de 1–30, 31–60, 61–90 y +90 días.
+- Listado de facturas a crédito con cliente, OT, vencimiento, total, abonado y saldo.
+- Registro de abonos desde cartera con métodos de pago, referencia y comprobante digital.
+- Los abonos entran a caja y quedan vinculados a la factura y a la OT.
+- Recordatorio de saldo por WhatsApp con el detalle de la factura.
+- Exportación CSV con los filtros actuales.
+- Permiso `collectReceivables` para registrar abonos; módulo disponible para administrador, cajero y propietario.
+
+### Crédito de clientes
+- Cupo de crédito por cliente, con 0 como “sin límite”.
+- Días de crédito por cliente para calcular el vencimiento.
+- La entrega a crédito valida el cupo disponible antes de autorizar.
+- La factura a crédito guarda la fecha de vencimiento.
+- La cartera se puede consultar y cobrar después de entregar la OT.
+
+### Taller
+- Estado de garantía por OT entregada: vigente, por vencer o vencida.
+- Pestaña **Garantías** en Órdenes de trabajo con las OT cubiertas.
+- Tarjeta de garantía en el detalle de la OT con vencimiento y días restantes.
+- Riesgo de abandono calculado con los días legales del snapshot de la OT.
+- Aviso de abandono en el detalle y notificación en el panel.
+- Los repuestos conservan su garantía propia.
+
+### Calidad
+- Aceptación 1.16.0: 36/36.
+- Smoke empaquetado 1.16.0: 36/36.
+- Regresión 1.15.0: 44/44.
+- Regresión 1.14.1: 19/19 sin propietario.
+- Regresión 1.14.0: 20/20 base.
+- Regresión 1.13.1: 23/23.
+- Regresión 1.13.0: 30/30.
+- Typecheck y build de app: OK.
+- Migración 17: cupo/días de crédito, vencimiento de facturas y módulo de cartera.
+- Migración 1.16.0 sobre base 1.15: OK.
+
 ## 1.15.0 — 2026-10-28
 
 ### Punto de venta

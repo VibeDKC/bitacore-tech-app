@@ -55,7 +55,7 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/19-contrato-1.15.0.md`, el acta en `docs/actas/1.15.0.md` y los pendientes en `docs/pendientes/1.15.0.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/20-contrato-1.16.0.md`, el acta en `docs/actas/1.16.0.md` y los pendientes en `docs/pendientes/1.16.0.md`.
 
 Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales ya consulta por número y código, sin publicar el código en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
@@ -71,6 +71,21 @@ Desde 1.15.0 el POS permite:
 
 Los servicios manuales aparecen en el comprobante de venta y en el historial, pero no crean productos ni movimientos de inventario. Los PDFs no cambian: el comprobante de diagnóstico inicial de la OT sigue siendo fijo.
 
+## Taller y cartera
+
+Desde 1.16.0 el taller incorpora:
+
+- **Cartera** como módulo propio: saldo total, vencido, por vencer, al día y antigüedad de la deuda.
+- Cupo de crédito y días de crédito por cliente. El cupo se valida al autorizar una entrega a crédito; 0 significa sin límite.
+- Vencimiento automático de cada factura a crédito.
+- Abonos desde Cartera con efectivo, transferencia, tarjeta o mixto; el pago entra a caja y queda vinculado a la factura.
+- Comprobante digital obligatorio también en abonos de cartera cuando la regla está activa.
+- Recordatorio de saldo por WhatsApp y exportación CSV.
+- **Garantías** por OT entregada: vigente, por vencer o vencida, con vencimiento y días restantes.
+- Riesgo de abandono según los días configurados en el snapshot legal de la OT, con aviso en el detalle y notificación en el panel.
+
+La cartera aplica a las entregas a crédito de OT. Las ventas de POS siguen cobrándose con los métodos actuales.
+
 
 ## Primer arranque
 
@@ -85,7 +100,7 @@ La configuración inicial registra la auditoría y genera un respaldo completo. 
 
 La cuenta Propietario no aparece en la lista de usuarios para los administradores. Se usa solo para auditoría y recuperación. Los administradores pueden crear otros administradores, técnicos y cajeros desde **Configuración → Usuarios y roles**.
 
-Si actualizas desde una instalación anterior, la base existente conserva sus usuarios y datos. La migración agrega los módulos de permisos y los códigos de seguimiento sin borrar información. La cuenta raíz existente se migra a las credenciales privadas de 1.14 y pasa a llamarse `propietario` cuando ese usuario está disponible.
+Si actualizas desde una instalación anterior, la base existente conserva sus usuarios y datos. La migración agrega los módulos de permisos, los códigos de seguimiento, la cartera con cupo/días de crédito y los vencimientos sin borrar información. La cuenta raíz existente se migra a las credenciales privadas de 1.14 y pasa a llamarse `propietario` cuando ese usuario está disponible.
 
 ## Datos, evidencias y respaldos
 
@@ -226,7 +241,9 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.14.0` | Superadmin oculto, primer admin, administradores y permisos por módulos. |
 | `npm run test:acceptance:1.14.1` | Facturación, entrega, crédito, reportes, purga y seguimiento por hash. |
 | `npm run test:acceptance:1.15.0` | Servicios manuales, cliente rápido, atajos del POS y comprobante digital obligatorio. |
+| `npm run test:acceptance:1.16.0` | Cartera, cupo de crédito, vencimientos, abonos, garantías y abandono. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
+| `npm run test:migration:1.16.0` | Migración 17 de cartera, cupo de crédito y vencimientos sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
@@ -261,6 +278,7 @@ npm run test:acceptance:1.13.1
 npm run test:acceptance:1.14.0
 npm run test:acceptance:1.14.1
 npm run test:acceptance:1.15.0
+npm run test:acceptance:1.16.0
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -272,9 +290,10 @@ npm run test:migration:1.10.2
 npm run test:migration:1.10.3
 npm run test:migration:1.11.0
 npm run test:migration:1.12.0
+npm run test:migration:1.16.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22` y `44/44`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44` y `36/36`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -282,7 +301,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.15.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.16.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -295,6 +314,10 @@ El instalador queda en `release/` como `BitacoreTech-1.15.0-x64.exe`. La configu
 - Las ventas no llevan IVA; las compras sí aplican IVA del 19 %.
 - Los servicios manuales del POS no crean productos ni mueven stock; se guardan como líneas `servicio` con `product_id = NULL`.
 - El comprobante en pagos digitales es configurable y, cuando está activo, exige adjunto en Transferencia y Tarjeta. Está desactivado por defecto.
+- La cartera agrupa las facturas de OT entregadas a crédito; el cupo por cliente se valida antes de autorizar y 0 significa sin límite.
+- Los abonos de cartera usan los mismos métodos de pago que la caja y respetan la regla de comprobante digital.
+- La garantía de una OT entregada se calcula con los días del snapshot legal; los repuestos conservan su garantía individual.
+- El riesgo de abandono se calcula con los días del snapshot legal y se muestra en la OT y en las notificaciones.
 - No se emiten facturas electrónicas DIAN.
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
 - El inventario permite editar referencias solo a administradores y propietario; el stock se mueve mediante ajustes auditados.

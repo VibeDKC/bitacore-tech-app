@@ -23,12 +23,13 @@ import { api } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { SearchInput, Select } from '@/components/ui/Input'
 import { WorkOrderStatusBadge } from '@/components/ui/StatusBadge'
 import { SegmentedTabs } from '@/components/ui/Tabs'
 import { cn } from '@/lib/utils'
 
-type OrderTab = 'todas' | 'abiertas' | 'diagnostico' | 'listas' | 'cerradas'
+type OrderTab = 'todas' | 'abiertas' | 'diagnostico' | 'listas' | 'cerradas' | 'garantias'
 
 export function OrdersPage() {
   const { role } = useAuth()
@@ -67,7 +68,11 @@ export function OrdersPage() {
         (order) =>
           !['entregado', 'no_reparado'].includes(order.status) &&
           new Date(order.promisedAt).getTime() < now
-      ).length
+      ).length,
+      warranties: orders.filter(
+        (order) => order.warranty && order.warranty.status !== 'vencida'
+      ).length,
+      abandonment: orders.filter((order) => order.abandonment?.atRisk).length
     }),
     [orders, now]
   )
@@ -80,7 +85,10 @@ export function OrdersPage() {
         (tab === 'abiertas' && !['entregado', 'no_reparado'].includes(order.status)) ||
         (tab === 'diagnostico' && order.status === 'diagnostico') ||
         (tab === 'listas' && order.status === 'listo') ||
-        (tab === 'cerradas' && ['entregado', 'no_reparado'].includes(order.status))
+        (tab === 'cerradas' && ['entregado', 'no_reparado'].includes(order.status)) ||
+        (tab === 'garantias' &&
+          Boolean(order.warranty) &&
+          order.warranty?.status !== 'vencida')
       const matchesTech = technician === 'Todos' || order.technician === technician
       const matchesQuery =
         !term ||
@@ -152,6 +160,11 @@ export function OrdersPage() {
         description="Recepción, diagnóstico y entrega de cada equipo con trazabilidad completa."
         actions={
           <>
+            {counts.abandonment > 0 ? (
+              <Badge variant="danger" dot>
+                {counts.abandonment} en riesgo de abandono
+              </Badge>
+            ) : null}
             <Button
               variant="secondary"
               size="md"
@@ -198,7 +211,8 @@ export function OrdersPage() {
               { value: 'abiertas', label: 'Abiertas', count: counts.open },
               { value: 'diagnostico', label: 'Diagnóstico', count: counts.diagnostic },
               { value: 'listas', label: 'Listas', count: counts.ready },
-              { value: 'cerradas', label: 'Cerradas' }
+              { value: 'cerradas', label: 'Cerradas' },
+              { value: 'garantias', label: 'Garantías', count: counts.warranties }
             ]}
           />
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -272,6 +286,25 @@ export function OrdersPage() {
                     <td className="table-td truncate text-[11px]">{order.technician}</td>
                     <td className="table-td">
                       <WorkOrderStatusBadge status={order.status} />
+                      {order.warranty ? (
+                        <p
+                          className={cn(
+                            'mt-1 text-[9px] font-semibold',
+                            order.warranty.status === 'vencida'
+                              ? 'text-slate-400'
+                              : order.warranty.status === 'por_vencer'
+                                ? 'text-warning-600'
+                                : 'text-success-600'
+                          )}
+                        >
+                          Garantía hasta {formatShortDate(order.warranty.until)}
+                        </p>
+                      ) : null}
+                      {order.abandonment?.atRisk ? (
+                        <p className="mt-1 text-[9px] font-semibold text-danger-600">
+                          Riesgo de abandono
+                        </p>
+                      ) : null}
                     </td>
                     <td className="table-td">
                       <p className="text-[10px] text-slate-500">Ing. {formatShortDate(order.createdAt)}</p>

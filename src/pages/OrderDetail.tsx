@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Banknote,
@@ -41,7 +42,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { canCancelWorkOrder, nextWorkOrderStatus, workOrderStatusConfig, workOrderStatusOrder } from '@/lib/status'
 import { lineTotal } from '@/lib/orders'
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
+import { formatCurrency, formatDate, formatDateTime, formatShortDate } from '@/lib/format'
 import { api, errorMessage } from '@/lib/backend'
 import { useApi } from '@/lib/useApi'
 import { defaultLegalConfig } from '@/lib/legalConfig'
@@ -811,6 +812,21 @@ export function OrderDetailPage() {
         </div>
       </div>
 
+      {order.abandonment?.atRisk ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-warning-200 bg-warning-50/70 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-600" />
+          <div>
+            <p className="text-[11px] font-semibold text-warning-800">
+              Equipo en riesgo de abandono
+            </p>
+            <p className="mt-0.5 text-[10px] leading-relaxed text-warning-700">
+              Superó {order.abandonment.days} días desde el ingreso. Contacta al cliente o
+              registra el cierre de la OT.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <div className="card overflow-hidden">
         <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between lg:p-6">
           <div className="flex items-start gap-4">
@@ -1441,6 +1457,40 @@ export function OrderDetailPage() {
                     <span>Fecha de entrega</span>
                     <span className="font-semibold text-ink">{formatDateTime(order.deliveredAt ?? order.settlement.paidAt)}</span>
                   </div>
+                  {order.warranty ? (
+                    <div className="rounded-xl border border-line bg-slate-50/60 px-3.5 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                          Garantía del servicio
+                        </p>
+                        <Badge
+                          variant={
+                            order.warranty.status === 'vencida'
+                              ? 'neutral'
+                              : order.warranty.status === 'por_vencer'
+                                ? 'warning'
+                                : 'success'
+                          }
+                          dot
+                        >
+                          {order.warranty.status === 'vencida'
+                            ? 'Vencida'
+                            : order.warranty.status === 'por_vencer'
+                              ? 'Por vencer'
+                              : 'Vigente'}
+                        </Badge>
+                      </div>
+                      <p className="mt-1.5 text-[11px] font-semibold text-ink">
+                        Vence {formatShortDate(order.warranty.until)}
+                      </p>
+                      <p className="mt-0.5 text-[9px] text-slate-400">
+                        {order.warranty.days} días desde la entrega
+                        {order.warranty.daysLeft >= 0
+                          ? ` · ${order.warranty.daysLeft} día${order.warranty.daysLeft === 1 ? '' : 's'} restante${order.warranty.daysLeft === 1 ? '' : 's'}`
+                          : ` · vencida hace ${Math.abs(order.warranty.daysLeft)} día${Math.abs(order.warranty.daysLeft) === 1 ? '' : 's'}`}
+                      </p>
+                    </div>
+                  ) : null}
                   {order.settlement.exceptionReason ? (
                     <div className="rounded-xl border border-warning-100 bg-warning-50/70 px-3 py-2.5">
                       <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-warning-700">Motivo de la excepción</p>

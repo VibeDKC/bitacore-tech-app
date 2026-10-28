@@ -42,6 +42,8 @@ import type {
   CatalogConnectionResult,
   Purchase,
   PurchaseReviewInput,
+  ReceivableDetail,
+  ReceivablesData,
   ReportData,
   Role,
   SaleReceipt,
@@ -539,6 +541,26 @@ export const api = {
     },
     openReceipt(paymentId: string) {
       return rpc<{ opened: boolean }>('payments.openReceipt', { paymentId })
+    }
+  },
+  receivables: {
+    list() {
+      return rpc<ReceivablesData>('receivables.list')
+    },
+    detail(invoiceId: string) {
+      return rpc<ReceivableDetail>('receivables.detail', { invoiceId })
+    },
+    addPayment(input: {
+      invoiceId: string
+      amount: number
+      method: PaymentMethod
+      reference?: string
+      receipt?: { dataUrl: string; name: string; mimeType: string }
+    }) {
+      return rpc<{ paymentId: string; number: string }>(
+        'receivables.addPayment',
+        input as unknown as Record<string, unknown>
+      )
     }
   },
   purchases: {
