@@ -67,6 +67,14 @@ function parsePrice(value) {
   return Number(value.replace(/[^\d]/g, ''))
 }
 
+function formatPrice(value) {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0
+  }).format(value)
+}
+
 async function assertNoOverflow(page, label) {
   const overflow = await page.evaluate(() =>
     Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) -
@@ -131,13 +139,12 @@ async function main() {
     assert.ok(catalog.featured.every((id) => catalog.products.some((product) => product.id === id)))
     assert.ok(catalog.featured.includes(catalog.heroProductId))
   })
-  checkData('3 promociones demo con precio válido', () => {
+  checkData('promociones publicadas válidas', () => {
     const promotions = catalog.products.filter((product) => product.promotion)
-    assert.equal(promotions.length, 3)
     for (const product of promotions) {
-      assert.equal(product.promotion.demo, true)
       assert.ok(product.price > 0)
       assert.ok(product.regularPrice > product.price)
+      assert.ok(['percent', 'amount'].includes(product.promotion.type))
       const expected =
         product.promotion.type === 'percent'
           ? Math.round((product.regularPrice * (100 - product.promotion.value)) / 100)
@@ -234,8 +241,13 @@ async function main() {
       const heroText = await page.locator('.hero-text').innerText()
       assert.doesNotMatch(heroText, /envío|entrega|domicilio/i)
       assert.match(heroText, /atención presencial/i)
-      assert.match(await page.locator('.hero-product-name').innerText(), /KZ Castor Bass/i)
-      assert.match(await page.locator('.hero-kicker').innerText(), /^Promoción$/i)
+      const heroProduct = catalog.products.find((product) => product.id === catalog.heroProductId)
+      assert.ok(heroProduct)
+      assert.equal((await page.locator('.hero-product-name').innerText()).trim(), heroProduct.name)
+      assert.equal(
+        (await page.locator('.hero-kicker').innerText()).trim().toLowerCase(),
+        heroProduct.promotion ? 'promoción' : 'destacado'
+      )
       assert.match(await page.locator('.hero-guarantee').innerText(), /Garantía 30 días/i)
       assert.match(await page.locator('.hero-carousel-count').innerText(), /1 \/ 9/)
     })
@@ -290,7 +302,7 @@ async function main() {
       )
     })
 
-    await check('Hero: 9 productos únicos, 3 promociones y 6 destacados', async () => {
+    await check('Hero: 9 productos únicos y etiquetas válidas', async () => {
       const dots = page.locator('.hero-carousel-dots button')
       assert.equal(await dots.count(), 9)
       const names = []
@@ -299,12 +311,16 @@ async function main() {
         await dots.nth(itemIndex).click()
         await page.waitForTimeout(80)
         names.push((await page.locator('.hero-product-name').innerText()).trim())
-        labels.push((await page.locator('.hero-kicker').innerText()).trim())
+        labels.push((await page.locator('.hero-kicker').innerText()).trim().toLowerCase())
       }
       assert.equal(new Set(names).size, 9)
-      assert.match(names[0], /KZ Castor Bass/i)
-      assert.equal(labels.filter((label) => /^Promoción$/i.test(label)).length, 3)
-      assert.equal(labels.filter((label) => /^Destacado$/i.test(label)).length, 6)
+      assert.ok(labels.every((label) => label === 'promoción' || label === 'destacado'))
+      assert.equal(
+        labels.filter((label) => label === 'promoción').length,
+        catalog.products.filter(
+          (product) => product.promotion && catalog.featured.includes(product.id)
+        ).length
+      )
       assert.match(await page.locator('.hero-carousel-count').innerText(), /9 \/ 9/)
       await dots.first().click()
       await page.waitForTimeout(100)
@@ -405,10 +421,16 @@ async function main() {
       const sort = page.locator('.catalog-toolbar select').nth(1)
       await sort.selectOption('price-asc')
       await page.waitForTimeout(150)
-      assert.equal(parsePrice(await page.locator('.product-card .product-price').first().innerText()), 3800)
+      assert.equal(
+        parsePrice(await page.locator('.product-card .product-price').first().innerText()),
+        Math.min(...catalog.products.map((product) => product.price))
+      )
       await sort.selectOption('price-desc')
       await page.waitForTimeout(150)
-      assert.equal(parsePrice(await page.locator('.product-card .product-price').first().innerText()), 180000)
+      assert.equal(
+        parsePrice(await page.locator('.product-card .product-price').first().innerText()),
+        Math.max(...catalog.products.map((product) => product.price))
+      )
     })
 
     await check('Catálogo: parámetros de URL', async () => {
@@ -422,35 +444,62 @@ async function main() {
     await waitForCount(page, '.product-card', 39)
     await page.screenshot({ path: path.join(shotsDir, '02-catalogo-desktop.png') })
 
-    await check('Ficha con promoción fija', async () => {
-      await goto('/producto/power-bank-adata-c100-10000mah-tipo-c-negro')
+    const fixedPromoProduct = catalog.products.find(
+      (product) => product.promotion?.type === 'amount'
+    )
+    const percentPromoProduct = catalog.products.find(
+      (product) => product.promotion?.type === 'percent'
+    )
+    const regularProduct = catalog.products.find((product) => !product.promotion && product.image)
+
+    await check('Ficha: promoción fija o precio regular', async () => {
+      const sample = fixedPromoProduct ?? regularProduct
+      assert.ok(sample)
+      await goto(`/producto/${sample.slug}`)
       await page.locator('.detail-title').waitFor()
-      assert.match(await page.locator('.detail-title').innerText(), /Power Bank Adata/i)
-      assert.match(await page.locator('.detail-price-old').innerText(), /60\.000/)
-      assert.match(await page.locator('.detail-price').innerText(), /50\.000/)
-      assert.match(await page.locator('.detail-promo').innerText(), /10\.000/)
-      assert.match(await page.locator('.detail-stock').innerText(), /Última unidad/i)
+      assert.equal((await page.locator('.detail-title').innerText()).trim(), sample.name)
+      assert.match(await page.locator('.detail-price').innerText(), new RegExp(formatPrice(sample.price).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      if (sample.promotion) {
+        assert.match(
+          await page.locator('.detail-price-old').innerText(),
+          new RegExp(formatPrice(sample.regularPrice).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        )
+        assert.match(await page.locator('.detail-promo').innerText(), new RegExp(sample.promotion.badge.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      } else {
+        assert.equal(await page.locator('.detail-price-old').count(), 0)
+        assert.equal(await page.locator('.detail-promo').count(), 0)
+      }
+      assert.match(await page.locator('.detail-stock').innerText(), /Última unidad|Pocas unidades|Disponible/i)
       const facts = await page.locator('.detail-facts').innerText()
       assert.match(facts, /Nuevo/)
       assert.match(facts, /30 días/)
-      assert.match(facts, /PB-ADAT-C100-10K/)
+      assert.match(facts, new RegExp(sample.sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
       const href = await page.getByRole('link', { name: /Solicitar cotización/i }).getAttribute('href')
       assert.match(href, /^https:\/\/wa\.me\/573246381768\?text=/)
       const message = decodeURIComponent(href.split('?text=')[1])
-      assert.match(message, /Power Bank Adata/i)
-      assert.match(message, /Precio promocional/i)
-      assert.match(message, /50\.000/)
+      assert.match(message, new RegExp(sample.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(message, sample.promotion ? /Precio promocional/i : /Precio:/i)
       assert.ok((await page.locator('.related-section .product-card').count()) >= 2)
     })
 
     await page.screenshot({ path: path.join(shotsDir, '03-ficha-promo-desktop.png') })
 
-    await check('Ficha con promoción porcentual', async () => {
-      await goto('/producto/disco-ssd-sata-green-512gb-2-5')
+    await check('Ficha: promoción porcentual o sin promoción', async () => {
+      const sample = percentPromoProduct ?? regularProduct
+      assert.ok(sample)
+      await goto(`/producto/${sample.slug}`)
       await page.locator('.detail-title').waitFor()
-      assert.match(await page.locator('.detail-price-old').innerText(), /200\.000/)
-      assert.match(await page.locator('.detail-price').innerText(), /180\.000/)
-      assert.match(await page.locator('.detail-promo').innerText(), /10%/)
+      if (sample.promotion) {
+        assert.match(
+          await page.locator('.detail-price-old').innerText(),
+          new RegExp(formatPrice(sample.regularPrice).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        )
+        assert.match(await page.locator('.detail-price').innerText(), new RegExp(formatPrice(sample.price).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+        assert.match(await page.locator('.detail-promo').innerText(), new RegExp(sample.promotion.badge.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      } else {
+        assert.equal(await page.locator('.detail-price-old').count(), 0)
+        assert.equal(await page.locator('.detail-promo').count(), 0)
+      }
     })
 
     await check('Ficha sin foto usa placeholder', async () => {

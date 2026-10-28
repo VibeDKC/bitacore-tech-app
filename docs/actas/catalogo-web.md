@@ -1,5 +1,7 @@
 # Acta — Demo de catálogo web (F6)
 
+> **Actualización 1.12.0:** las promociones demo fueron reemplazadas por promociones reales y el catálogo se publica localmente desde la app. Ver `docs/actas/1.12.0.md`.
+
 | Dato | Valor |
 | --- | --- |
 | Fecha | 27 de octubre de 2026 |

@@ -6,7 +6,7 @@ Este archivo registra lo que queda fuera de la demo local del catálogo web y lo
 
 ## Promociones reales
 
-La web solo tiene tres promociones de demostración generadas por el exportador. Falta el módulo real en OCTESTR:
+La app ya tiene el módulo real de promociones (1.12.0) y la web consume solo promociones activas, vigentes y publicadas. Queda pendiente:
 
 - Alcance por SKU, por categoría o para todo el catálogo.
 - Descuento por porcentaje o monto fijo.
@@ -18,7 +18,7 @@ La web solo tiene tres promociones de demostración generadas por el exportador.
 - Historial y auditoría de cambios.
 - Regla de precio anterior y vigencia visible en la ficha.
 
-Mientras no exista el módulo, las promociones de la demo no deben interpretarse como precios comerciales.
+Las promociones demo fueron eliminadas. La base real no tiene promociones cargadas al cierre de 1.12.0; se crean desde la app.
 
 ## Más vendidos y carrusel del hero
 
@@ -32,30 +32,35 @@ Regla definida para cuando exista el módulo:
 - Si ninguna referencia cumple, no se inventan slides de “Más vendido”; quedan promociones y destacados.
 - Se necesita vincular las ventas al `product_id`. Hoy `invoice_items.product_id` está nulo y `stock_movements` solo tiene carga inicial.
 - Falta definir si el carrusel sincroniza **promociones + destacados** o **solo promociones**. Esa opción debe vivir en el módulo de promociones; si la integración no lo permite, se ignora.
-- No publicar el carrusel con promociones demo como si fueran comerciales.
+- No publicar promociones inactivas, vencidas o no marcadas para web.
 
-Secuencia recomendada: cerrar la demo, resolver sincronización y hosting, montar promociones + regla de 30 días y publicar con datos reales. Si se necesita lanzar antes, publicar solo catálogo sin promociones.
+Secuencia recomendada: cerrar 1.12 (promociones + publicación local), resolver la sincronización remota y el hosting en 1.13, implementar la regla de más vendidos y publicar con datos reales. Si se necesita lanzar antes, publicar solo catálogo sin promociones.
 
 ## Sincronización catálogo ↔ base
 
-Hoy el catálogo es un snapshot manual:
+En 1.12.0 la app publica el snapshot local (manual o automático) en la carpeta configurada. También queda el comando manual:
 
 ```bash
 cd web
 npm run export:catalog
 ```
 
-Falta:
+Hecho:
 
-- Automatizar la exportación al publicar cambios de inventario.
-- Definir si la fuente será la base local, Supabase o una API.
-- Subir imágenes al publicar y servir URLs remotas o firmadas.
-- Resolver el nombre de archivo de imagen: hoy siempre se copia como `.jpg`, aunque el origen sea PNG/WebP.
-- Limpiar imágenes huérfanas cuando un producto se elimina o cambia de foto.
-- Evitar que los slugs cambien si se edita el nombre del producto.
-- Validar que el snapshot tenga las 39 referencias esperadas, los 3 destacados por categoría y las 3 promociones demo.
-- Mantener las OT demo o reemplazarlas por datos anonimizados estables.
+- Publicación local automática después de cambios de inventario, compras, ventas, OT y promociones.
+- Exclusión de servicios, inactivos, insumos de taller, `publish_web = 0` y SKU de prueba.
+- Imágenes copiadas y archivos huérfanos eliminados.
+- Extensiones de imagen preservadas.
+- Estado de publicación y aviso a administradores.
+
+Falta para 1.13:
+
+- Sincronización remota con Supabase/Vercel.
+- Subir imágenes a Storage y servir URLs remotas.
+- Resolver slugs estables si se edita el nombre.
+- Validar el snapshot contra Supabase y manejar reintentos sin internet.
 - Publicar solo campos autorizados: hoy se incluyen stock exacto, ids internos y fechas de creación/actualización.
+- Reemplazar la web estática de MTO APP y definir carrito.
 
 ## Publicación real
 

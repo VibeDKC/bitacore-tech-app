@@ -33,6 +33,10 @@ import type {
   Payment,
   PaymentMethod,
   Product,
+  Promotion,
+  PromotionInput,
+  PromotionPreview,
+  CatalogSyncStatus,
   Purchase,
   PurchaseReviewInput,
   ReportData,
@@ -417,6 +421,40 @@ export const api = {
       }>('evidence.export', { orderId })
     }
   },
+  promotions: {
+    list() {
+      return rpc<Promotion[]>('promotions.list')
+    },
+    preview(input: PromotionInput) {
+      return rpc<PromotionPreview>('promotions.preview', input as unknown as Record<string, unknown>)
+    },
+    create(input: PromotionInput) {
+      return rpc<Promotion>('promotions.create', input as unknown as Record<string, unknown>)
+    },
+    update(input: PromotionInput) {
+      return rpc<Promotion>('promotions.update', input as unknown as Record<string, unknown>)
+    },
+    toggle(id: string, active: boolean) {
+      return rpc<Promotion>('promotions.toggle', { id, active })
+    },
+    publishWeb(id: string, publishWeb: boolean) {
+      return rpc<Promotion>('promotions.publishWeb', { id, publishWeb })
+    },
+    remove(id: string) {
+      return rpc<{ deleted: boolean }>('promotions.delete', { id })
+    }
+  },
+  catalog: {
+    status() {
+      return rpc<CatalogSyncStatus>('catalog.status')
+    },
+    publish() {
+      return rpc<{ ok: boolean; status: CatalogSyncStatus; error?: string }>('catalog.publish')
+    },
+    chooseFolder() {
+      return rpc<{ canceled: boolean; status?: CatalogSyncStatus }>('catalog.chooseFolder')
+    }
+  },
   pos: {
     sell(input: PosSaleInput) {
       return rpc<{ invoice: Invoice; receipt: SaleReceipt }>('pos.sell', input as unknown as Record<string, unknown>)
@@ -542,7 +580,7 @@ export const api = {
       return rpc<SettingsData>('settings.get')
     },
     updateSection(
-      section: 'print' | 'ai' | 'security' | 'business' | 'equipment' | 'messages' | 'tracking',
+      section: 'print' | 'ai' | 'security' | 'business' | 'equipment' | 'messages' | 'tracking' | 'catalog',
       value: Record<string, unknown>
     ) {
       return rpc<SettingsData>('settings.updateSection', { section, value })

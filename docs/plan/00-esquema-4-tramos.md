@@ -20,7 +20,7 @@
 
 > Los Tramos 1 y 2 se ejecutaron en una misma sesión. El release 1.3.0 incluye ambos; el release 1.4.0 cierra F4/F5 con catálogo de equipos, permisos por usuario, NIT, fidelidad y respaldos cifrados.
 >
-> **F6 — Catálogo web:** demo local en `web/` con contrato en `docs/plan/14-contrato-catalogo-web.md` y acta en `docs/actas/catalogo-web.md`. No cierra el Tramo 4.
+> **F6 — Catálogo web:** demo local en `web/` con contrato en `docs/plan/14-contrato-catalogo-web.md` y acta en `docs/actas/catalogo-web.md`. En 1.12.0 se integraron promociones reales y publicación local (`docs/plan/15-contrato-1.12.0.md`). No cierra el Tramo 4.
 
 ## 1. Objetivo
 

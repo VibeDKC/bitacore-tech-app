@@ -78,6 +78,7 @@ const emptyProductForm = {
   warrantyDays: '90',
   rotation: 'rotativo' as ProductRotation,
   alertEnabled: true,
+  publishWeb: true,
   service: false,
   serviceType: '',
   imageDataUrl: null as string | null,
@@ -242,6 +243,7 @@ export function InventoryPage() {
         warrantyDays: Number(form.warrantyDays) || 0,
         rotation: form.rotation,
         alertEnabled: form.alertEnabled,
+        publishWeb: form.publishWeb,
         service: form.service,
         serviceType: form.service ? form.serviceType || undefined : undefined,
         imageDataUrl: form.imageDataUrl || undefined,
@@ -282,6 +284,7 @@ export function InventoryPage() {
       warrantyDays: String(product.warrantyDays),
       rotation: product.rotation,
       alertEnabled: product.alertEnabled,
+      publishWeb: product.publishWeb,
       service: Boolean(product.service),
       serviceType: product.serviceType ?? '',
       imageDataUrl: null,
@@ -324,6 +327,7 @@ export function InventoryPage() {
         warrantyDays: Number(editForm.warrantyDays) || 0,
         rotation: editForm.rotation,
         alertEnabled: editForm.alertEnabled,
+        publishWeb: editForm.publishWeb,
         service: editForm.service,
         serviceType: editForm.service ? editForm.serviceType || undefined : undefined,
         imageDataUrl: editForm.imageDataUrl || undefined,
@@ -994,7 +998,8 @@ export function InventoryPage() {
                     category: service && categoryOptions.includes('Servicios') ? 'Servicios' : form.category,
                     stock: service ? '0' : form.stock,
                     minStock: service ? '0' : form.minStock,
-                    alertEnabled: service ? false : form.alertEnabled
+                    alertEnabled: service ? false : form.alertEnabled,
+                    publishWeb: service ? false : form.publishWeb
                   })
                 }}
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
@@ -1062,6 +1067,18 @@ export function InventoryPage() {
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
               />
               <span className="text-[11px] font-semibold text-ink">Generar alerta de stock</span>
+            </span>
+          </label>
+          <label className="flex items-end">
+            <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={form.publishWeb}
+                disabled={form.service}
+                onChange={(event) => setForm({ ...form, publishWeb: event.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
+              />
+              <span className="text-[11px] font-semibold text-ink">Publicar en catálogo web</span>
             </span>
           </label>
           <label className="block">
@@ -1226,7 +1243,8 @@ export function InventoryPage() {
                     service,
                     serviceType: service ? editForm.serviceType : '',
                     category: service && categoryOptions.includes('Servicios') ? 'Servicios' : editForm.category,
-                    alertEnabled: service ? false : editForm.alertEnabled
+                    alertEnabled: service ? false : editForm.alertEnabled,
+                    publishWeb: service ? false : editForm.publishWeb
                   })
                 }}
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
@@ -1295,6 +1313,18 @@ export function InventoryPage() {
                 className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
               />
               <span className="text-[11px] font-semibold text-ink">Generar alerta de stock</span>
+            </span>
+          </label>
+          <label className="flex items-end">
+            <span className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-line px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={editForm.publishWeb}
+                disabled={editForm.service}
+                onChange={(event) => setEditForm({ ...editForm, publishWeb: event.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
+              />
+              <span className="text-[11px] font-semibold text-ink">Publicar en catálogo web</span>
             </span>
           </label>
           <label className="block">

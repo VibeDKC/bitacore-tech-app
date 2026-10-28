@@ -14,6 +14,7 @@ import {
   EyeOff,
   FileText,
   Fingerprint,
+  Globe2,
   KeyRound,
   LockKeyhole,
   MessageCircle,
@@ -50,10 +51,11 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Modal } from '@/components/ui/Modal'
 import { DictionariesPanel } from '@/components/settings/DictionariesPanel'
 import { MessagesPanel } from '@/components/settings/MessagesPanel'
+import { CatalogSyncPanel } from '@/components/settings/CatalogSyncPanel'
 import { DEFAULT_MESSAGES, type MessageTemplates } from '@/types'
 import { cn } from '@/lib/utils'
 
-type SettingsTab = 'negocio' | 'usuarios' | 'diccionarios' | 'impresion' | 'mensajes' | 'respaldos' | 'ia' | 'seguridad'
+type SettingsTab = 'negocio' | 'usuarios' | 'diccionarios' | 'impresion' | 'mensajes' | 'catalogo' | 'respaldos' | 'ia' | 'seguridad'
 type PrintFormat = 'a4' | '80mm' | '58mm'
 
 const tabs: Array<{ value: SettingsTab; label: string; description: string; icon: typeof Store }> = [
@@ -62,6 +64,7 @@ const tabs: Array<{ value: SettingsTab; label: string; description: string; icon
   { value: 'diccionarios', label: 'Diccionarios', description: 'Catálogos y desplegables', icon: BookOpen },
   { value: 'impresion', label: 'Impresión', description: 'Formatos y comprobantes', icon: Printer },
   { value: 'mensajes', label: 'Mensajes', description: 'WhatsApp y reportes', icon: MessageCircle },
+  { value: 'catalogo', label: 'Catálogo web', description: 'Publicación local', icon: Globe2 },
   { value: 'respaldos', label: 'Respaldos', description: 'Backup y restauración', icon: DatabaseBackup },
   { value: 'ia', label: 'IA y API', description: 'Facturas y modelos', icon: Sparkles },
   { value: 'seguridad', label: 'Seguridad', description: 'Acceso y protección', icon: ShieldCheck }
@@ -2414,6 +2417,8 @@ export function SettingsPage() {
               </div>
             </>
           ) : null}
+
+          {tab === 'catalogo' ? <CatalogSyncPanel /> : null}
         </div>
       </div>
 

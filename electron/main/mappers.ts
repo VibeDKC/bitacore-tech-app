@@ -3,6 +3,7 @@ import { productImageUrl } from './productImages'
 import { paymentReceiptUrl } from './paymentReceipts'
 import { evidenceDto, evidenceSetHash } from './evidence'
 import { calculateNitDv } from './nit'
+import { resolvePromotionForProductRow } from './promotions'
 
 export const money = (cents: number | null | undefined) => Math.round(Number(cents ?? 0)) / 100
 export const toCents = (value: number | null | undefined) => Math.round(Number(value ?? 0) * 100)
@@ -145,6 +146,8 @@ export function productDto(db: Database, row: any, includeCost = true) {  const 
     service: bool(row.is_service),
     serviceType: row.service_type ?? null,
     alertEnabled: row.alert_enabled === undefined ? true : bool(row.alert_enabled),
+    publishWeb: row.publish_web === undefined ? true : bool(row.publish_web),
+    promotion: resolvePromotionForProductRow(db, row),
     rotation: row.rotation === 'no_rotativo' || row.rotation === 'prueba' ? row.rotation : 'rotativo',
     iconKey: categoryIconKey(row.category),
     tone: categoryTone(row.category)
@@ -219,6 +222,9 @@ export function invoiceDto(db: Database, row: any, includeCustomer = true) {
       description: line.description,
       quantity: Number(line.quantity),
       unitPrice: money(line.unit_price_cents),
+      originalUnitPrice: money(line.original_unit_price_cents || line.unit_price_cents),
+      promotionName: line.promotion_name ?? null,
+      promotionDiscount: money(line.promotion_discount_cents || 0),
       lineTotal: money(line.line_total_cents),
       note: line.note ?? null,
       itemType: line.item_type === 'servicio' ? 'servicio' : 'producto'

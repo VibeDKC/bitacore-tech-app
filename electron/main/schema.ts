@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS products (
   is_service INTEGER NOT NULL DEFAULT 0,
   service_type TEXT,
   alert_enabled INTEGER NOT NULL DEFAULT 1,
+  publish_web INTEGER NOT NULL DEFAULT 1,
   rotation TEXT NOT NULL DEFAULT 'rotativo' CHECK (rotation IN ('rotativo', 'no_rotativo', 'prueba')),
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
@@ -418,11 +419,49 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   description TEXT NOT NULL,
   quantity REAL NOT NULL DEFAULT 1,
   unit_price_cents INTEGER NOT NULL DEFAULT 0,
+  original_unit_price_cents INTEGER NOT NULL DEFAULT 0,
   unit_cost_cents INTEGER NOT NULL DEFAULT 0,
   line_total_cents INTEGER NOT NULL DEFAULT 0,
+  promotion_id TEXT,
+  promotion_name TEXT,
+  promotion_discount_cents INTEGER NOT NULL DEFAULT 0,
   item_type TEXT NOT NULL DEFAULT 'producto',
   note TEXT
 );
+
+CREATE TABLE IF NOT EXISTS promotions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'category', 'sku', 'mixed')),
+  discount_type TEXT NOT NULL CHECK (discount_type IN ('percent', 'amount')),
+  discount_percent REAL NOT NULL DEFAULT 0,
+  discount_cents INTEGER NOT NULL DEFAULT 0,
+  starts_on TEXT,
+  ends_on TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  publish_web INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 0,
+  allow_below_cost INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT,
+  updated_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS promotion_targets (
+  id TEXT PRIMARY KEY,
+  promotion_id TEXT NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL CHECK (target_type IN ('category', 'sku')),
+  category TEXT,
+  product_id TEXT REFERENCES products(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotions_active ON promotions(active, starts_on, ends_on);
+CREATE INDEX IF NOT EXISTS idx_promotion_targets_promotion ON promotion_targets(promotion_id);
+CREATE INDEX IF NOT EXISTS idx_promotion_targets_product ON promotion_targets(product_id);
+CREATE INDEX IF NOT EXISTS idx_promotion_targets_category ON promotion_targets(category);
 
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,

@@ -89,6 +89,16 @@ export const DEFAULT_SETTINGS = {
   messages: DEFAULT_MESSAGES,
   tracking: {
     purchasesByUser: true
+  },
+  catalog: {
+    targetPath: '',
+    autoPublish: false,
+    lastPublishedAt: null as string | null,
+    lastStatus: 'idle' as 'idle' | 'success' | 'error' | 'pending',
+    lastMessage: '',
+    lastProductCount: 0,
+    lastImageCount: 0,
+    lastPromotionCount: 0
   }
 }
 

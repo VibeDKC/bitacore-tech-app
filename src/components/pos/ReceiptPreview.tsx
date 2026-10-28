@@ -77,6 +77,11 @@ function ReceiptCopy({
             <tr key={`${line.productId}-${line.note ?? ''}`} className="border-b border-black/10">
               <td className="py-0.5 pr-1">
                 {line.name}
+                {line.promotionName ? (
+                  <span className="mt-0.5 block text-[0.85em] leading-snug text-black/65">
+                    Promo: {line.promotionName}
+                  </span>
+                ) : null}
                 {compact === 'a4' && line.note ? (
                   <span className="mt-0.5 block text-[0.85em] leading-snug text-black/65">{line.note}</span>
                 ) : null}

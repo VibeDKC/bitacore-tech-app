@@ -29,6 +29,8 @@ export type BackendCapability =
   | 'exportAudit'
   | 'useAI'
   | 'applyDiscount'
+  | 'managePromotions'
+  | 'publishCatalog'
   | 'authorizeNoCharge'
   | 'manageEvidence'
   | 'voidEvidence'
@@ -64,6 +66,8 @@ export const ALL_CAPABILITIES: BackendCapability[] = [
   'exportAudit',
   'useAI',
   'applyDiscount',
+  'managePromotions',
+  'publishCatalog',
   'authorizeNoCharge',
   'manageEvidence',
   'voidEvidence',
@@ -87,10 +91,10 @@ export function capabilitiesForRole(role: Role) {
 }
 
 const roleModules: Record<Role, string[]> = {
-  superadmin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'audit', 'settings'],
-  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'settings'],
-  tecnico: ['dashboard', 'orders', 'inventory', 'customers'],
-  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash']
+  superadmin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'audit', 'promotions', 'settings'],
+  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'promotions', 'settings'],
+  tecnico: ['dashboard', 'orders', 'inventory', 'customers', 'promotions'],
+  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash', 'promotions']
 }
 
 const roleCapabilities: Record<Role, BackendCapability[]> = {
@@ -123,6 +127,8 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'exportAudit',
     'useAI',
     'applyDiscount',
+    'managePromotions',
+    'publishCatalog',
     'authorizeNoCharge',
     'manageEvidence',
     'voidEvidence',
@@ -149,6 +155,8 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'settleOrder',
     'useAI',
     'applyDiscount',
+    'managePromotions',
+    'publishCatalog',
     'authorizeNoCharge',
     'manageEvidence',
     'voidEvidence',

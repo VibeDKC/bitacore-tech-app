@@ -103,7 +103,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           </div>
           <p className="detail-price-note">
             Precio en COP · Disponibilidad sujeta a confirmación
-            {product.promotion ? ' · Promoción de demostración' : ''}
+            {product.promotion ? ' · Promoción vigente' : ''}
           </p>
 
           <p className="detail-copy">

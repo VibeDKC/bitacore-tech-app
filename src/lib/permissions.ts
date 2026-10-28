@@ -32,11 +32,12 @@ const roleModules: Record<Role, ModuleKey[]> = {
     'cash',
     'reports',
     'audit',
+    'promotions',
     'settings'
   ],
-  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'settings'],
-  tecnico: ['dashboard', 'orders', 'inventory', 'customers'],
-  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash']
+  admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'promotions', 'settings'],
+  tecnico: ['dashboard', 'orders', 'inventory', 'customers', 'promotions'],
+  cajero: ['dashboard', 'pos', 'inventory', 'customers', 'cash', 'promotions']
 }
 
 const roleCapabilities: Record<Role, Capability[]> = {
@@ -70,6 +71,8 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'exportAudit',
     'useAI',
     'applyDiscount',
+    'managePromotions',
+    'publishCatalog',
     'manageEvidence',
     'voidEvidence',
     'verifyEvidence',
@@ -96,6 +99,8 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'authorizeNoCharge',
     'useAI',
     'applyDiscount',
+    'managePromotions',
+    'publishCatalog',
     'manageEvidence',
     'voidEvidence',
     'verifyEvidence',
@@ -149,6 +154,8 @@ export const capabilityLabels: Record<Capability, string> = {
   exportAudit: 'Exportar auditoría',
   useAI: 'Usar IA',
   applyDiscount: 'Aplicar descuentos',
+  managePromotions: 'Gestionar promociones',
+  publishCatalog: 'Publicar catálogo web',
   authorizeNoCharge: 'Autorizar entrega sin cobro',
   manageEvidence: 'Gestionar evidencias',
   voidEvidence: 'Anular evidencias',
@@ -188,6 +195,8 @@ export const permissionMatrix: Array<{
       { label: 'Órdenes de trabajo', roles: { superadmin: 'full', admin: 'full', tecnico: 'full', cajero: 'none' } },
       { label: 'Asignar y reasignar técnico', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
       { label: 'Configurar fidelidad de clientes', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
+      { label: 'Promociones', roles: { superadmin: 'full', admin: 'full', tecnico: 'readonly', cajero: 'readonly' } },
+      { label: 'Publicar catálogo web', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
       { label: 'Evidencias fotográficas', roles: { superadmin: 'full', admin: 'full', tecnico: 'partial', cajero: 'none' } },
       { label: 'Clientes', roles: { superadmin: 'full', admin: 'full', tecnico: 'full', cajero: 'full' } },
       { label: 'Inventario', roles: { superadmin: 'full', admin: 'partial', tecnico: 'readonly', cajero: 'readonly' } },

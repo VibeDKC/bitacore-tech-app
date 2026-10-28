@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.12.0 — 2026-10-27
+
+### Promociones
+- Módulo visible para todos; edición reservada a propietario y administradores.
+- Alcance por SKU, categoría o todo el catálogo.
+- Descuento por porcentaje o monto fijo, vigencia, prioridad, activa/inactiva y publicación web.
+- Vista previa de productos afectados y aviso de precio bajo costo con autorización.
+- Resolución por prioridad y especificidad.
+- Promociones aplicadas a ventas POS y web; no a OT.
+- Sin acumulación con descuento manual ni fidelidad.
+- Factura con precio original, precio efectivo y nombre de promoción.
+- Avisos in-app para promociones bajo costo y errores de publicación.
+- Migración 14 con tablas `promotions` y `promotion_targets`, `products.publish_web` y campos de promoción en `invoice_items`.
+
+### Catálogo web
+- Publicación local manual y automática opcional del snapshot; la automática viene desactivada por defecto.
+- Estado de última publicación, productos, imágenes y promociones.
+- Exclusión de servicios, inactivos, insumos de taller y productos con `publish_web = 0`.
+- Imágenes copiadas, extensión preservada y limpieza de huérfanas.
+- Web con promociones reales; se eliminaron las promociones demo.
+- Se mantiene el carrusel del hero de 4 segundos y 9 destacados.
+
+### Calidad
+- Aceptación 1.12.0: 22/22.
+- Smoke empaquetado 1.12.0: 22/22.
+- Migración 14 sobre copia de la base real: OK.
+- Regresión 1.11.0: 34/34.
+- Regresión 1.10.3: 26/26.
+- Web sin promociones: 37/37.
+- Web con promociones temporales: 37/37.
+- Typecheck y build de app y web: OK.
+- Sin Supabase/Vercel todavía; sincronización remota para 1.13.
+
 ## Catálogo web demo — 2026-10-27
 
 - Demo Next.js en `web/`, separada de la aplicación Electron.

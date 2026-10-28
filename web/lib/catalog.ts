@@ -1,11 +1,13 @@
 import catalogJson from '@/data/catalog.json'
 
 export type Promotion = {
+  id: string
   name: string
   badge: string
-  type: 'percent' | 'fixed'
+  type: 'percent' | 'amount'
   value: number
-  demo: boolean
+  startsOn?: string | null
+  endsOn?: string | null
 }
 
 export type Product = {

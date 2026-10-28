@@ -1,7 +1,9 @@
 import type { LucideIcon } from 'lucide-react'
+import type { CatalogSyncStatus, ProductPromotion } from './promotions'
 
 export * from './dictionaries'
 export * from './messages'
+export * from './promotions'
 
 export type Role = 'superadmin' | 'admin' | 'tecnico' | 'cajero'
 
@@ -15,6 +17,7 @@ export type ModuleKey =
   | 'cash'
   | 'reports'
   | 'audit'
+  | 'promotions'
   | 'settings'
 
 export type Capability =
@@ -47,6 +50,8 @@ export type Capability =
   | 'exportAudit'
   | 'useAI'
   | 'applyDiscount'
+  | 'managePromotions'
+  | 'publishCatalog'
   | 'manageEvidence'
   | 'voidEvidence'
   | 'verifyEvidence'
@@ -86,6 +91,8 @@ export interface Product {
   warrantyDays: number
   serials: string[]
   alertEnabled: boolean
+  publishWeb: boolean
+  promotion?: ProductPromotion | null
   rotation: ProductRotation
   icon: LucideIcon
   iconKey?: string
@@ -459,6 +466,9 @@ export interface Invoice {
     description: string
     quantity: number
     unitPrice: number
+    originalUnitPrice?: number
+    promotionName?: string | null
+    promotionDiscount?: number
     lineTotal: number
     note?: string | null
     itemType?: 'producto' | 'servicio'
@@ -1009,6 +1019,7 @@ export interface SettingsData {
   equipment: { qrEnabled: boolean }
   messages: { initial: string; ready: string }
   tracking: { purchasesByUser: boolean }
+  catalog: CatalogSyncStatus
   backup: { passwordConfigured: boolean }
   rolePermissions: Array<{ role: Role; capability: Capability; allowed: boolean }>
   statuses: StatusSetting[]
@@ -1074,6 +1085,9 @@ export interface SaleReceipt {
     name: string
     quantity: number
     price: number
+    originalPrice?: number
+    promotionName?: string | null
+    promotionDiscount?: number
     lineTotal: number
     note?: string | null
   }>

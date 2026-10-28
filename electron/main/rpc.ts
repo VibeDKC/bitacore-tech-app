@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import { dialog, safeStorage, shell } from 'electron'
 import { z } from 'zod'
+import type { PromotionInput } from '@shared/index'
 import type { Database } from './database'
 import {
   BACKUP_DATABASE_FILENAME,
@@ -50,6 +51,23 @@ import {
 } from './permissions'
 import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './security'
 import { calculateNitDv, isValidNit, normalizeNit } from './nit'
+import {
+  catalogStatus,
+  publishCatalog,
+  scheduleCatalogPublish,
+  updateCatalogConfig
+} from './catalogPublisher'
+import {
+  activePromotionRows,
+  deletePromotion,
+  listPromotions,
+  previewPromotion,
+  promotionAlertData,
+  resolvePromotionForProductRow,
+  savePromotion,
+  setPromotionWeb,
+  togglePromotion
+} from './promotions'
 import { runDemoSeed, type SeedOwner } from './seed'
 import { generateDiagnosticReport, type ReportMode } from './diagnosticReport'
 import { listGeminiModels, scanInvoice, testGeminiConnection, type InvoiceExtraction } from './aiInvoice'
@@ -856,7 +874,14 @@ function discountCentsFor(type: 'percent' | 'amount', value: number, subtotalCen
 }
 
 function assertDiscountFloor(
-  lines: Array<{ name: string; quantity: number; unitPriceCents: number; unitCostCents: number; isService?: boolean }>,
+  lines: Array<{
+    name: string
+    quantity: number
+    unitPriceCents: number
+    unitCostCents: number
+    isService?: boolean
+    allowBelowCost?: boolean
+  }>,
   subtotalCents: number,
   discountCents: number
 ) {
@@ -867,7 +892,7 @@ function assertDiscountFloor(
     const allocated = Math.round((discountCents * lineTotal) / subtotalCents)
     const net = lineTotal - allocated
     const cost = line.unitCostCents * line.quantity
-    if (net < cost) {
+    if (net < cost && !line.allowBelowCost) {
       fail(
         `El descuento deja ${line.name} por debajo del costo de compra. Ajusta el descuento o requiere autorización del propietario.`,
         'DISCOUNT_BELOW_COST'
@@ -961,7 +986,7 @@ function legalPublic(db: Database) {
   return getLegal(db)
 }
 
-function settingsData(db: Database) {
+function settingsData(db: Database, runtime: Runtime) {
   const aiConfig = { ...db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai) }
   const aiKey = db.getSetting<any>('ai_key', null)
   delete aiConfig.apiKey
@@ -1011,6 +1036,7 @@ function settingsData(db: Database) {
     equipment: db.getSetting('equipment_config', DEFAULT_SETTINGS.equipment),
     messages: db.getSetting('messages_config', DEFAULT_SETTINGS.messages),
     tracking: db.getSetting('tracking_config', DEFAULT_SETTINGS.tracking),
+    catalog: catalogStatus(db, runtime),
     backup: { passwordConfigured: backupPasswordConfigured(db) },
     rolePermissions: db
       .all<{ role: string; capability: string; allowed: number }>(
@@ -2278,6 +2304,36 @@ function notificationData(db: Database, session?: Session) {
         tone: 'warning'
       })
     }
+    if (session.role === 'admin' || session.role === 'superadmin') {
+      const promoAlerts = promotionAlertData(db)
+      if (promoAlerts.belowCost > 0) {
+        data.push({
+          id: 'promotions-below-cost',
+          title: `${promoAlerts.belowCost} promoción${promoAlerts.belowCost === 1 ? '' : 'es'} por debajo del costo`,
+          description: `Revisa ${promoAlerts.belowCostNames.join(', ')}.`,
+          time: 'Ahora',
+          tone: 'danger'
+        })
+      }
+      const catalog = db.getSetting<any>('catalog_config', DEFAULT_SETTINGS.catalog)
+      if (catalog?.lastStatus === 'error') {
+        data.push({
+          id: 'catalog-publish-error',
+          title: 'No se pudo publicar el catálogo web',
+          description: String(catalog.lastMessage || 'Revisa la configuración de la carpeta de publicación.'),
+          time: 'Ahora',
+          tone: 'danger'
+        })
+      } else if (catalog?.lastStatus === 'pending') {
+        data.push({
+          id: 'catalog-publish-pending',
+          title: 'Publicación del catálogo web en curso',
+          description: String(catalog.lastMessage || 'Espera a que termine la publicación.'),
+          time: 'Ahora',
+          tone: 'info'
+        })
+      }
+    }
   }
   return data
 }
@@ -3464,6 +3520,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const minStock = numberValue(payload?.minStock ?? 0, 'Stock mínimo', { min: 0 })
       const rotation = schema(payload?.rotation ?? 'rotativo', z.enum(['rotativo', 'no_rotativo', 'prueba']))
       const alertEnabled = payload?.alertEnabled === undefined ? rotation === 'rotativo' : Boolean(payload.alertEnabled)
+      const publishWeb = payload?.publishWeb === undefined ? true : Boolean(payload.publishWeb)
       const service = Boolean(payload?.service)
       const serviceType =
         service && typeof payload?.serviceType === 'string' && payload.serviceType.trim()
@@ -3499,8 +3556,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
             `INSERT INTO products
               (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
                image_path, image_thumb_path, image_updated_at,
-               warranty_days, is_service, service_type, alert_enabled, rotation, active, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+               warranty_days, is_service, service_type, alert_enabled, publish_web, rotation, active, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             id,
             name,
             sku,
@@ -3521,6 +3578,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             service ? 1 : 0,
             serviceType,
             alertEnabled ? 1 : 0,
+            publishWeb ? 1 : 0,
             rotation,
             nowIso,
             nowIso
@@ -3558,6 +3616,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
         throw error
       }
+      scheduleCatalogPublish(db, runtime)
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', id), true)
     }
 
@@ -3697,6 +3756,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
         params.push(payload.alertEnabled ? 1 : 0)
         changed.push(payload.alertEnabled ? 'alerta activada' : 'alerta desactivada')
       }
+      if (payload?.publishWeb !== undefined) {
+        updates.push('publish_web = ?')
+        params.push(payload.publishWeb ? 1 : 0)
+        changed.push(payload.publishWeb ? 'publicación web activada' : 'publicación web desactivada')
+      }
       if (payload?.active !== undefined) {
         updates.push('active = ?')
         params.push(payload.active ? 1 : 0)
@@ -3763,6 +3827,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           oldImagePaths.filter((item) => !nextImagePaths.has(String(item)))
         )
       }
+      scheduleCatalogPublish(db, runtime)
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', productId), canSession(session, 'viewCosts'))
     }
 
@@ -3801,6 +3866,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           productId
         )
       })
+      scheduleCatalogPublish(db, runtime)
       return productDto(db, db.get<any>('SELECT * FROM products WHERE id = ?', productId), true)
     }
 
@@ -4592,6 +4658,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           row.id
         )
       })
+      scheduleCatalogPublish(db, runtime)
       return orderDto(db, getOrderOrFail(db, row.id))
     }
 
@@ -4855,28 +4922,55 @@ export async function handleRpc(command: string, payload: Payload, token: string
           .min(1)
       )
       const method = schema(payload?.method, z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
+      const activePromotions = activePromotionRows(db)
       const prepared = lines.map((line) => {
         const product = db.get<any>('SELECT * FROM products WHERE id = ? AND active = 1', line.productId)
         if (!product) fail('Uno de los productos ya no existe')
         if (!product.is_service && Number(product.stock) < line.quantity) {
           fail(`Stock insuficiente de ${product.name}. Disponible: ${product.stock}`)
         }
+        const promotion = resolvePromotionForProductRow(db, product, activePromotions)
+        const originalUnitPriceCents = Number(product.price_cents)
+        const unitPriceCents = promotion ? toCents(promotion.price) : originalUnitPriceCents
         return {
           ...line,
           product,
+          promotion,
+          originalUnitPriceCents,
+          unitPriceCents,
+          promotionDiscountCents: Math.max(0, originalUnitPriceCents - unitPriceCents),
           note: product.is_service ? line.note?.trim().slice(0, 500) || null : null
         }
       })
-      const subtotalCents = prepared.reduce((sum, line) => sum + Number(line.product.price_cents) * line.quantity, 0)
-      const discount = resolveSaleDiscount(customer, payload, session, subtotalCents)
+      const hasPromotion = prepared.some((line) => Boolean(line.promotion))
+      if (hasPromotion) {
+        const requestedValue =
+          payload?.discountValue !== undefined
+            ? Number(payload.discountValue)
+            : Number(payload?.discountPercent ?? 0)
+        if (requestedValue > 0) {
+          fail(
+            'Las promociones no se acumulan con descuento manual ni fidelidad. Retira el descuento para continuar.',
+            'PROMOTION_NO_STACK'
+          )
+        }
+      }
+      const subtotalCents = prepared.reduce(
+        (sum, line) => sum + line.unitPriceCents * line.quantity,
+        0
+      )
+      const discount = hasPromotion
+        ? ({ type: 'percent', value: 0, source: 'none' } as const)
+        : resolveSaleDiscount(customer, payload, session, subtotalCents)
       const discountCents = discountCentsFor(discount.type, discount.value, subtotalCents)
       assertDiscountFloor(
         prepared.map((line) => ({
           name: line.product.name,
           quantity: line.quantity,
-          unitPriceCents: Number(line.product.price_cents),
+          unitPriceCents: line.unitPriceCents,
           unitCostCents: Number(line.product.cost_cents),
-          isService: Boolean(line.product.is_service)
+          isService: Boolean(line.product.is_service),
+          allowBelowCost: Boolean(line.promotion?.allowBelowCost)
         })),
         subtotalCents,
         discountCents
@@ -4921,16 +5015,22 @@ export async function handleRpc(command: string, payload: Payload, token: string
         for (const line of prepared) {
           db.run(
             `INSERT INTO invoice_items
-              (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, invoice_id, product_id, description, quantity, unit_price_cents, original_unit_price_cents,
+               unit_cost_cents, line_total_cents, promotion_id, promotion_name, promotion_discount_cents,
+               item_type, note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             `ii_${sha256(`${invoiceId}|${line.productId}`).slice(0, 20)}`,
             invoiceId,
             line.product.id,
             line.product.name,
             line.quantity,
-            line.product.price_cents,
+            line.unitPriceCents,
+            line.originalUnitPriceCents,
             line.product.cost_cents,
-            Math.round(line.product.price_cents * line.quantity),
+            Math.round(line.unitPriceCents * line.quantity),
+            line.promotion?.id ?? null,
+            line.promotion?.name ?? null,
+            line.promotionDiscountCents,
             line.product.is_service ? 'servicio' : 'producto',
             line.note
           )
@@ -5010,6 +5110,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         throw error
       }
       const invoice = db.get<any>('SELECT * FROM invoices WHERE id = ?', invoiceId)
+      scheduleCatalogPublish(db, runtime)
       return {
         invoice: invoiceDto(db, invoice),
         receipt: {
@@ -5023,8 +5124,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
             productId: line.product.id,
             name: line.product.name,
             quantity: line.quantity,
-            price: money(line.product.price_cents),
-            lineTotal: money(line.product.price_cents * line.quantity),
+            price: money(line.unitPriceCents),
+            originalPrice: money(line.originalUnitPriceCents),
+            promotionName: line.promotion?.name ?? null,
+            promotionDiscount: money(line.promotionDiscountCents),
+            lineTotal: money(line.unitPriceCents * line.quantity),
             note: line.note
           }))
         }
@@ -5868,6 +5972,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           id
         )
       })
+      scheduleCatalogPublish(db, runtime)
       return purchaseDto(db, db.get<any>('SELECT * FROM purchases WHERE id = ?', id))
     }
 
@@ -6109,6 +6214,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           id
         )
       })
+      scheduleCatalogPublish(db, runtime)
       return purchaseDto(db, db.get<any>('SELECT * FROM purchases WHERE id = ?', id))
     }
 
@@ -6246,7 +6352,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           `Rol ${roleLabels[role]} · ${items.length} permisos revisados.`
         )
       })
-      return settingsData(db)
+      return settingsData(db, runtime)
     }
 
     case 'dictionaries.list': {
@@ -6516,9 +6622,126 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return { deleted: true }
     }
 
+    case 'promotions.list': {
+      requireModuleAccess(session, 'promotions')
+      return listPromotions(db)
+    }
+
+    case 'promotions.preview': {
+      requireModuleAccess(session, 'promotions')
+      return previewPromotion(db, payload as unknown as PromotionInput)
+    }
+
+    case 'promotions.create': {
+      requireModuleAccess(session, 'promotions')
+      requireCap(session, 'managePromotions')
+      const input = payload as unknown as PromotionInput
+      const result = savePromotion(db, input, session.userId)
+      audit(
+        db,
+        session,
+        'Creación de promoción',
+        'Promoción',
+        `${result.promotion.name} · ${result.promotion.badge}${result.belowCostCount ? ` · ${result.belowCostCount} producto(s) bajo costo` : ''}`,
+        result.promotion.id
+      )
+      scheduleCatalogPublish(db, runtime)
+      return result.promotion
+    }
+
+    case 'promotions.update': {
+      requireModuleAccess(session, 'promotions')
+      requireCap(session, 'managePromotions')
+      const input = payload as unknown as PromotionInput
+      if (!input.id) fail('Falta la promoción.', 'BAD_REQUEST')
+      const result = savePromotion(db, input, session.userId)
+      audit(
+        db,
+        session,
+        'Actualización de promoción',
+        'Promoción',
+        `${result.promotion.name} · ${result.promotion.badge}${result.belowCostCount ? ` · ${result.belowCostCount} producto(s) bajo costo` : ''}`,
+        result.promotion.id
+      )
+      scheduleCatalogPublish(db, runtime)
+      return result.promotion
+    }
+
+    case 'promotions.toggle': {
+      requireModuleAccess(session, 'promotions')
+      requireCap(session, 'managePromotions')
+      const id = text(payload?.id, 'Promoción', 1, 80)
+      const active = Boolean(payload?.active)
+      const promotion = togglePromotion(db, id, active, session.userId)
+      audit(db, session, active ? 'Activación de promoción' : 'Pausa de promoción', 'Promoción', promotion.name, id)
+      scheduleCatalogPublish(db, runtime)
+      return promotion
+    }
+
+    case 'promotions.publishWeb': {
+      requireModuleAccess(session, 'promotions')
+      requireCap(session, 'managePromotions')
+      const id = text(payload?.id, 'Promoción', 1, 80)
+      const publishWeb = Boolean(payload?.publishWeb)
+      const promotion = setPromotionWeb(db, id, publishWeb, session.userId)
+      audit(
+        db,
+        session,
+        publishWeb ? 'Publicación de promoción en web' : 'Retiro de promoción de web',
+        'Promoción',
+        promotion.name,
+        id
+      )
+      scheduleCatalogPublish(db, runtime)
+      return promotion
+    }
+
+    case 'promotions.delete': {
+      requireModuleAccess(session, 'promotions')
+      requireCap(session, 'managePromotions')
+      const id = text(payload?.id, 'Promoción', 1, 80)
+      const current = listPromotions(db).find((promotion) => promotion.id === id)
+      deletePromotion(db, id)
+      audit(db, session, 'Eliminación de promoción', 'Promoción', current?.name ?? id, id)
+      scheduleCatalogPublish(db, runtime)
+      return { deleted: true }
+    }
+
+    case 'catalog.status': {
+      requireCap(session, 'publishCatalog')
+      return catalogStatus(db, runtime)
+    }
+
+    case 'catalog.publish': {
+      requireCap(session, 'publishCatalog')
+      const result = publishCatalog(db, runtime)
+      audit(
+        db,
+        session,
+        result.ok ? 'Publicación de catálogo web' : 'Error de publicación de catálogo web',
+        'Catálogo web',
+        result.ok ? result.status.lastMessage : result.error ?? result.status.lastMessage,
+        'catalog'
+      )
+      return result
+    }
+
+    case 'catalog.chooseFolder': {
+      requireCap(session, 'publishCatalog')
+      const selected = await dialog.showOpenDialog({
+        title: 'Selecciona la carpeta del catálogo web',
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (selected.canceled || !selected.filePaths[0]) return { canceled: true }
+      const targetPath = selected.filePaths[0]
+      updateCatalogConfig(db, runtime, { targetPath })
+      audit(db, session, 'Carpeta de catálogo web actualizada', 'Catálogo web', targetPath, 'catalog')
+      return { canceled: false, status: catalogStatus(db, runtime) }
+    }
+
     case 'settings.get': {
       requireModuleAccess(session, 'settings')
-      return settingsData(db)
+      return settingsData(db, runtime)
     }
 
     case 'legal.get': {
@@ -6631,12 +6854,22 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireModuleAccess(session, 'settings')
       const section = schema(
         payload?.section,
-        z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages', 'tracking'])
+        z.enum(['print', 'ai', 'security', 'business', 'equipment', 'messages', 'tracking', 'catalog'])
       )
       if (section === 'ai') requireCap(session, 'configureAI')
       if (section === 'equipment') requireCap(session, 'manageStaff')
       if (section === 'business') requireCap(session, 'configureBusiness')
       if (section === 'tracking') requireCap(session, 'configureBusiness')
+      if (section === 'catalog') requireCap(session, 'publishCatalog')
+      if (section === 'catalog') {
+        const value = payload?.value && typeof payload.value === 'object' ? payload.value : {}
+        updateCatalogConfig(db, runtime, {
+          targetPath: typeof value.targetPath === 'string' ? value.targetPath : undefined,
+          autoPublish: value.autoPublish === undefined ? undefined : Boolean(value.autoPublish)
+        })
+        audit(db, session, 'Actualización de catálogo web', 'Configuración', 'Sección catálogo actualizada.', 'catalog')
+        return settingsData(db, runtime)
+      }
       if (section === 'ai') {
         const current = db.getSetting<any>('ai_config', DEFAULT_SETTINGS.ai)
         const value = payload?.value && typeof payload.value === 'object' ? { ...payload.value } : {}
@@ -6698,7 +6931,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.setSetting(`${section}_config`, { ...current, ...(payload?.value ?? {}) })
       }
       audit(db, session, 'Actualización de configuración', 'Configuración', `Sección ${section} actualizada.`)
-      return settingsData(db)
+      return settingsData(db, runtime)
     }
 
     case 'profile.get': {
@@ -7139,6 +7372,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
           DELETE FROM purchase_items;
           DELETE FROM purchases;
           DELETE FROM stock_movements;
+          DELETE FROM promotion_targets;
+          DELETE FROM promotions;
           DELETE FROM product_serials;
           DELETE FROM products;
           DELETE FROM customers WHERE is_final_consumer = 0;

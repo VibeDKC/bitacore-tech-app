@@ -25,7 +25,7 @@ export function ProductCard({ product }: { product: Product }) {
               <span className="badge badge-condition">{product.condition}</span>
             ) : null}
             {product.promotion ? (
-              <span className="badge badge-promo" title="Promoción de demostración">
+              <span className="badge badge-promo" title="Promoción vigente">
                 {product.promotion.badge}
               </span>
             ) : null}

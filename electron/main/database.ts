@@ -109,8 +109,17 @@ export class Database {
     this.ensureColumn('products', 'image_thumb_path', 'TEXT')
     this.ensureColumn('products', 'image_updated_at', 'TEXT')
     this.ensureColumn('products', 'alert_enabled', 'INTEGER NOT NULL DEFAULT 1')
+    this.ensureColumn('products', 'publish_web', 'INTEGER NOT NULL DEFAULT 1')
     this.ensureColumn('products', 'rotation', "TEXT NOT NULL DEFAULT 'rotativo'")
+    this.ensureColumn('promotions', 'scope', "TEXT NOT NULL DEFAULT 'all'")
     this.ensureColumn('invoice_items', 'note', 'TEXT')
+    this.ensureColumn('invoice_items', 'original_unit_price_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('invoice_items', 'promotion_id', 'TEXT')
+    this.ensureColumn('invoice_items', 'promotion_name', 'TEXT')
+    this.ensureColumn('invoice_items', 'promotion_discount_cents', 'INTEGER NOT NULL DEFAULT 0')
+    this.run(
+      'UPDATE invoice_items SET original_unit_price_cents = unit_price_cents WHERE original_unit_price_cents = 0'
+    )
     this.ensureColumn('work_order_items', 'warranty_days', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'discount_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'adjustment_cents', 'INTEGER NOT NULL DEFAULT 0')
@@ -131,7 +140,7 @@ export class Database {
     this.ensureRolePermissions()
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-28T01:56:05.607Z",
+  "generatedAt": "2026-10-28T04:10:06.185Z",
   "source": "OCTESTR",
   "business": {
     "name": "BitacoreTech",
@@ -15,17 +15,17 @@
     "withImage": 24,
     "categories": 3
   },
-  "heroProductId": "prod_mto_14",
+  "heroProductId": "prod_mto_41",
   "featured": [
     "prod_mto_41",
-    "prod_mto_17",
-    "prod_mto_14",
     "prod_mto_45",
     "prod_mto_27",
+    "prod_mto_17",
     "prod_mto_30",
     "prod_mto_18",
     "prod_mto_19",
-    "prod_mto_22"
+    "prod_mto_22",
+    "prod_mto_14"
   ],
   "categories": [
     {
@@ -55,19 +55,13 @@
       "name": "Power Bank Adata C100 10000mAh Tipo C Negro",
       "category": "Accesorios",
       "categorySlug": "accesorios",
-      "regularPrice": 60000,
-      "price": 50000,
+      "regularPrice": null,
+      "price": 60000,
       "stock": 1,
       "condition": "Nuevo",
       "warrantyDays": 30,
       "image": "/products/prod_mto_41.jpg",
-      "promotion": {
-        "name": "Promo demo de power bank",
-        "badge": "-$ 10.000",
-        "type": "fixed",
-        "value": 10000,
-        "demo": true
-      },
+      "promotion": null,
       "createdAt": "2026-10-17T01:00:23.000Z",
       "updatedAt": "2026-10-27T15:44:05.724Z"
     },
@@ -265,19 +259,13 @@
       "name": "Disco SSD SATA Green 512GB 2.5\"",
       "category": "Almacenamiento",
       "categorySlug": "almacenamiento",
-      "regularPrice": 200000,
-      "price": 180000,
+      "regularPrice": null,
+      "price": 200000,
       "stock": 1,
       "condition": "Nuevo",
       "warrantyDays": 30,
       "image": "/products/prod_mto_17.jpg",
-      "promotion": {
-        "name": "Promo demo de almacenamiento",
-        "badge": "-10%",
-        "type": "percent",
-        "value": 10,
-        "demo": true
-      },
+      "promotion": null,
       "createdAt": "2026-10-14T04:15:22.000Z",
       "updatedAt": "2026-10-27T15:44:05.724Z"
     },
@@ -526,19 +514,13 @@
       "name": "Auriculares KZ Castor Bass MIC",
       "category": "Periféricos",
       "categorySlug": "perifericos",
-      "regularPrice": 60000,
-      "price": 51000,
+      "regularPrice": null,
+      "price": 60000,
       "stock": 1,
       "condition": "Nuevo",
       "warrantyDays": 30,
       "image": "/products/prod_mto_14.jpg",
-      "promotion": {
-        "name": "Promo demo de audio",
-        "badge": "-15%",
-        "type": "percent",
-        "value": 15,
-        "demo": true
-      },
+      "promotion": null,
       "createdAt": "2026-10-14T03:15:21.000Z",
       "updatedAt": "2026-10-27T15:44:05.724Z"
     },

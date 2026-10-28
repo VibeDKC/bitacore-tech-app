@@ -1,5 +1,7 @@
 # Contrato — Demo de catálogo web (F6)
 
+> **Actualización 1.12.0:** la web consume promociones reales y el snapshot se publica localmente desde la app. Ver `docs/plan/15-contrato-1.12.0.md`.
+
 | Dato | Valor |
 | --- | --- |
 | Fecha | 27 de octubre de 2026 |

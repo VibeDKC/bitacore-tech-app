@@ -1,6 +1,6 @@
 # Catálogo web BitacoreTech
 
-Demo de catálogo público construida con Next.js, usando un snapshot de la base local de OCTESTR. Pertenece a la fase F6 (catálogo web) y todavía no tiene sincronización automática ni despliegue público.
+Catálogo público construido con Next.js, usando el snapshot local de OCTESTR. Desde 1.12 las promociones reales de la app se publican en la web y la app puede regenerar el snapshot localmente. La sincronización remota con Supabase/Vercel queda para 1.13.
 
 ## Requisitos
 
@@ -28,21 +28,22 @@ npm run dev
 
 ## Regenerar los datos del catálogo
 
-El catálogo se genera leyendo `%APPDATA%\BitacoreTech\bitacoretech.db` y copiando las imágenes a `web/public/products`.
+La app puede publicar el snapshot desde **Configuración → Catálogo web** o desde **Promociones → Publicar catálogo web**. La publicación automática es opcional y viene desactivada por defecto; se habilita en Configuración. También se puede regenerar manualmente leyendo `%APPDATA%\BitacoreTech\bitacoretech.db` y copiando las imágenes a `web/public/products`:
 
 ```bash
 cd web
 npm run export:catalog
 ```
 
-El script excluye:
+Se excluyen:
 
 - Servicios.
 - Insumos de taller.
-- El producto de pruebas `USB GENERIC` (`00000000000`).
 - Productos inactivos.
+- Productos con `publish_web = 0`.
+- El producto de pruebas `USB GENERIC` (`00000000000`).
 
-El JSON público no incluye el precio del servicio “Hora Servicio Técnico”.
+El JSON público no incluye el precio del servicio “Hora Servicio Técnico”. Las promociones se leen de las tablas `promotions` y `promotion_targets`; solo salen las activas, vigentes y publicadas en web.
 
 ## Prueba de humo
 
@@ -59,14 +60,15 @@ En modo desarrollo no uses `127.0.0.1` para la prueba: Next bloquea el HMR de es
 
 ## Alcance de esta fase
 
-- Home con hero y carrusel de 9 destacados uno a uno (3 promociones + 6 destacados).
+- Home con hero y carrusel de 9 destacados uno a uno. La etiqueta “Promoción” aparece solo cuando la app publica una promoción real.
 - 39 referencias activas, 24 con imagen y 15 con placeholder.
 - Búsqueda por nombre, SKU o categoría sin exigir tildes.
 - Categorías, orden y disponibilidad.
 - Precio, condición y garantía reales del snapshot.
-- Promociones de demostración (no hay módulo real todavía).
+- Promociones reales con alcance por SKU/categoría/todo, vigencia, prioridad y publicación web.
+- Publicación local manual y automática opcional desde la app; snapshot regenerable con `npm run export:catalog`.
 - Servicios sin precio por hora; revisión inicial sujeta a cotización.
 - Consulta demo de OT con número y código.
 - Diseño responsive y contacto por WhatsApp en la barra superior y el pie.
 
-No incluye carrito, pagos, cuentas, promociones reales, sincronización automática, portal de OT con datos reales ni despliegue. Eso corresponde a fases posteriores.
+No incluye carrito, pagos, cuentas, sincronización remota Supabase/Vercel ni portal de OT con datos reales. Eso corresponde a 1.13.

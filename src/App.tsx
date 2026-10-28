@@ -8,6 +8,7 @@ import { OrdersPage } from '@/pages/Orders'
 import { NewOrderPage } from '@/pages/NewOrder'
 import { OrderDetailPage } from '@/pages/OrderDetail'
 import { InventoryPage } from '@/pages/Inventory'
+import { PromotionsPage } from '@/pages/Promotions'
 import { CustomersPage } from '@/pages/Customers'
 import { PurchasesPage } from '@/pages/Purchases'
 import { CashPage } from '@/pages/Cash'
@@ -74,6 +75,14 @@ export function App() {
           element={
             <ModuleGuard module="inventory">
               <InventoryPage />
+            </ModuleGuard>
+          }
+        />
+        <Route
+          path="promociones"
+          element={
+            <ModuleGuard module="promotions">
+              <PromotionsPage />
             </ModuleGuard>
           }
         />

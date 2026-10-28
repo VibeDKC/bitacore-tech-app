@@ -90,13 +90,16 @@ export function POSPage() {
 
   const canDiscount = can(role, 'applyDiscount')
   const customer = customers.find((item) => item.id === customerId) ?? customers[0] ?? null
+  const hasPromotion = cart.some((line) => Boolean(line.product.promotion))
   const loyaltyActive = Boolean(
-    customer?.loyaltyActive &&
+    !hasPromotion &&
+      customer?.loyaltyActive &&
       (!customer.loyaltyValidUntil || new Date(`${customer.loyaltyValidUntil}T23:59:59`).getTime() >= Date.now()) &&
       Number(customer.loyaltyDiscountValue ?? 0) > 0
   )
   const loyaltyType = customer?.loyaltyDiscountType === 'amount' ? 'amount' : 'percent'
   const loyaltyValue = Number(customer?.loyaltyDiscountValue ?? 0)
+  const unitPrice = (product: (typeof products)[number]) => product.promotion?.price ?? product.price
 
   useEffect(() => {
     if (!customers.length) return
@@ -118,14 +121,18 @@ export function POSPage() {
     })
   }, [products, query, category])
 
-  const subtotal = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0)
-  const discountValue = loyaltyActive
-    ? loyaltyType === 'percent'
-      ? Math.round((subtotal * loyaltyValue) / 100)
-      : Math.min(loyaltyValue, subtotal)
-    : discountType === 'percent'
-      ? Math.round((subtotal * (Number(discountInput) || 0)) / 100)
-      : Math.min(Number(discountInput) || 0, subtotal)
+  const subtotal = cart.reduce((sum, line) => sum + unitPrice(line.product) * line.quantity, 0)
+  const listSubtotal = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0)
+  const promotionSavings = Math.max(0, listSubtotal - subtotal)
+  const discountValue = hasPromotion
+    ? 0
+    : loyaltyActive
+      ? loyaltyType === 'percent'
+        ? Math.round((subtotal * loyaltyValue) / 100)
+        : Math.min(loyaltyValue, subtotal)
+      : discountType === 'percent'
+        ? Math.round((subtotal * (Number(discountInput) || 0)) / 100)
+        : Math.min(Number(discountInput) || 0, subtotal)
   const total = subtotal - discountValue
   const itemCount = cart.reduce((sum, line) => sum + line.quantity, 0)
   const receivedValue = Number(received.replace(/[^0-9]/g, '')) || 0
@@ -209,8 +216,8 @@ export function POSPage() {
         customerId: customer.id,
         lines: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity, note: line.note })),
         method,
-        discountType: loyaltyActive ? loyaltyType : discountType,
-        discountValue: loyaltyActive ? loyaltyValue : Number(discountInput) || 0,
+        discountType: hasPromotion ? 'percent' : loyaltyActive ? loyaltyType : discountType,
+        discountValue: hasPromotion ? 0 : loyaltyActive ? loyaltyValue : Number(discountInput) || 0,
         received: method === 'Efectivo' ? receivedValue : undefined,
         reference: reference.trim() || undefined,
         receipt: receipt
@@ -381,7 +388,19 @@ export function POSPage() {
 
                   <div className="mt-3 flex items-end justify-between gap-2 border-t border-line/70 pt-3">
                     <div>
-                      <p className="tabular text-[14px] font-bold text-ink">{formatCurrency(product.price)}</p>
+                      {product.promotion ? (
+                        <>
+                          <p className="text-[9px] text-slate-400 line-through">
+                            {formatCurrency(product.promotion.regularPrice)}
+                          </p>
+                          <p className="tabular text-[14px] font-bold text-brand-700">
+                            {formatCurrency(product.promotion.price)}
+                          </p>
+                          <Badge variant="warning">{product.promotion.badge}</Badge>
+                        </>
+                      ) : (
+                        <p className="tabular text-[14px] font-bold text-ink">{formatCurrency(product.price)}</p>
+                      )}
                       <p className="mt-0.5 text-[9px] text-slate-400">
                         {product.service ? product.serviceType || 'Servicio' : `${product.stock} en stock`}
                       </p>
@@ -467,7 +486,14 @@ export function POSPage() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-1 text-[12px] font-semibold text-ink">{line.product.name}</p>
-                        <p className="mt-0.5 text-[10px] text-slate-400">{formatCurrency(line.product.price)} c/u</p>
+                        <p className="mt-0.5 text-[10px] text-slate-400">
+                          {formatCurrency(unitPrice(line.product))} c/u
+                          {line.product.promotion ? (
+                            <span className="ml-1 font-semibold text-brand-600">
+                              · {line.product.promotion.badge}
+                            </span>
+                          ) : null}
+                        </p>
                         {line.product.service ? (
                           <label className="mt-1.5 block">
                             <span className="sr-only">Detalle del servicio</span>
@@ -503,7 +529,7 @@ export function POSPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="tabular text-[12px] font-bold text-ink">
-                              {formatCurrency(line.product.price * line.quantity)}
+                              {formatCurrency(unitPrice(line.product) * line.quantity)}
                             </span>
                             <button
                               type="button"
@@ -537,13 +563,23 @@ export function POSPage() {
             <div className="space-y-2 text-[11px]">
               <div className="flex items-center justify-between text-slate-500">
                 <span>Subtotal</span>
-                <span className="tabular font-semibold text-ink">{formatCurrency(subtotal)}</span>
+                <span className="tabular font-semibold text-ink">
+                  {formatCurrency(hasPromotion ? listSubtotal : subtotal)}
+                </span>
               </div>
+              {promotionSavings > 0 ? (
+                <div className="flex items-center justify-between text-brand-700">
+                  <span>Promociones</span>
+                  <span className="tabular font-semibold">-{formatCurrency(promotionSavings)}</span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between text-slate-500">
                 <span className="flex items-center gap-1.5">
                   <Tag className="h-3 w-3" /> Descuento
                 </span>
-                {loyaltyActive ? (
+                {hasPromotion ? (
+                  <span className="text-[10px] font-medium text-slate-400">No acumulable con promoción</span>
+                ) : loyaltyActive ? (
                   <div className="flex items-center gap-2">
                     <Badge variant="warning">
                       Fidelidad{' '}
@@ -588,6 +624,11 @@ export function POSPage() {
                   <span className="text-[10px] text-slate-400">Sin permiso</span>
                 )}
               </div>
+              {hasPromotion ? (
+                <p className="rounded-lg bg-brand-50 px-2.5 py-1.5 text-[9px] font-medium leading-relaxed text-brand-700">
+                  Las promociones no se acumulan con descuento manual ni fidelidad.
+                </p>
+              ) : null}
               <div className="flex items-center justify-between rounded-lg bg-white px-2.5 py-1.5 text-[10px] text-slate-400">
                 <span>IVA en ventas</span>
                 <span className="font-semibold">No aplica por ahora</span>
@@ -734,8 +775,16 @@ export function POSPage() {
           <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3">
             <div className="flex items-center justify-between text-[11px] text-brand-700">
               <span>Subtotal</span>
-              <span className="tabular font-semibold">{formatCurrency(subtotal)}</span>
+              <span className="tabular font-semibold">
+                {formatCurrency(hasPromotion ? listSubtotal : subtotal)}
+              </span>
             </div>
+            {promotionSavings > 0 ? (
+              <div className="mt-1 flex items-center justify-between text-[11px] text-brand-700">
+                <span>Promociones</span>
+                <span className="tabular font-semibold">-{formatCurrency(promotionSavings)}</span>
+              </div>
+            ) : null}
             <div className="mt-1 flex items-center justify-between text-[11px] text-brand-700">
               <span>Descuento</span>
               <span className="tabular font-semibold">-{formatCurrency(discountValue)}</span>

@@ -8,6 +8,7 @@ import {
   Settings,
   ShieldCheck,
   ShoppingCart,
+  Tag,
   Truck,
   Users,
   Wallet,
@@ -39,6 +40,7 @@ const navItems: NavItem[] = [
   { key: 'pos', label: 'Punto de venta', path: '/pos', icon: ShoppingCart },
   { key: 'orders', label: 'Órdenes de trabajo', path: '/ordenes', icon: Wrench },
   { key: 'inventory', label: 'Inventario', path: '/inventario', icon: Package },
+  { key: 'promotions', label: 'Promociones', path: '/promociones', icon: Tag },
   { key: 'customers', label: 'Clientes', path: '/clientes', icon: Users },
   { key: 'purchases', label: 'Compras', path: '/compras', icon: Truck },
   { key: 'cash', label: 'Caja', path: '/caja', icon: Wallet },
@@ -182,7 +184,7 @@ export function Sidebar({
           </div>
         </div>
         <p className="mt-3 px-1 text-center text-[9px] font-medium uppercase tracking-[0.14em] text-slate-300">
-          BitacoreTech Taller & POS · v1.11.0
+          BitacoreTech Taller & POS · v1.12.0
         </p>
       </div>
     </aside>
