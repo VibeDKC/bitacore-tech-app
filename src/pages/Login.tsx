@@ -76,7 +76,7 @@ export function LoginPage() {
       email: setupForm.email.trim()
     }
     if (form.name.length < 3) {
-      setSetupError('Escribe el nombre del propietario.')
+      setSetupError('Escribe el nombre del administrador.')
       return
     }
     if (!/^[a-z0-9._-]+$/.test(form.username)) {
@@ -203,7 +203,7 @@ export function LoginPage() {
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Logo />
               <span className="rounded-full border border-line bg-slate-50 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                v1.13.1
+                v1.14.1
               </span>
             </div>
 
@@ -216,7 +216,7 @@ export function LoginPage() {
                   {setupRequired ? 'Configuración inicial' : 'Acceso privado'}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  {setupRequired ? 'Crea la cuenta del propietario' : 'Solo personal autorizado'}
+                  {setupRequired ? 'Crea la cuenta del administrador' : 'Solo personal autorizado'}
                 </p>
               </div>
             </div>
@@ -225,12 +225,12 @@ export function LoginPage() {
               <>
                 <h2 className="mt-8 font-display text-[30px] font-bold tracking-[-0.03em] text-ink">Configura tu taller</h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                  Crea la cuenta del propietario. Es la única cuenta con acceso total y no se crean credenciales por defecto.
+                  Crea la cuenta del administrador. La cuenta propietario ya existe protegida y no aparece en la lista de usuarios.
                 </p>
 
                 <form onSubmit={handleSetup} className="mt-7 space-y-4">
                   <label className="block">
-                    <span className="field-label">Nombre del propietario</span>
+                    <span className="field-label">Nombre del administrador</span>
                     <input
                       value={setupForm.name}
                       onChange={(event) => setSetupForm({ ...setupForm, name: event.target.value })}
@@ -408,7 +408,7 @@ export function LoginPage() {
                   <p className="text-[11px] font-semibold text-ink">Acceso protegido</p>
                   <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
                     {setupRequired
-                      ? 'La cuenta del propietario se guarda con hash scrypt y la configuración inicial queda registrada en la auditoría.'
+                      ? 'La cuenta del administrador se guarda con hash scrypt y la configuración inicial queda registrada en la auditoría.'
                       : 'Las contraseñas se guardan con hash scrypt y cada inicio de sesión queda registrado en la auditoría.'}
                   </p>
                 </div>

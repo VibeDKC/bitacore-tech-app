@@ -1,11 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { DEFAULT_LEGAL } from './defaults'
 import { sha256, newId } from './security'
 import { SCHEMA_V1 } from './schema'
 import { ensureDictionaries, ensureReferenceData } from './seed'
-import { ALL_CAPABILITIES, capabilitiesForRole } from './permissions'
+import { ALL_CAPABILITIES, ALL_MODULES, capabilitiesForRole, roleModulesForRole } from './permissions'
+import { OWNER_ACCOUNT } from './owner'
 
 export const APP_DATA_FOLDER = 'BitacoreTech'
 export const LEGACY_APP_DATA_FOLDER = 'octestr-taller'
@@ -46,6 +48,8 @@ export class Database {
     this.db = new DatabaseSync(path)
     this.configure()
     this.migrate()
+    this.ensureOwnerAccount()
+    this.ensureTrackingCodes()
     ensureReferenceData(this)
     ensureDictionaries(this)
     this.backfillCustomerPhones()
@@ -63,6 +67,9 @@ export class Database {
 
   private migrate() {
     this.db.exec(SCHEMA_V1)
+    const hadSchema15 = Boolean(
+      this.get<{ version: number }>('SELECT version FROM schema_migrations WHERE version = 15')
+    )
     this.ensureColumn('backups', 'format', "TEXT NOT NULL DEFAULT 'db'")
     this.ensureColumn('work_order_evidence', 'source', "TEXT NOT NULL DEFAULT 'archivo'")
     this.ensureColumn('users', 'document_type', 'TEXT')
@@ -78,6 +85,7 @@ export class Database {
     this.ensureColumn('customers', 'loyalty_discount_value', 'REAL NOT NULL DEFAULT 0')
     this.ensureColumn('customers', 'loyalty_valid_until', 'TEXT')
     this.ensureColumn('customers', 'loyalty_notes', 'TEXT')
+    this.ensureColumn('customers', 'credit_enabled', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('suppliers', 'is_foreign_nit', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('work_orders', 'equipment_id', 'TEXT REFERENCES equipment(id)')
     this.ensureColumn('invoices', 'discount_type', "TEXT NOT NULL DEFAULT 'percent'")
@@ -127,6 +135,10 @@ export class Database {
       'UPDATE invoice_items SET original_unit_price_cents = unit_price_cents WHERE original_unit_price_cents = 0'
     )
     this.ensureColumn('work_order_items', 'warranty_days', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('work_orders', 'tracking_code', 'TEXT')
+    this.ensureColumn('invoices', 'credit_authorized', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('invoices', 'credit_authorized_by', 'TEXT')
+    this.ensureColumn('invoices', 'credit_authorized_at', 'TEXT')
     this.ensureColumn('purchases', 'discount_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'adjustment_cents', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('purchases', 'ai_metadata_json', 'TEXT')
@@ -144,9 +156,15 @@ export class Database {
     this.backfillPurchasePayments()
     this.backfillAuditAttribution()
     this.ensureRolePermissions()
+    if (!hadSchema15) {
+      // 1.14 permite que los administradores gestionen otros administradores.
+      this.run(
+        "UPDATE role_permissions SET allowed = 1 WHERE role = 'admin' AND capability = 'manageAdmins'"
+      )
+    }
     this.backfillEquipment()
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) {
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }
@@ -322,6 +340,91 @@ export class Database {
     })
   }
 
+  private ensureOwnerAccount() {
+    const initialized =
+      this.get<{ value: string }>(
+        "SELECT value FROM meta WHERE key = 'owner_account_initialized'"
+      )?.value === '1'
+    const existing = this.get<any>(
+      "SELECT * FROM users WHERE role = 'superadmin' LIMIT 1"
+    )
+    if (existing) {
+      if (initialized) return
+      // Migración de una instalación anterior: la cuenta raíz pasa a usar
+      // las credenciales privadas de 1.14 y queda protegida.
+      const usernameTaken = this.get<{ id: string }>(
+        'SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id <> ?',
+        OWNER_ACCOUNT.username,
+        existing.id
+      )
+      this.run(
+        `UPDATE users
+         SET username = ?, name = ?, email = ?, password_hash = ?, is_protected = 1, active = 1
+         WHERE id = ?`,
+        usernameTaken ? existing.username : OWNER_ACCOUNT.username,
+        OWNER_ACCOUNT.name,
+        OWNER_ACCOUNT.email,
+        OWNER_ACCOUNT.passwordHash,
+        existing.id
+      )
+      this.run(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('owner_account_initialized', '1')"
+      )
+      return
+    }
+    const now = new Date().toISOString()
+    this.run(
+      `INSERT INTO users
+        (id, username, name, email, role, password_hash, active, is_protected, created_at, created_by)
+       VALUES (?, ?, ?, ?, 'superadmin', ?, 1, 1, ?, NULL)`,
+      OWNER_ACCOUNT.id,
+      OWNER_ACCOUNT.username,
+      OWNER_ACCOUNT.name,
+      OWNER_ACCOUNT.email,
+      OWNER_ACCOUNT.passwordHash,
+      now
+    )
+    this.run(
+      "INSERT OR REPLACE INTO meta (key, value) VALUES ('owner_account_initialized', '1')"
+    )
+    this.appendAudit({
+      userId: null,
+      userName: 'Sistema',
+      role: 'Sistema',
+      action: 'Creación de cuenta raíz',
+      entity: 'Sistema',
+      detail: 'Cuenta propietario precreada y protegida.'
+    })
+  }
+
+  private ensureTrackingCodes() {
+    this.db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_work_orders_tracking_code ON work_orders(tracking_code) WHERE tracking_code IS NOT NULL'
+    )
+    const pending = this.all<{ id: string }>(
+      "SELECT id FROM work_orders WHERE tracking_code IS NULL OR tracking_code = ''"
+    )
+    if (!pending.length) return
+    const now = new Date().toISOString()
+    for (const row of pending) {
+      let code = ''
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const candidate = `SG-${randomBytes(8).toString('hex').toUpperCase()}`
+        if (!this.get('SELECT id FROM work_orders WHERE tracking_code = ?', candidate)) {
+          code = candidate
+          break
+        }
+      }
+      if (!code) continue
+      this.run(
+        'UPDATE work_orders SET tracking_code = ?, updated_at = COALESCE(updated_at, ?) WHERE id = ?',
+        code,
+        now,
+        row.id
+      )
+    }
+  }
+
   private ensureRolePermissions() {
     const now = new Date().toISOString()
     for (const role of ['superadmin', 'admin', 'tecnico', 'cajero'] as const) {
@@ -332,6 +435,16 @@ export class Database {
           role,
           capability,
           granted.has(capability) ? 1 : 0,
+          now
+        )
+      }
+      const modules = new Set(roleModulesForRole(role))
+      for (const module of ALL_MODULES) {
+        this.run(
+          'INSERT OR IGNORE INTO role_modules (role, module, allowed, updated_at) VALUES (?, ?, ?, ?)',
+          role,
+          module,
+          modules.has(module) ? 1 : 0,
           now
         )
       }
@@ -413,6 +526,8 @@ export class Database {
     this.db = new DatabaseSync(this.path)
     this.configure()
     this.migrate()
+    this.ensureOwnerAccount()
+    this.ensureTrackingCodes()
     ensureReferenceData(this)
     ensureDictionaries(this)
     this.backfillCustomerPhones()

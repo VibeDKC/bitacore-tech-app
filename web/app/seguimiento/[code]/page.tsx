@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { OrderStatusCard } from '@/components/order-status-card'
-import { findDemoOrderByCode } from '@/lib/orders-demo'
+import { findPortalOrderByCode } from '@/lib/orders-hash'
 import { getOrdersDemo } from '@/lib/orders-demo-server'
 
 export const revalidate = 60
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default async function TrackingPage({ params }: TrackingPageProps) {
   const { code } = await params
   const orders = await getOrdersDemo()
-  const order = findDemoOrderByCode(orders.orders, code)
+  const order = findPortalOrderByCode(orders.orders, code)
   if (!order) notFound()
 
   return (
@@ -36,7 +36,7 @@ export default async function TrackingPage({ params }: TrackingPageProps) {
         <span>{order.number}</span>
       </nav>
       <div className="tracking-wrap">
-        <OrderStatusCard order={order} />
+        <OrderStatusCard order={order} code={code} />
         <Link className="btn btn-outline" href="/buscar-orden">
           <ArrowLeft aria-hidden="true" />
           Volver a la búsqueda

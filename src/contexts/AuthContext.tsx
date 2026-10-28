@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { AuthSession, AuthUser, Role } from '@/types'
 import { api, getAuthToken, setAuthToken, type SetupInput } from '@/lib/backend'
-import { setEffectivePermissions } from '@/lib/permissions'
+import { setEffectiveModules, setEffectivePermissions } from '@/lib/permissions'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -66,9 +66,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           canPreviewRoles: info.canPreviewRoles,
           expiresAt: info.expiresAt,
           roleLabel: info.roleLabel,
-          permissions: info.permissions
+          permissions: info.permissions,
+          modules: info.modules
         })
         setEffectivePermissions(info.permissions)
+        setEffectiveModules(info.modules)
       } catch {
         setAuthToken(null)
         if (active) setSession(null)
@@ -87,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthToken(result.token, false)
     setSession(result)
     setEffectivePermissions(result.permissions)
+    setEffectiveModules(result.modules)
     setSetupRequired(false)
     return result
   }, [])
@@ -96,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthToken(result.token)
     setSession(result)
     setEffectivePermissions(result.permissions)
+    setEffectiveModules(result.modules)
     setSetupRequired(false)
     return result
   }, [])
@@ -109,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(null)
       setSession(null)
       setEffectivePermissions(null)
+      setEffectiveModules(null)
     }
   }, [])
 
@@ -126,11 +131,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             canPreviewRoles: info.canPreviewRoles,
             expiresAt: info.expiresAt,
             roleLabel: info.roleLabel,
-            permissions: info.permissions
+            permissions: info.permissions,
+            modules: info.modules
           }
         : current
     )
     setEffectivePermissions(info.permissions)
+    setEffectiveModules(info.modules)
   }, [])
 
   const setPreviewRole = useCallback(
@@ -148,11 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               canPreviewRoles: info.canPreviewRoles,
               expiresAt: info.expiresAt,
               roleLabel: info.roleLabel,
-              permissions: info.permissions
+              permissions: info.permissions,
+              modules: info.modules
             }
           : current
       )
       setEffectivePermissions(info.permissions)
+      setEffectiveModules(info.modules)
     },
     [session?.canPreviewRoles]
   )

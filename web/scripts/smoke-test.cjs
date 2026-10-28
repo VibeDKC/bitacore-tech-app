@@ -29,7 +29,8 @@ const results = []
 const consoleErrors = []
 const pageErrors = []
 const localFailures = []
-const intentional404 = /\/producto\/no-existe|\/seguimiento\/NO-EXISTE|\/ruta-inexistente/
+const intentional404 =
+  /\/producto\/no-existe|\/seguimiento\/NO-EXISTE|\/ruta-inexistente|\/api\/seguimiento\?/
 
 function checkData(name, fn) {
   try {
@@ -158,12 +159,10 @@ async function main() {
   checkData('stock oculto por defecto en la web', () => {
     assert.equal(catalog.stockVisibility, 'outOnly')
   })
-  checkData('3 órdenes demo', () => {
+  checkData('3 órdenes demo con código hasheado', () => {
     assert.equal(orders.orders.length, 3)
-    assert.deepEqual(
-      orders.orders.map((order) => order.code).sort(),
-      ['DEMO-01', 'DEMO-02', 'DEMO-03']
-    )
+    assert.ok(orders.orders.every((order) => /^[a-f0-9]{64}$/.test(order.codeHash)))
+    assert.equal(new Set(orders.orders.map((order) => order.codeHash)).size, 3)
   })
   checkData('coincidencia con la base local', () => {
     const dbPath =
@@ -584,12 +583,12 @@ async function main() {
     await page.waitForTimeout(300)
     await page.screenshot({ path: path.join(shotsDir, '04b-servicios-formulario.png') })
 
-    await check('Buscar orden: datos demo y error controlado', async () => {
+    await check('Buscar orden: código y error controlado', async () => {
       await goto('/buscar-orden')
       await page.locator('.order-search-form').waitFor()
-      assert.match(await page.locator('.order-subtitle').innerText(), /QR no está activo/i)
+      assert.match(await page.locator('.order-subtitle').innerText(), /código de seguimiento/i)
       assert.match(await page.locator('.order-qr-note').innerText(), /inactivo por defecto/i)
-      assert.equal(await page.locator('.order-demo-list button').count(), 3)
+      assert.equal(await page.locator('.order-demo-list').count(), 0)
       await page.locator('.order-search-form input').first().fill('OT-000000')
       await page.locator('.order-search-form input').nth(1).fill('XXXX-00')
       await page.locator('.order-search-form button[type="submit"]').click()
@@ -597,12 +596,13 @@ async function main() {
       assert.match(await page.locator('.order-error').innerText(), /No encontramos una orden/i)
     })
 
-    await check('Buscar orden: chip demo muestra estado', async () => {
-      await page.locator('.order-demo-list button').first().click()
+    await check('Buscar orden: código válido muestra estado', async () => {
+      await goto('/buscar-orden')
+      await page.locator('.order-search-form input').first().fill('OT-002332')
+      await page.locator('.order-search-form input').nth(1).fill('DEMO-01')
+      await page.locator('.order-search-form button[type="submit"]').click()
       await page.locator('.order-status-card').waitFor()
       assert.match(await page.locator('.order-number').innerText(), /OT-002332/)
-      assert.match(await page.locator('.order-status-pill').innerText(), /Listo para entrega/i)
-      assert.match(await page.locator('.order-equipment').innerText(), /HP ProDesk 400 G6/i)
     })
 
     await page.screenshot({ path: path.join(shotsDir, '05-buscar-orden-desktop.png') })

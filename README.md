@@ -45,7 +45,7 @@ Incluye:
 - Visibilidad de stock configurable: mostrar cantidades o solo “Agotado”.
 - Etiqueta “Más vendido” con la regla de 30 días y mínimo 2 unidades (solo cuando hay datos).
 - Servicios sin precio por hora.
-- Consulta demo de OT con número y código.
+- Consulta real de OT por número y código validado por hash.
 - Promociones por SKU/categoría/todo, porcentaje o monto fijo, vigencia, prioridad y publicación web.
 - Exclusión de servicios, inactivos, insumos de taller, productos con `publish_web = 0` y condiciones no elegibles (`Usado`, `Para repuesto`, `Otro`).
 
@@ -55,22 +55,24 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/17-contrato-1.13.1.md`, el acta en `docs/actas/1.13.1.md` y los pendientes en `docs/pendientes/1.13.1.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/18-contrato-1.14.1.md`, el acta en `docs/actas/1.14.1.md` y los pendientes en `docs/pendientes/1.14.1.md`.
 
-Los pedidos en línea, los pagos y el portal de OT con datos reales siguen pendientes. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
+Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales ya consulta por número y código, sin publicar el código en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
 ## Primer arranque
 
-La primera vez **no se crean usuarios ni credenciales por defecto**. La aplicación muestra la pantalla **Configura tu taller**, donde se registra:
+La base se crea con una cuenta **Propietario** oculta y protegida. La primera vez, la aplicación muestra la pantalla **Configura tu taller** para crear únicamente la cuenta **Administrador**:
 
-- Nombre del propietario.
+- Nombre del administrador.
 - Nombre del taller o negocio.
 - Usuario y contraseña (mínimo 8 caracteres).
 - Correo de contacto opcional.
 
-La configuración inicial crea la cuenta raíz, registra la auditoría y genera un respaldo completo. En ese momento se puede elegir **Cargar datos de demostración** para probar la aplicación con productos, clientes y OT ficticias. Las cuentas demo de ese modo reciben contraseñas aleatorias; no se publican credenciales conocidas.
+La configuración inicial registra la auditoría y genera un respaldo completo. En ese momento se puede elegir **Cargar datos de demostración** para probar la aplicación con productos, clientes y OT ficticias. Las cuentas demo reciben contraseñas aleatorias; no se publican credenciales conocidas.
 
-Si actualizas desde una instalación anterior, la base existente conserva sus usuarios y datos. Cambia las contraseñas demo desde **Configuración → Seguridad** antes de usar información real.
+La cuenta Propietario no aparece en la lista de usuarios para los administradores. Se usa solo para auditoría y recuperación. Los administradores pueden crear otros administradores, técnicos y cajeros desde **Configuración → Usuarios y roles**.
+
+Si actualizas desde una instalación anterior, la base existente conserva sus usuarios y datos. La migración agrega los módulos de permisos y los códigos de seguimiento sin borrar información. La cuenta raíz existente se migra a las credenciales privadas de 1.14 y pasa a llamarse `propietario` cuando ese usuario está disponible.
 
 ## Datos, evidencias y respaldos
 
@@ -208,6 +210,8 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.12.0` | Promociones, POS, publicación local y permisos. |
 | `npm run test:acceptance:1.13.0` | Supabase simulado: conexión, clave cifrada, subida, limpieza, permisos y más vendidos. |
 | `npm run test:acceptance:1.13.1` | Carrito web, visibilidad de stock, publicación por referencia y regla de usados/reacondicionados. |
+| `npm run test:acceptance:1.14.0` | Superadmin oculto, primer admin, administradores y permisos por módulos. |
+| `npm run test:acceptance:1.14.1` | Facturación, entrega, crédito, reportes, purga y seguimiento por hash. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
@@ -240,6 +244,8 @@ npm run test:acceptance:1.11.0
 npm run test:acceptance:1.12.0
 npm run test:acceptance:1.13.0
 npm run test:acceptance:1.13.1
+npm run test:acceptance:1.14.0
+npm run test:acceptance:1.14.1
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -253,7 +259,7 @@ npm run test:migration:1.11.0
 npm run test:migration:1.12.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30` y `23/23`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22` y `22/22`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -261,7 +267,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.13.1-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.14.1-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`

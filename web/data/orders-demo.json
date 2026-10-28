@@ -1,40 +1,40 @@
 {
-  "generatedAt": "2026-10-28T07:39:32.900Z",
-  "demo": true,
-  "note": "Datos de demostración sin nombre, teléfono ni datos privados del cliente.",
+  "generatedAt": "2026-10-28T14:48:32.702Z",
+  "demo": false,
+  "note": "Estados de OT sin nombre, teléfono, serial, credenciales ni notas internas. El código se valida por hash.",
   "orders": [
     {
       "number": "OT-002332",
-      "code": "DEMO-01",
+      "codeHash": "73bd447029dfb7da5e960ccb2b74bfe348b0c725cd9c1ec251b066abc9bac0b4",
       "status": "listo",
       "equipmentType": "PC de escritorio",
       "brand": "HP",
       "model": "ProDesk 400 G6",
-      "promisedAt": "2026-10-25T17:00:00",
-      "createdAt": "2026-10-23T16:40:00",
-      "updatedAt": "2026-10-23T16:40:00"
+      "promisedAt": "2026-10-28T14:48:32.701Z",
+      "createdAt": "2026-10-28T14:48:32.702Z",
+      "updatedAt": "2026-10-28T14:48:32.702Z"
     },
     {
       "number": "OT-002341",
-      "code": "DEMO-02",
+      "codeHash": "b41760505f4645052387ceaa85c4da5220a68326da0f1cbd2e05e959388189a5",
       "status": "reparacion",
       "equipmentType": "Laptop",
       "brand": "Apple",
       "model": "MacBook Pro 13\" 2020",
-      "promisedAt": "2026-10-26T17:00:00",
-      "createdAt": "2026-10-22T09:15:00",
-      "updatedAt": "2026-10-22T09:15:00"
+      "promisedAt": "2026-10-28T14:48:32.702Z",
+      "createdAt": "2026-10-28T14:48:32.702Z",
+      "updatedAt": "2026-10-28T14:48:32.702Z"
     },
     {
       "number": "OT-002336",
-      "code": "DEMO-03",
+      "codeHash": "21c05b710e32329da9749125597a7c08d1d2adf6de238fe30cc0c0d97319da94",
       "status": "recibido",
       "equipmentType": "Consola",
       "brand": "Sony",
       "model": "PlayStation 5",
-      "promisedAt": "2026-10-29T17:00:00",
-      "createdAt": "2026-10-25T09:05:00",
-      "updatedAt": "2026-10-25T09:05:00"
+      "promisedAt": "2026-10-28T14:48:32.702Z",
+      "createdAt": "2026-10-28T14:48:32.702Z",
+      "updatedAt": "2026-10-28T14:48:32.702Z"
     }
   ]
 }

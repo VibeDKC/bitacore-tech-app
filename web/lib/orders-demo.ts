@@ -2,7 +2,7 @@ import ordersJson from '@/data/orders-demo.json'
 
 export type DemoOrder = {
   number: string
-  code: string
+  codeHash: string
   status: string
   equipmentType: string
   brand: string
@@ -97,22 +97,6 @@ export function statusSteps(status: string) {
       state
     }
   })
-}
-
-export function findDemoOrder(orders: DemoOrder[], number: string, code: string) {
-  const normalizedNumber = number.trim().toUpperCase()
-  const normalizedCode = code.trim().toUpperCase()
-  return orders.find(
-    (order) =>
-      order.number.toUpperCase() === normalizedNumber &&
-      order.code.toUpperCase() === normalizedCode
-  )
-}
-
-export function findDemoOrderByCode(orders: DemoOrder[], code: string) {
-  return orders.find(
-    (order) => order.code.toUpperCase() === code.trim().toUpperCase()
-  )
 }
 
 export function formatOrderDate(value: string) {

@@ -30,6 +30,7 @@ import type {
   EvidenceStage,
   Invoice,
   LegalConfig,
+  ModuleKey,
   Payment,
   PaymentMethod,
   Product,
@@ -148,6 +149,7 @@ export interface LoginResult extends AuthSession {}
 export interface SetupStatus {
   setupRequired: boolean
   hasUsers: boolean
+  hasAdmin?: boolean
 }
 
 export interface SetupInput {
@@ -168,6 +170,7 @@ export interface SessionInfo {
   expiresAt: string
   roleLabel: string
   permissions: AuthSession['permissions']
+  modules: AuthSession['modules']
 }
 
 export interface CustomerDetail {
@@ -192,6 +195,7 @@ export interface SettleInput {
   method?: PaymentMethod
   received?: number
   noCharge?: boolean
+  credit?: boolean
   exceptionReason?: string
   reference?: string
   receipt?: { dataUrl: string; name: string; mimeType: string }
@@ -286,6 +290,7 @@ export const api = {
       address?: string
       isForeignDocument?: boolean
       documentDv?: string
+      creditEnabled?: boolean
     }) {
       return rpc<Customer>('customers.create', input as unknown as Record<string, unknown>)
     },
@@ -371,6 +376,13 @@ export const api = {
       }
     ) {
       return rpc<WorkOrder>('orders.addPayment', { id, ...input })
+    },
+    invoice(input: {
+      id: string
+      discountType?: 'percent' | 'amount'
+      discountValue?: number
+    }) {
+      return rpc<WorkOrder>('orders.invoice', input)
     },
     settle(input: SettleInput) {
       return rpc<WorkOrder>('orders.settle', input as unknown as Record<string, unknown>)
@@ -640,8 +652,12 @@ export const api = {
     }
   },
   permissions: {
-    updateRole(role: Role, permissions: Array<{ capability: string; allowed: boolean }>) {
-      return rpc<SettingsData>('permissions.updateRole', { role, permissions })
+    updateRole(
+      role: Role,
+      permissions: Array<{ capability: string; allowed: boolean }>,
+      modules: Array<{ module: ModuleKey; allowed: boolean }>
+    ) {
+      return rpc<SettingsData>('permissions.updateRole', { role, permissions, modules })
     }
   },
   business: {
@@ -681,8 +697,21 @@ export const api = {
     restore(id: string) {
       return rpc<{ restored: boolean; safetyBackup: string; requiresReload: boolean; format?: 'folder' | 'db' }>('backups.restore', { id })
     },
-    purge(confirmation: string, password: string) {
-      return rpc<{ purged: boolean; backup: BackupRecord; requiresReload: boolean }>('backups.purge', { confirmation, password })
+    purge(
+      confirmation: string,
+      password: string,
+      input: {
+        scope: 'all' | 'operation' | 'custom'
+        selection?: Array<'operation' | 'inventory' | 'customers' | 'suppliers' | 'promotions'>
+        publishCatalog?: boolean
+      } = { scope: 'all' }
+    ) {
+      return rpc<{
+        purged: boolean
+        backup: BackupRecord
+        requiresReload: boolean
+        catalog?: { ok: boolean; error?: string }
+      }>('backups.purge', { confirmation, password, ...input })
     },
     setPassword(password: string) {
       return rpc<{ configured: boolean }>('backups.setPassword', { password })

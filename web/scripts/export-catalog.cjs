@@ -7,6 +7,7 @@
  */
 const fs = require('node:fs')
 const path = require('node:path')
+const { createHash } = require('node:crypto')
 const { DatabaseSync } = require('node:sqlite')
 
 const webRoot = path.resolve(__dirname, '..')
@@ -17,9 +18,30 @@ const outputOrders = path.join(webRoot, 'data', 'orders-demo.json')
 const outputImages = path.join(webRoot, 'public', 'products')
 
 const demoOrders = [
-  { number: 'OT-002332', code: 'DEMO-01' },
-  { number: 'OT-002341', code: 'DEMO-02' },
-  { number: 'OT-002336', code: 'DEMO-03' }
+  {
+    number: 'OT-002332',
+    code: 'DEMO-01',
+    status: 'listo',
+    equipmentType: 'PC de escritorio',
+    brand: 'HP',
+    model: 'ProDesk 400 G6'
+  },
+  {
+    number: 'OT-002341',
+    code: 'DEMO-02',
+    status: 'reparacion',
+    equipmentType: 'Laptop',
+    brand: 'Apple',
+    model: 'MacBook Pro 13" 2020'
+  },
+  {
+    number: 'OT-002336',
+    code: 'DEMO-03',
+    status: 'recibido',
+    equipmentType: 'Consola',
+    brand: 'Sony',
+    model: 'PlayStation 5'
+  }
 ]
 const business = {
   name: 'BitacoreTech',
@@ -29,6 +51,10 @@ const business = {
   city: 'Medellín',
   hours: '8:00 a. m. – 8:00 p. m.',
   currency: 'COP'
+}
+
+function sha256(value) {
+  return createHash('sha256').update(String(value), 'utf8').digest('hex')
 }
 
 function slugify(value) {
@@ -268,37 +294,54 @@ const heroProduct =
   products.find((product) => product.image && featured.includes(product.id)) ||
   products[0]
 
-const orderRows = db
-  .prepare(
-    `SELECT number, status, equipment_type, brand, model, promised_at, created_at, updated_at
-     FROM work_orders
-     WHERE number IN (${demoOrders.map(() => '?').join(', ')})
-     ORDER BY created_at DESC`
-  )
-  .all(...demoOrders.map((order) => order.number))
+const workOrderColumns = db.prepare('PRAGMA table_info(work_orders)').all()
+const hasTrackingCode = workOrderColumns.some((column) => column.name === 'tracking_code')
+const orderRows = hasTrackingCode
+  ? db
+      .prepare(
+        `SELECT number, tracking_code, status, equipment_type, brand, model, promised_at, created_at, updated_at
+         FROM work_orders
+         WHERE tracking_code IS NOT NULL AND tracking_code <> ''
+         ORDER BY created_at DESC
+         LIMIT 500`
+      )
+      .all()
+  : []
 const ordersByNumber = new Map(orderRows.map((order) => [order.number, order]))
+const portalOrders = orderRows.map((order) => ({
+  number: order.number,
+  codeHash: sha256(order.tracking_code),
+  status: order.status,
+  equipmentType: order.equipment_type,
+  brand: order.brand,
+  model: order.model,
+  promisedAt: order.promised_at,
+  createdAt: order.created_at,
+  updatedAt: order.updated_at
+}))
+for (const demo of demoOrders) {
+  if (portalOrders.some((order) => order.number === demo.number && order.codeHash === sha256(demo.code))) {
+    continue
+  }
+  const order = ordersByNumber.get(demo.number)
+  portalOrders.push({
+    number: demo.number,
+    codeHash: sha256(demo.code),
+    status: order?.status ?? demo.status,
+    equipmentType: order?.equipment_type ?? demo.equipmentType,
+    brand: order?.brand ?? demo.brand,
+    model: order?.model ?? demo.model,
+    promisedAt: order?.promised_at ?? new Date().toISOString(),
+    createdAt: order?.created_at ?? new Date().toISOString(),
+    updatedAt: order?.updated_at ?? new Date().toISOString()
+  })
+}
 
 const ordersDemo = {
   generatedAt: new Date().toISOString(),
-  demo: true,
-  note: 'Datos de demostración sin nombre, teléfono ni datos privados del cliente.',
-  orders: demoOrders
-    .map((demo) => {
-      const order = ordersByNumber.get(demo.number)
-      if (!order) return null
-      return {
-        number: order.number,
-        code: demo.code,
-        status: order.status,
-        equipmentType: order.equipment_type,
-        brand: order.brand,
-        model: order.model,
-        promisedAt: order.promised_at,
-        createdAt: order.created_at,
-        updatedAt: order.updated_at
-      }
-    })
-    .filter(Boolean)
+  demo: false,
+  note: 'Estados de OT sin nombre, teléfono, serial, credenciales ni notas internas. El código se valida por hash.',
+  orders: portalOrders
 }
 
 const payload = {

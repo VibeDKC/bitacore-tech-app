@@ -125,6 +125,7 @@ export function OrderDetailPage() {
 
   const [itemModal, setItemModal] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [invoiceMode, setInvoiceMode] = useState<'invoice' | 'settle'>('settle')
   const [paymentModal, setPaymentModal] = useState(false)
   const [cancelModal, setCancelModal] = useState(false)
   const [documentOpen, setDocumentOpen] = useState(false)
@@ -197,6 +198,14 @@ export function OrderDetailPage() {
   const total = order?.total ?? labor + parts
   const paid = order?.paidAmount ?? payments.reduce((sum, payment) => sum + payment.amount, 0)
   const balance = order?.balance ?? Math.max(total - paid, 0)
+  const hasInvoice = Boolean(order?.invoiceNumber)
+  const canInvoice = status === 'listo' && can(role, 'settleOrder') && !hasInvoice
+  const canSettle = status === 'listo' && can(role, 'settleOrder') && hasInvoice
+  const canCredit =
+    canSettle &&
+    can(role, 'authorizeCredit') &&
+    Boolean(customer?.creditEnabled) &&
+    balance > 0
   const loyaltyActive = Boolean(
     customer?.loyaltyActive &&
       (!customer.loyaltyValidUntil || new Date(`${customer.loyaltyValidUntil}T23:59:59`).getTime() >= Date.now()) &&
@@ -204,20 +213,21 @@ export function OrderDetailPage() {
   )
   const loyaltyType = customer?.loyaltyDiscountType === 'amount' ? 'amount' : 'percent'
   const loyaltyValue = Number(customer?.loyaltyDiscountValue ?? 0)
-  const settleDiscountValue = loyaltyActive
-    ? loyaltyType === 'percent'
-      ? Math.round((total * loyaltyValue) / 100)
-      : Math.min(loyaltyValue, total)
-    : settleDiscountType === 'percent'
-      ? Math.round((total * (Number(settleDiscountInput) || 0)) / 100)
-      : Math.min(Number(settleDiscountInput) || 0, total)
+  const settleDiscountValue = hasInvoice
+    ? 0
+    : loyaltyActive
+      ? loyaltyType === 'percent'
+        ? Math.round((total * loyaltyValue) / 100)
+        : Math.min(loyaltyValue, total)
+      : settleDiscountType === 'percent'
+        ? Math.round((total * (Number(settleDiscountInput) || 0)) / 100)
+        : Math.min(Number(settleDiscountInput) || 0, total)
   const settleTotal = Math.max(total - settleDiscountValue, 0)
   const settleBalance = Math.max(settleTotal - paid, 0)
   const canManualDiscount = can(role, 'applyDiscount')
   const next = nextWorkOrderStatus(status)
   const canAdvance = Boolean(next) && (next === 'entregado' ? can(role, 'settleOrder') : can(role, 'diagnoseOrder'))
   const canAddItem = can(role, 'diagnoseOrder') || can(role, 'createOrder')
-  const canBill = status === 'listo' && can(role, 'settleOrder')
   const orderTerminal = ['entregado', 'no_reparado'].includes(status)
   const canManageCredentials =
     Boolean(order) &&
@@ -374,6 +384,11 @@ export function OrderDetailPage() {
   }
 
   function openSettlement() {
+    if (!hasInvoice) {
+      openInvoice()
+      return
+    }
+    setInvoiceMode('settle')
     setNoCharge(false)
     setExceptionReason('')
     setPaymentMethod('Efectivo')
@@ -382,6 +397,46 @@ export function OrderDetailPage() {
     setReceived(String(settleBalance))
     setSettleReceipt(null)
     setInvoiceModal(true)
+  }
+
+  function openInvoice() {
+    setInvoiceMode('invoice')
+    setNoCharge(false)
+    setExceptionReason('')
+    setPaymentMethod('Efectivo')
+    setSettleDiscountType('percent')
+    setSettleDiscountInput('')
+    setSettleReceipt(null)
+    setInvoiceModal(true)
+  }
+
+  function openNoCharge() {
+    setInvoiceMode('settle')
+    setNoCharge(true)
+    setExceptionReason('')
+    setPaymentMethod('Efectivo')
+    setReceived('')
+    setSettleReceipt(null)
+    setInvoiceModal(true)
+  }
+
+  async function deliverOnCredit() {
+    if (!order || settling || !canCredit) return
+    if (!window.confirm('¿Confirmas la entrega a crédito? El saldo quedará pendiente y la autorización se registrará en la auditoría.')) {
+      return
+    }
+    setSettling(true)
+    try {
+      const updated = await api.orders.settle({ id: order.id, credit: true })
+      applyOrder(updated)
+      toast.success('Equipo entregado a crédito', {
+        description: `${updated.invoiceNumber ?? 'Factura'} · saldo pendiente ${formatCurrency(updated.balance ?? 0)}`
+      })
+    } catch (failure) {
+      toast.error('No se pudo entregar a crédito', { description: errorMessage(failure) })
+    } finally {
+      setSettling(false)
+    }
   }
 
   async function advanceStatus() {
@@ -530,10 +585,34 @@ export function OrderDetailPage() {
 
   async function confirmInvoice() {
     if (!order || settling) return
-    if (!noCharge && settleBalance <= 0) {
-      toast.error('No hay saldo pendiente por cobrar')
+    if (invoiceMode === 'invoice') {
+      if (settleTotal <= 0) {
+        toast.error('No hay valores por cobrar', {
+          description: 'Agrega mano de obra o repuestos, o registra un presupuesto en la OT.'
+        })
+        return
+      }
+      setSettling(true)
+      try {
+        const updated = await api.orders.invoice({
+          id: order.id,
+          discountType: loyaltyActive ? loyaltyType : settleDiscountType,
+          discountValue: loyaltyActive ? loyaltyValue : Number(settleDiscountInput) || 0
+        })
+        applyOrder(updated)
+        setInvoiceModal(false)
+        setSettleReceipt(null)
+        toast.success('OT facturada', {
+          description: `${updated.invoiceNumber ?? 'Factura'} · ${formatCurrency(updated.total ?? settleTotal)}. El cobro y la entrega se registran aparte.`
+        })
+      } catch (failure) {
+        toast.error('No se pudo facturar la OT', { description: errorMessage(failure) })
+      } finally {
+        setSettling(false)
+      }
       return
     }
+
     if (!noCharge && settleTotal <= 0) {
       toast.error('No hay valores por cobrar', {
         description: 'Agrega mano de obra o repuestos, registra un presupuesto, o autoriza la entrega sin cobro.'
@@ -560,8 +639,6 @@ export function OrderDetailPage() {
         received: noCharge || paymentMethod !== 'Efectivo' ? undefined : receivedValue,
         noCharge,
         exceptionReason: noCharge ? exceptionReason.trim() : undefined,
-        discountType: noCharge ? undefined : loyaltyActive ? loyaltyType : settleDiscountType,
-        discountValue: noCharge ? 0 : loyaltyActive ? loyaltyValue : Number(settleDiscountInput) || 0,
         receipt:
           !noCharge && settleReceipt
             ? {
@@ -581,8 +658,8 @@ export function OrderDetailPage() {
           description: 'La excepción quedó registrada en la bitácora y en la auditoría.'
         })
       } else {
-        toast.success('Factura interna generada', {
-          description: `${updated.invoiceNumber ?? 'Factura'} · ${formatCurrency(balance)} · ${paymentMethod}`
+        toast.success('Cobro y entrega registrados', {
+          description: `${updated.invoiceNumber ?? 'Factura'} · ${formatCurrency(updated.balance ?? 0)} de saldo`
         })
       }
     } catch (failure) {
@@ -672,13 +749,38 @@ export function OrderDetailPage() {
           <Button variant="secondary" size="sm" leftIcon={<MessageCircle className="h-3.5 w-3.5" />} onClick={openWhatsApp}>
             WhatsApp
           </Button>
-          {canBill ? (
+          {canInvoice ? (
+            <Button size="sm" onClick={openInvoice} leftIcon={<FileText className="h-3.5 w-3.5" />}>
+              Facturar
+            </Button>
+          ) : canSettle ? (
             <Button size="sm" onClick={openSettlement} leftIcon={<FileText className="h-3.5 w-3.5" />}>
-              Facturar y entregar
+              Cobrar y entregar
             </Button>
           ) : canAdvance && next ? (
             <Button size="sm" onClick={() => void advanceStatus()} loading={saving} rightIcon={<ArrowRight className="h-3.5 w-3.5" />}>
               Pasar a {workOrderStatusConfig[next].shortLabel}
+            </Button>
+          ) : null}
+          {canCredit ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void deliverOnCredit()}
+              loading={settling}
+              leftIcon={<Wallet className="h-3.5 w-3.5" />}
+            >
+              Entregar a crédito
+            </Button>
+          ) : null}
+          {canInvoice && canAuthorizeNoCharge ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={openNoCharge}
+              leftIcon={<ShieldCheck className="h-3.5 w-3.5" />}
+            >
+              Entregar sin cobro
             </Button>
           ) : null}
         </div>
@@ -699,6 +801,8 @@ export function OrderDetailPage() {
               </div>
               <p className="mt-1 text-[12px] text-slate-500">
                 {order.number} · {order.equipmentType} · {order.customerName}
+                {order.trackingCode ? ` · Seguimiento ${order.trackingCode}` : ''}
+                {order.invoiceNumber ? ` · Factura ${order.invoiceNumber}` : ''}
               </p>
               <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-slate-400">
                 <span className="flex items-center gap-1">
@@ -1278,8 +1382,21 @@ export function OrderDetailPage() {
             <div className="card p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-display text-[15px] font-bold text-ink">Cierre financiero</h2>
-                <Badge variant={order.settlement?.status === 'exento' ? 'warning' : 'success'} dot>
-                  {order.settlement?.status === 'exento' ? 'Sin cobro' : 'Pagado'}
+                <Badge
+                  variant={
+                    order.settlement?.status === 'exento'
+                      ? 'warning'
+                      : order.settlement?.status === 'credito'
+                        ? 'danger'
+                        : 'success'
+                  }
+                  dot
+                >
+                  {order.settlement?.status === 'exento'
+                    ? 'Sin cobro'
+                    : order.settlement?.status === 'credito'
+                      ? 'Crédito'
+                      : 'Pagado'}
                 </Badge>
               </div>
               {order.settlement ? (
@@ -1290,7 +1407,9 @@ export function OrderDetailPage() {
                     <p className="mt-1 text-[9px] text-slate-400">
                       {order.settlement.status === 'exento'
                         ? 'Entrega autorizada sin cobro'
-                        : `${order.settlement.method ?? '—'} · ${order.settlement.invoiceNumber ?? 'Sin factura'}`}
+                        : order.settlement.status === 'credito'
+                          ? `Entrega a crédito autorizada por ${order.settlement.creditAuthorizedBy ?? 'el administrador'}`
+                          : `${order.settlement.method ?? '-'} · ${order.settlement.invoiceNumber ?? 'Sin factura'}`}
                     </p>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-slate-500">
@@ -1563,13 +1682,15 @@ export function OrderDetailPage() {
       <Modal
         open={invoiceModal}
         onClose={() => setInvoiceModal(false)}
-        title="Cobro y entrega"
+        title={invoiceMode === 'invoice' ? 'Facturar OT' : 'Cobro y entrega'}
         description={`${order.number} · ${order.customerName} · sin IVA`}
         size="md"
         footer={
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
             <span className="text-[9px] leading-relaxed text-slate-400">
-              La entrega cierra la OT y queda en la auditoría.
+              {invoiceMode === 'invoice'
+                ? 'La factura se genera ahora. El cobro y la entrega se registran aparte.'
+                : 'La entrega cierra la OT y queda en la auditoría.'}
             </span>
             <div className="flex flex-col-reverse gap-2 sm:flex-row">
               <Button variant="secondary" onClick={() => setInvoiceModal(false)}>
@@ -1578,11 +1699,19 @@ export function OrderDetailPage() {
               <Button
                 onClick={() => void confirmInvoice()}
                 loading={settling}
-                disabled={(!noCharge && settleBalance <= 0) || (noCharge && !canAuthorizeNoCharge)}
+                disabled={
+                  invoiceMode === 'invoice'
+                    ? settleTotal <= 0
+                    : noCharge && !canAuthorizeNoCharge
+                }
                 leftIcon={<CheckCircle2 className="h-4 w-4" />}
                 variant={noCharge ? 'danger' : 'primary'}
               >
-                {noCharge ? 'Entregar sin cobro' : 'Cobrar y entregar'}
+                {invoiceMode === 'invoice'
+                  ? 'Facturar'
+                  : noCharge
+                    ? 'Entregar sin cobro'
+                    : 'Cobrar y entregar'}
               </Button>
             </div>
           </div>
@@ -1605,11 +1734,13 @@ export function OrderDetailPage() {
               </div>
             ) : null}
             <div className="mt-2.5 flex items-center justify-between border-t border-line pt-2.5">
-              <span className="text-[11px] text-slate-500">Total de la OT</span>
+              <span className="text-[11px] text-slate-500">
+                {invoiceMode === 'invoice' ? 'Total a facturar' : 'Total de la OT'}
+              </span>
               <span className="tabular text-[12px] font-semibold text-ink">{formatCurrency(total)}</span>
             </div>
 
-            {!noCharge ? (
+            {invoiceMode === 'invoice' && !noCharge ? (
               <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                 <span className="flex items-center gap-1.5">
                   <Tag className="h-3 w-3" /> Descuento
@@ -1667,17 +1798,25 @@ export function OrderDetailPage() {
               </div>
             ) : null}
 
-            <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-              <span>Anticipos aplicados</span>
-              <span className="tabular font-semibold text-success-600">- {formatCurrency(paid)}</span>
-            </div>
+            {invoiceMode === 'settle' ? (
+              <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                <span>Anticipos aplicados</span>
+                <span className="tabular font-semibold text-success-600">- {formatCurrency(paid)}</span>
+              </div>
+            ) : null}
             <div className="mt-2 flex items-center justify-between border-t border-line pt-2.5">
-              <span className="text-[12px] font-semibold text-slate-600">Saldo a cobrar</span>
-              <span className="tabular font-display text-2xl font-bold text-ink">{formatCurrency(noCharge ? 0 : settleBalance)}</span>
+              <span className="text-[12px] font-semibold text-slate-600">
+                {invoiceMode === 'invoice' ? 'Total a facturar' : 'Saldo a cobrar'}
+              </span>
+              <span className="tabular font-display text-2xl font-bold text-ink">
+                {formatCurrency(
+                  invoiceMode === 'invoice' ? settleTotal : noCharge ? 0 : settleBalance
+                )}
+              </span>
             </div>
           </div>
 
-          {!noCharge ? (
+          {invoiceMode === 'settle' && !noCharge ? (
             <div>
               <span className="field-label">Método de pago</span>
               <div className="grid grid-cols-2 gap-2">
@@ -1708,7 +1847,7 @@ export function OrderDetailPage() {
             </div>
           ) : null}
 
-          {!noCharge && paymentMethod === 'Efectivo' ? (
+          {invoiceMode === 'settle' && !noCharge && paymentMethod === 'Efectivo' ? (
             <div className="rounded-xl border border-line bg-white p-3.5">
               <label className="block">
                 <span className="field-label">Efectivo recibido</span>
@@ -1726,7 +1865,7 @@ export function OrderDetailPage() {
             </div>
           ) : null}
 
-          {!noCharge ? (
+          {invoiceMode === 'settle' && !noCharge ? (
             <PaymentReceiptField
               value={settleReceipt}
               onChange={setSettleReceipt}
@@ -1734,6 +1873,7 @@ export function OrderDetailPage() {
             />
           ) : null}
 
+          {invoiceMode === 'settle' && !hasInvoice ? (
           <div className={cn('rounded-xl border p-3.5', noCharge ? 'border-danger-200 bg-danger-50/60' : 'border-line bg-white')}>
             <label className={cn('flex items-start gap-2', canAuthorizeNoCharge ? 'cursor-pointer' : 'cursor-not-allowed opacity-70')}>
               <input
@@ -1763,11 +1903,14 @@ export function OrderDetailPage() {
               </label>
             ) : null}
           </div>
+          ) : null}
 
           <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-brand-800">
-            {noCharge
-              ? 'La OT quedará Entregada como excepción sin cobro. El motivo y el usuario se guardan en la bitácora y la auditoría.'
-              : 'Se generará la factura interna, se registrará el pago restante en caja y la OT pasará a Entregado. El cobro se registra ahora, no al recibir el equipo.'}
+            {invoiceMode === 'invoice'
+              ? 'Se generará la factura interna con el total y el descuento aplicado. El cobro y la entrega se registran en un paso posterior.'
+              : noCharge
+                ? 'La OT quedará Entregada como excepción sin cobro. El motivo y el usuario se guardan en la bitácora y la auditoría.'
+                : 'Se registrará el pago restante en caja y la OT pasará a Entregado. El cobro se registra ahora, no al recibir el equipo.'}
           </div>
         </div>
       </Modal>

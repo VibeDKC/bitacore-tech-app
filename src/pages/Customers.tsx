@@ -49,7 +49,8 @@ const emptyForm = {
   phones: [emptyPhone()] as CustomerPhoneDraft[],
   email: '',
   address: '',
-  isForeignDocument: false
+  isForeignDocument: false,
+  creditEnabled: false
 }
 
 export function CustomersPage() {
@@ -260,7 +261,8 @@ export function CustomersPage() {
       loyaltyDiscountType: selected.loyaltyDiscountType ?? 'percent',
       loyaltyDiscountValue: String(selected.loyaltyDiscountValue ?? 0),
       loyaltyValidUntil: selected.loyaltyValidUntil?.slice(0, 10) ?? '',
-      loyaltyNotes: selected.loyaltyNotes ?? ''
+      loyaltyNotes: selected.loyaltyNotes ?? '',
+      creditEnabled: Boolean(selected.creditEnabled)
     })
     setEditOpen(true)
   }
@@ -309,6 +311,7 @@ export function CustomersPage() {
         payload.loyaltyDiscountValue = Number(editForm.loyaltyDiscountValue) || 0
         payload.loyaltyValidUntil = editForm.loyaltyValidUntil || null
         payload.loyaltyNotes = editForm.loyaltyNotes.trim()
+        payload.creditEnabled = editForm.creditEnabled
       }
       const updated = await api.customers.update(selected.id, payload)
       setData((current) =>
@@ -968,6 +971,25 @@ export function CustomersPage() {
                   Cliente fiel
                 </label>
               </div>
+              <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-line bg-white/70 p-3">
+                <input
+                  type="checkbox"
+                  checked={editForm.creditEnabled}
+                  onChange={(event) =>
+                    setEditForm({ ...editForm, creditEnabled: event.target.checked })
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                />
+                <span>
+                  <span className="block text-[11px] font-semibold text-ink">
+                    Permitir entrega a crédito
+                  </span>
+                  <span className="mt-0.5 block text-[9px] leading-relaxed text-slate-500">
+                    Solo para personas de confianza. La entrega sin pago queda auditada y el
+                    saldo permanece pendiente.
+                  </span>
+                </span>
+              </label>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="field-label">Tipo de descuento</span>

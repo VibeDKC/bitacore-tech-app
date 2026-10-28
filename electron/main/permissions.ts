@@ -1,4 +1,4 @@
-import type { Role } from '@shared/index'
+import { MODULE_KEYS, type ModuleKey, type Role } from '@shared/index'
 
 export type BackendCapability =
   | 'viewCosts'
@@ -32,6 +32,7 @@ export type BackendCapability =
   | 'managePromotions'
   | 'publishCatalog'
   | 'authorizeNoCharge'
+  | 'authorizeCredit'
   | 'manageEvidence'
   | 'voidEvidence'
   | 'verifyEvidence'
@@ -69,6 +70,7 @@ export const ALL_CAPABILITIES: BackendCapability[] = [
   'managePromotions',
   'publishCatalog',
   'authorizeNoCharge',
+  'authorizeCredit',
   'manageEvidence',
   'voidEvidence',
   'verifyEvidence',
@@ -81,16 +83,23 @@ export const ROOT_ONLY_CAPABILITIES: BackendCapability[] = [
   'exportAudit',
   'purgeData',
   'restoreBackup',
-  'manageAdmins',
   'configureLegal',
   'configureAI'
 ]
+
+export const ROOT_ONLY_MODULES: ModuleKey[] = ['audit']
 
 export function capabilitiesForRole(role: Role) {
   return roleCapabilities[role]
 }
 
-const roleModules: Record<Role, string[]> = {
+export const ALL_MODULES: ModuleKey[] = [...MODULE_KEYS]
+
+export function roleModulesForRole(role: Role): ModuleKey[] {
+  return [...roleModules[role]]
+}
+
+const roleModules: Record<Role, ModuleKey[]> = {
   superadmin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'audit', 'promotions', 'settings'],
   admin: ['dashboard', 'pos', 'orders', 'inventory', 'customers', 'purchases', 'cash', 'reports', 'promotions', 'settings'],
   tecnico: ['dashboard', 'orders', 'inventory', 'customers', 'promotions'],
@@ -130,6 +139,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'managePromotions',
     'publishCatalog',
     'authorizeNoCharge',
+    'authorizeCredit',
     'manageEvidence',
     'voidEvidence',
     'verifyEvidence',
@@ -138,6 +148,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
   admin: [
     'viewCosts',
     'viewGrossMargin',
+    'manageAdmins',
     'manageStaff',
     'configureBusiness',
     'managePermissions',
@@ -158,6 +169,7 @@ const roleCapabilities: Record<Role, BackendCapability[]> = {
     'managePromotions',
     'publishCatalog',
     'authorizeNoCharge',
+    'authorizeCredit',
     'manageEvidence',
     'voidEvidence',
     'verifyEvidence',
@@ -171,7 +183,7 @@ export function can(role: Role, capability: BackendCapability) {
   return roleCapabilities[role].includes(capability)
 }
 
-export function canAccessModule(role: Role, module: string) {
+export function canAccessModule(role: Role, module: ModuleKey) {
   return roleModules[role].includes(module)
 }
 
@@ -181,7 +193,7 @@ export function requireCapability(role: Role, capability: BackendCapability) {
   }
 }
 
-export function requireModule(role: Role, module: string) {
+export function requireModule(role: Role, module: ModuleKey) {
   if (!canAccessModule(role, module)) {
     throw new RpcError(`Tu rol (${roleLabel(role)}) no tiene acceso a este módulo.`, 'FORBIDDEN')
   }

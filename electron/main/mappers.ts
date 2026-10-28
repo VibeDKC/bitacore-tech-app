@@ -88,7 +88,8 @@ export function customerDto(db: Database, row: any) {
     loyaltyDiscountType: row.loyalty_discount_type ?? 'percent',
     loyaltyDiscountValue: Number(row.loyalty_discount_value ?? 0),
     loyaltyValidUntil: row.loyalty_valid_until ?? null,
-    loyaltyNotes: row.loyalty_notes ?? ''
+    loyaltyNotes: row.loyalty_notes ?? '',
+    creditEnabled: bool(row.credit_enabled)
   }
 }
 
@@ -327,9 +328,15 @@ export function orderDto(db: Database, row: any) {
   }))
   const payments = paymentRows.map((payment) => paymentDto(db, payment))
   const itemsTotal = itemRows.reduce((sum, item) => sum + Number(item.unit_price_cents) * Number(item.quantity), 0)
-  const totalCents = itemsTotal > 0 ? itemsTotal : toCents(intake?.estimate ?? 0)
+  const totalCents =
+    invoiceRow?.status === 'activa'
+      ? Number(invoiceRow.total_cents)
+      : itemsTotal > 0
+        ? itemsTotal
+        : toCents(intake?.estimate ?? 0)
   const paidCents = paymentRows.reduce((sum, payment) => sum + Number(payment.amount_cents), 0)
   const isExceptionInvoice = Boolean(invoiceRow && String(invoiceRow.notes ?? '').startsWith('Excepción:'))
+  const isCreditInvoice = Boolean(invoiceRow?.credit_authorized)
   const isNoChargeDelivery = row.status === 'entregado' && isExceptionInvoice
   const balanceCents = isNoChargeDelivery ? 0 : Math.max(totalCents - paidCents, 0)
   const balance = money(balanceCents)
@@ -340,25 +347,35 @@ export function orderDto(db: Database, row: any) {
     const exceptionReason = isException
       ? String(invoiceRow.notes ?? '').replace(/^Excepción:\s*/i, '')
       : undefined
-    settlement = isException
+    settlement = isCreditInvoice
       ? {
-          status: 'exento',
-          amount: 0,
-          paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
-          exceptionReason
-        }
-      : {
-          status: 'pagado',
+          status: 'credito',
           amount: money(invoiceRow?.total_cents ?? paidCents),
-          method: invoiceRow?.payment_method ?? paymentRows.at(-1)?.method,
+          method: 'Crédito',
           paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
-          invoiceNumber: invoiceRow?.number
+          invoiceNumber: invoiceRow?.number,
+          creditAuthorizedBy: invoiceRow?.credit_authorized_by ?? null
         }
+      : isException
+        ? {
+            status: 'exento',
+            amount: 0,
+            paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
+            exceptionReason
+          }
+        : {
+            status: 'pagado',
+            amount: money(invoiceRow?.total_cents ?? paidCents),
+            method: invoiceRow?.payment_method ?? paymentRows.at(-1)?.method,
+            paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
+            invoiceNumber: invoiceRow?.number
+          }
   }
 
   return {
     id: row.id,
     number: row.number,
+    trackingCode: row.tracking_code ?? null,
     customerId: row.customer_id,
     customerName: row.customer_name,
     equipmentType: row.equipment_type,

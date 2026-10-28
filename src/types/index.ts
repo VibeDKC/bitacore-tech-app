@@ -1,24 +1,13 @@
 import type { LucideIcon } from 'lucide-react'
+import type { ModuleKey } from './modules'
 import type { CatalogSyncStatus, ProductPromotion } from './promotions'
 
 export * from './dictionaries'
 export * from './messages'
+export * from './modules'
 export * from './promotions'
 
 export type Role = 'superadmin' | 'admin' | 'tecnico' | 'cajero'
-
-export type ModuleKey =
-  | 'dashboard'
-  | 'pos'
-  | 'orders'
-  | 'inventory'
-  | 'customers'
-  | 'purchases'
-  | 'cash'
-  | 'reports'
-  | 'audit'
-  | 'promotions'
-  | 'settings'
 
 export type Capability =
   | 'viewCosts'
@@ -45,6 +34,7 @@ export type Capability =
   | 'settleOrder'
   | 'manageLoyalty'
   | 'authorizeNoCharge'
+  | 'authorizeCredit'
   | 'viewAudit'
   | 'viewFullAudit'
   | 'exportAudit'
@@ -133,6 +123,7 @@ export interface Customer {
   loyaltyDiscountValue?: number
   loyaltyValidUntil?: string | null
   loyaltyNotes?: string
+  creditEnabled?: boolean
 }
 
 export interface Equipment {
@@ -327,12 +318,13 @@ export interface WorkOrderEvidence {
 }
 
 export interface Settlement {
-  status: 'pagado' | 'exento'
+  status: 'pagado' | 'exento' | 'credito'
   amount: number
-  method?: PaymentMethod
+  method?: PaymentMethod | 'Crédito'
   paidAt: string
   invoiceNumber?: string
   exceptionReason?: string
+  creditAuthorizedBy?: string | null
 }
 
 export interface PaymentReceipt {
@@ -402,6 +394,7 @@ export interface TechnicianOption {
 export interface WorkOrder {
   id: string
   number: string
+  trackingCode?: string | null
   customerId: string
   customerName: string
   equipmentType: string
@@ -852,6 +845,7 @@ export interface AuthSession {
   expiresAt: string
   roleLabel: string
   permissions: Capability[]
+  modules: ModuleKey[]
 }
 
 export interface StockSummary {
@@ -950,7 +944,11 @@ export interface AccountSummaryRow {
 export interface ReportData {
   period: 'hoy' | '7d' | '30d' | 'ano'
   salesTotal: number
+  salesPos: number
+  salesOt: number
   invoiceCount: number
+  invoiceCountPos: number
+  invoiceCountOt: number
   avgTicket: number
   grossMargin: number | null
   grossMarginPercent: number | null
@@ -1022,6 +1020,7 @@ export interface SettingsData {
   catalog: CatalogSyncStatus
   backup: { passwordConfigured: boolean }
   rolePermissions: Array<{ role: Role; capability: Capability; allowed: boolean }>
+  roleModules: Array<{ role: Role; module: ModuleKey; allowed: boolean }>
   statuses: StatusSetting[]
 }
 

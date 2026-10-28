@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   PRIMARY KEY (role, capability)
 );
 
+CREATE TABLE IF NOT EXISTS role_modules (
+  role TEXT NOT NULL,
+  module TEXT NOT NULL,
+  allowed INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (role, module)
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

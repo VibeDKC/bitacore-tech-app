@@ -3,7 +3,7 @@ import { ArrowLeft, CheckCircle2, Clock, ShieldCheck } from 'lucide-react'
 import type { DemoOrder } from '@/lib/orders-demo'
 import { formatOrderDate, statusInfo, statusSteps } from '@/lib/orders-demo'
 
-export function OrderStatusCard({ order }: { order: DemoOrder }) {
+export function OrderStatusCard({ order, code }: { order: DemoOrder; code?: string }) {
   const info = statusInfo(order.status)
   const steps = statusSteps(order.status)
 
@@ -46,7 +46,7 @@ export function OrderStatusCard({ order }: { order: DemoOrder }) {
         </div>
         <div>
           <span className="fact-label">Código de seguimiento</span>
-          <p>{order.code}</p>
+          <p>{code || 'Verificado'}</p>
         </div>
       </div>
 
@@ -63,7 +63,7 @@ export function OrderStatusCard({ order }: { order: DemoOrder }) {
           Consultar otra orden
         </Link>
         <span className="order-demo-note">
-          <Clock aria-hidden="true" /> Datos de demostración
+          <Clock aria-hidden="true" /> Consulta segura
         </span>
       </div>
     </article>

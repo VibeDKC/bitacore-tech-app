@@ -12,12 +12,33 @@ import { DEFAULT_SETTINGS } from './defaults'
 import { RpcError } from './permissions'
 import { resolveProductImageFile } from './productImages'
 import { activePromotionRows, resolvePromotionForProductRow } from './promotions'
-import { sha256Bytes } from './security'
+import { sha256, sha256Bytes } from './security'
 
 const DEMO_ORDERS = [
-  { number: 'OT-002332', code: 'DEMO-01' },
-  { number: 'OT-002341', code: 'DEMO-02' },
-  { number: 'OT-002336', code: 'DEMO-03' }
+  {
+    number: 'OT-002332',
+    code: 'DEMO-01',
+    status: 'listo',
+    equipmentType: 'PC de escritorio',
+    brand: 'HP',
+    model: 'ProDesk 400 G6'
+  },
+  {
+    number: 'OT-002341',
+    code: 'DEMO-02',
+    status: 'reparacion',
+    equipmentType: 'Laptop',
+    brand: 'Apple',
+    model: 'MacBook Pro 13" 2020'
+  },
+  {
+    number: 'OT-002336',
+    code: 'DEMO-03',
+    status: 'recibido',
+    equipmentType: 'Consola',
+    brand: 'Sony',
+    model: 'PlayStation 5'
+  }
 ]
 
 const BUSINESS = {
@@ -502,12 +523,42 @@ function buildCatalogData(
     products[0]
 
   const orderRows = db.all<any>(
-    `SELECT number, status, equipment_type, brand, model, promised_at, created_at, updated_at
-     FROM work_orders WHERE number IN (${DEMO_ORDERS.map(() => '?').join(', ')})
-     ORDER BY created_at DESC`,
-    ...DEMO_ORDERS.map((order) => order.number)
+    `SELECT number, tracking_code, status, equipment_type, brand, model, promised_at, created_at, updated_at
+     FROM work_orders
+     WHERE tracking_code IS NOT NULL AND tracking_code <> ''
+     ORDER BY created_at DESC
+     LIMIT 500`
   )
   const byNumber = new Map(orderRows.map((order) => [String(order.number), order]))
+  const portalOrders = orderRows.map((order) => ({
+    number: order.number,
+    codeHash: sha256(String(order.tracking_code)),
+    status: order.status,
+    equipmentType: order.equipment_type,
+    brand: order.brand,
+    model: order.model,
+    promisedAt: order.promised_at,
+    createdAt: order.created_at,
+    updatedAt: order.updated_at
+  }))
+  // Las OT de demostración siguen disponibles para las pruebas de humo.
+  for (const demo of DEMO_ORDERS) {
+    if (portalOrders.some((order) => order.number === demo.number && order.codeHash === sha256(demo.code))) {
+      continue
+    }
+    const order = byNumber.get(demo.number)
+    portalOrders.push({
+      number: demo.number,
+      codeHash: sha256(demo.code),
+      status: order?.status ?? demo.status,
+      equipmentType: order?.equipment_type ?? demo.equipmentType,
+      brand: order?.brand ?? demo.brand,
+      model: order?.model ?? demo.model,
+      promisedAt: order?.promised_at ?? new Date().toISOString(),
+      createdAt: order?.created_at ?? new Date().toISOString(),
+      updatedAt: order?.updated_at ?? new Date().toISOString()
+    })
+  }
 
   return {
     catalog: {
@@ -528,23 +579,9 @@ function buildCatalogData(
     },
     orders: {
       generatedAt: new Date().toISOString(),
-      demo: true,
-      note: 'Datos de demostración sin nombre, teléfono ni datos privados del cliente.',
-      orders: DEMO_ORDERS.map((demo) => {
-        const order = byNumber.get(demo.number)
-        if (!order) return null
-        return {
-          number: order.number,
-          code: demo.code,
-          status: order.status,
-          equipmentType: order.equipment_type,
-          brand: order.brand,
-          model: order.model,
-          promisedAt: order.promised_at,
-          createdAt: order.created_at,
-          updatedAt: order.updated_at
-        }
-      }).filter(Boolean)
+      demo: false,
+      note: 'Estados de OT sin nombre, teléfono, serial, credenciales ni notas internas. El código se valida por hash.',
+      orders: portalOrders
     },
     images
   }

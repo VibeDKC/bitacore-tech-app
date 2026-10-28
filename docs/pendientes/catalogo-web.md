@@ -2,7 +2,7 @@
 
 Fecha: 28 de octubre de 2026
 
-Este archivo registra lo que queda fuera de 1.13.1 y los siguientes pasos del catálogo público. Los pendientes de la aplicación están en `docs/pendientes/1.13.1.md`.
+Este archivo registra lo que queda fuera de 1.14.1 y los siguientes pasos del catálogo público. Los pendientes de la aplicación están en `docs/pendientes/1.14.1.md`.
 
 ## Estado actual
 
@@ -88,13 +88,21 @@ Pendiente:
 
 ## Portal de OT real
 
-- La consulta usa `web/data/orders-demo.json` o el `orders-demo.json` remoto; no consulta la base real.
+Implementado en 1.14.1:
+
+- La app publica estados sanitizados y el hash SHA-256 del código en `orders-demo.json`.
 - El acceso es por número de OT + código, o por `/seguimiento/[code]`.
-- El QR debe quedar inactivo por defecto.
-- Falta una API segura que valide el código y devuelva solo estado, equipo, fechas y pasos.
-- No se deben publicar nombre, teléfono, serial, credenciales ni notas internas.
-- Falta rotar códigos demo antes de publicar.
-- Falta definir vigencia y revocación del código.
+- La API `/api/seguimiento` valida el código por hash y devuelve solo estado, equipo y fechas.
+- No se publican nombre, teléfono, serial, credenciales ni notas internas.
+- El código no aparece en texto plano en el JSON.
+- El QR sigue inactivo por defecto.
+
+Pendiente:
+
+- Definir vigencia y revocación del código.
+- Definir si las OT demo se retiran en producción.
+- Evaluar límite de intentos en la API.
+- Probar con una OT real publicada.
 
 ## Datos del negocio
 

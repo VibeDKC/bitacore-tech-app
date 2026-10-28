@@ -66,6 +66,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'manageLoyalty',
     'settleOrder',
     'authorizeNoCharge',
+    'authorizeCredit',
     'viewAudit',
     'viewFullAudit',
     'exportAudit',
@@ -81,6 +82,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
   admin: [
     'viewCosts',
     'viewGrossMargin',
+    'manageAdmins',
     'manageStaff',
     'configureBusiness',
     'managePermissions',
@@ -97,6 +99,7 @@ const roleCapabilities: Record<Role, Capability[]> = {
     'manageLoyalty',
     'settleOrder',
     'authorizeNoCharge',
+    'authorizeCredit',
     'useAI',
     'applyDiscount',
     'managePromotions',
@@ -111,13 +114,19 @@ const roleCapabilities: Record<Role, Capability[]> = {
 }
 
 export function canAccessModule(role: Role, module: ModuleKey) {
+  if (effectiveModulesSet) return effectiveModulesSet.has(module)
   return roleModules[role].includes(module)
 }
 
 let effectivePermissions: Set<Capability> | null = null
+let effectiveModulesSet: Set<ModuleKey> | null = null
 
 export function setEffectivePermissions(permissions: Capability[] | null) {
   effectivePermissions = permissions ? new Set(permissions) : null
+}
+
+export function setEffectiveModules(modules: ModuleKey[] | null) {
+  effectiveModulesSet = modules ? new Set(modules) : null
 }
 
 export function can(role: Role, capability: Capability) {
@@ -157,6 +166,7 @@ export const capabilityLabels: Record<Capability, string> = {
   managePromotions: 'Gestionar promociones',
   publishCatalog: 'Publicar catálogo web',
   authorizeNoCharge: 'Autorizar entrega sin cobro',
+  authorizeCredit: 'Autorizar entrega a crédito',
   manageEvidence: 'Gestionar evidencias',
   voidEvidence: 'Anular evidencias',
   verifyEvidence: 'Verificar evidencias',
@@ -171,18 +181,119 @@ export const rootOnlyCapabilities: Capability[] = [
   'exportAudit',
   'purgeData',
   'restoreBackup',
-  'manageAdmins',
   'configureLegal',
   'configureAI'
 ]
+
+export const rootOnlyModules: ModuleKey[] = ['audit']
 
 export function roleCan(role: Role, capability: Capability) {
   return roleCapabilities[role].includes(capability)
 }
 
 export function visibleModules(role: Role) {
-  return roleModules[role]
+  return effectiveModulesSet ? [...effectiveModulesSet] : roleModules[role]
 }
+
+export function roleModulesForRole(role: Role) {
+  return [...roleModules[role]]
+}
+
+export const moduleCatalog: Array<{
+  key: ModuleKey
+  label: string
+  description: string
+  capabilities: Capability[]
+}> = [
+  {
+    key: 'dashboard',
+    label: 'Panel',
+    description: 'Resumen diario y accesos rápidos.',
+    capabilities: []
+  },
+  {
+    key: 'pos',
+    label: 'Ventas / POS',
+    description: 'Cobro, descuentos y anulación de facturas.',
+    capabilities: ['settleOrder', 'applyDiscount', 'annulInvoice']
+  },
+  {
+    key: 'orders',
+    label: 'Órdenes de trabajo',
+    description: 'Recepción, diagnóstico, repuestos, evidencias y entrega.',
+    capabilities: [
+      'createOrder',
+      'diagnoseOrder',
+      'assignTechnician',
+      'authorizeNoCharge',
+      'authorizeCredit',
+      'manageEvidence',
+      'voidEvidence',
+      'verifyEvidence',
+      'exportEvidence'
+    ]
+  },
+  {
+    key: 'inventory',
+    label: 'Inventario',
+    description: 'Referencias, costos, imágenes y publicación web.',
+    capabilities: ['editInventory', 'viewCosts', 'publishCatalog']
+  },
+  {
+    key: 'customers',
+    label: 'Clientes',
+    description: 'Fichas, equipos e historial.',
+    capabilities: ['manageLoyalty']
+  },
+  {
+    key: 'purchases',
+    label: 'Compras y proveedores',
+    description: 'Compras, cuentas por pagar y abonos.',
+    capabilities: ['createPurchase']
+  },
+  {
+    key: 'cash',
+    label: 'Caja',
+    description: 'Turnos, arqueo y traslados.',
+    capabilities: ['closeCash']
+  },
+  {
+    key: 'reports',
+    label: 'Reportes',
+    description: 'Ventas, márgenes y utilidad.',
+    capabilities: ['viewGrossMargin', 'viewNetProfit']
+  },
+  {
+    key: 'promotions',
+    label: 'Promociones',
+    description: 'Descuentos y publicación web.',
+    capabilities: ['managePromotions']
+  },
+  {
+    key: 'audit',
+    label: 'Auditoría',
+    description: 'Consulta y exportación de la trazabilidad.',
+    capabilities: ['viewAudit', 'viewFullAudit', 'exportAudit']
+  },
+  {
+    key: 'settings',
+    label: 'Configuración',
+    description: 'Usuarios, permisos, respaldos, negocio e IA.',
+    capabilities: [
+      'manageAdmins',
+      'manageStaff',
+      'createBackup',
+      'importBackup',
+      'restoreBackup',
+      'purgeData',
+      'configureLegal',
+      'configureBusiness',
+      'managePermissions',
+      'configureAI',
+      'manageDictionaries'
+    ]
+  }
+]
 
 export const permissionMatrix: Array<{
   group: string
@@ -211,7 +322,7 @@ export const permissionMatrix: Array<{
     items: [
       { label: 'Personal técnico y cajeros', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
       { label: 'Diccionarios y catálogos', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
-      { label: 'Crear o modificar admins', roles: { superadmin: 'full', admin: 'none', tecnico: 'none', cajero: 'none' } },
+      { label: 'Crear o modificar admins', roles: { superadmin: 'full', admin: 'full', tecnico: 'none', cajero: 'none' } },
       { label: 'Cuenta raíz', roles: { superadmin: 'full', admin: 'none', tecnico: 'none', cajero: 'none' } },
       { label: 'Anulación de facturas', roles: { superadmin: 'full', admin: 'partial', tecnico: 'none', cajero: 'none' } },
       { label: 'Auditoría', roles: { superadmin: 'full', admin: 'none', tecnico: 'none', cajero: 'none' } },

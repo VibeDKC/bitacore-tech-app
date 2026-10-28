@@ -356,7 +356,7 @@ export function ensureDictionaries(db: Database) {
 
 /**
  * Datos ficticios para probar la aplicación. Solo se ejecuta cuando el
- * propietario lo elige explícitamente en el primer arranque. Las cuentas
+ * administrador lo elige explícitamente en el primer arranque. Las cuentas
  * demo reciben contraseñas aleatorias: nadie puede iniciar sesión con una
  * credencial conocida.
  */
@@ -375,9 +375,9 @@ function seedAll(db: Database, owner: SeedOwner) {
       username: owner.username,
       name: owner.name,
       email: owner.email,
-      role: 'superadmin',
+      role: 'admin',
       password: owner.password,
-      protected: 1,
+      protected: 0,
       active: 1
     },
     {
@@ -475,12 +475,13 @@ function seedAll(db: Database, owner: SeedOwner) {
       db.run(
         `INSERT INTO stock_movements
           (id, product_id, type, quantity, unit_cost_cents, reason, reference_type, reference_id, user_id, user_name, created_at)
-         VALUES (?, ?, 'carga_inicial', ?, ?, 'Carga inicial de inventario', 'seed', ?, 'u1', 'Propietario BitacoreTech', ?)`,
+         VALUES (?, ?, 'carga_inicial', ?, ?, 'Carga inicial de inventario', 'seed', ?, 'u1', ?, ?)`,
         `seed_stock_${product.id}`,
         product.id,
         Number(product.stock ?? 0),
         cents(product.cost),
         product.id,
+        owner.name,
         createdAt
       )
     }

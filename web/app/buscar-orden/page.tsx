@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { QrCode, ShieldCheck } from 'lucide-react'
 import { OrderSearch } from '@/components/order-search'
-import { getOrdersDemo } from '@/lib/orders-demo-server'
 
 export const revalidate = 60
 
@@ -11,17 +10,15 @@ export const metadata: Metadata = {
     'Consulta el estado de tu orden de trabajo con el número de OT y el código de seguimiento.'
 }
 
-export default async function OrderSearchPage() {
-  const orders = await getOrdersDemo()
+export default function OrderSearchPage() {
   return (
     <div className="container order-page">
       <section className="order-hero">
         <p className="eyebrow">Seguimiento</p>
         <h1 className="order-title">Consulta el estado de tu equipo</h1>
         <p className="order-subtitle">
-          Ingresa el número de OT y el código de seguimiento que aparece en tu
-          orden o factura. En esta demo el QR no está activo: usa los datos de
-          prueba.
+          Ingresa el número de OT y el código de seguimiento que aparece en tu orden o
+          comprobante. El código se valida de forma segura y no se publica en el catálogo.
         </p>
         <div className="order-privacy">
           <ShieldCheck aria-hidden="true" />
@@ -30,15 +27,15 @@ export default async function OrderSearchPage() {
         </div>
       </section>
 
-      <OrderSearch orders={orders.orders} />
+      <OrderSearch />
 
       <div className="order-qr-note">
         <QrCode aria-hidden="true" />
         <div>
-          <strong>QR de seguimiento (demo)</strong>
+          <strong>QR de seguimiento</strong>
           <p>
-            En la versión final, el QR impreso abrirá esta página. Por ahora
-            queda inactivo por defecto: el acceso es con número de OT y código.
+            El QR impreso abre esta página con el código de la orden. El QR sigue
+            inactivo por defecto y se activa desde Configuración cuando lo decidas.
           </p>
         </div>
       </div>

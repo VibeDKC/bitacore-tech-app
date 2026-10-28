@@ -207,6 +207,11 @@ function TicketSheet({ order, data, variant }: { order: WorkOrder; data: Documen
         <p className={cn('mt-1 font-display font-black tracking-tight', narrow ? 'text-[22px]' : 'text-[28px]')}>
           {order.number}
         </p>
+        {order.trackingCode ? (
+          <p className="mt-1 text-[8px] font-semibold tracking-[0.08em]">
+            Seguimiento: {order.trackingCode}
+          </p>
+        ) : null}
         <Barcode value={order.number} height={narrow ? 34 : 44} className="mt-2" />
       </div>
 
@@ -345,6 +350,11 @@ function A4Copy({
             <div className="w-[55mm] shrink-0 border-l border-black/25 pl-3 text-right">
               <p className="text-[6.5px] font-semibold uppercase tracking-[0.14em] opacity-60">Comprobante de ingreso</p>
               <p className="font-display text-[22px] font-black leading-none tracking-tight">{order.number}</p>
+              {order.trackingCode ? (
+                <p className="mt-1 text-[8px] font-semibold tracking-[0.08em]">
+                  Seguimiento: {order.trackingCode}
+                </p>
+              ) : null}
               <Barcode value={order.number} height={30} className="mt-1" />
             </div>
           </div>

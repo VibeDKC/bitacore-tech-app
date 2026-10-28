@@ -22,7 +22,8 @@ import {
   Sparkles,
   TrendingUp,
   Users,
-  Wallet
+  Wallet,
+  Wrench
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
@@ -98,6 +99,22 @@ export function ReportsPage() {
         locked: false
       },
       {
+        label: 'Ventas POS',
+        value: formatCurrency(report.salesPos),
+        hint: `${formatNumber(report.invoiceCountPos)} facturas de mostrador`,
+        icon: ShoppingBag,
+        tone: 'bg-emerald-50 text-emerald-600',
+        locked: false
+      },
+      {
+        label: 'Ventas OT',
+        value: formatCurrency(report.salesOt),
+        hint: `${formatNumber(report.invoiceCountOt)} órdenes facturadas`,
+        icon: Wrench,
+        tone: 'bg-indigo-50 text-indigo-600',
+        locked: false
+      },
+      {
         label: 'Ticket promedio',
         value: formatCurrency(report.avgTicket),
         hint: periodLabels[report.period],
@@ -143,7 +160,11 @@ export function ReportsPage() {
       ['Resumen', 'Valor'],
       ['Periodo', periodLabels[report.period]],
       ['Ventas del periodo', report.salesTotal],
+      ['Ventas POS', report.salesPos],
+      ['Ventas OT', report.salesOt],
       ['Facturas activas', report.invoiceCount],
+      ['Facturas POS', report.invoiceCountPos],
+      ['Facturas OT', report.invoiceCountOt],
       ['Ticket promedio', report.avgTicket],
       ['Margen bruto', report.grossMargin ?? 'Restringido'],
       ['Utilidad neta', report.netProfit ?? 'Restringido'],

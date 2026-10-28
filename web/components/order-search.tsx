@@ -4,24 +4,42 @@ import { useState } from 'react'
 import { Search } from 'lucide-react'
 import { OrderStatusCard } from '@/components/order-status-card'
 import type { DemoOrder } from '@/lib/orders-demo'
-import { findDemoOrder } from '@/lib/orders-demo'
 
-export function OrderSearch({ orders }: { orders: DemoOrder[] }) {
+export function OrderSearch() {
   const [number, setNumber] = useState('')
   const [code, setCode] = useState('')
   const [result, setResult] = useState<DemoOrder | null>(null)
+  const [submittedCode, setSubmittedCode] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
-    const order = findDemoOrder(orders, number, code)
-    if (!order) {
+    setLoading(true)
+    try {
+      const response = await fetch(
+        `/api/seguimiento?numero=${encodeURIComponent(number.trim())}&codigo=${encodeURIComponent(
+          code.trim()
+        )}`,
+        { cache: 'no-store' }
+      )
+      if (!response.ok) {
+        setResult(null)
+        setError(
+          'No encontramos una orden con esos datos. Verifica el número y el código impreso en tu OT.'
+        )
+        return
+      }
+      const order = (await response.json()) as DemoOrder
+      setResult(order)
+      setSubmittedCode(code.trim().toUpperCase())
+    } catch {
       setResult(null)
-      setError('No encontramos una orden con esos datos. Verifica el número y el código.')
-      return
+      setError('No se pudo consultar la orden. Revisa tu conexión e inténtalo de nuevo.')
+    } finally {
+      setLoading(false)
     }
-    setResult(order)
   }
 
   return (
@@ -42,44 +60,27 @@ export function OrderSearch({ orders }: { orders: DemoOrder[] }) {
           <input
             value={code}
             onChange={(event) => setCode(event.target.value)}
-            placeholder="Ej. DEMO-01"
+            placeholder="Ej. SG-AB12CD34EF56"
             autoComplete="off"
             required
           />
         </label>
-        <button className="btn btn-primary" type="submit">
+        <button className="btn btn-primary" type="submit" disabled={loading}>
           <Search aria-hidden="true" />
-          Consultar estado
+          {loading ? 'Consultando…' : 'Consultar estado'}
         </button>
       </form>
 
       <div className="order-demo-box">
-        <p className="order-demo-title">Datos de prueba para esta demo</p>
-        <div className="order-demo-list">
-          {orders.map((order) => (
-            <button
-              key={order.number}
-              type="button"
-              onClick={() => {
-                setNumber(order.number)
-                setCode(order.code)
-                setResult(order)
-                setError('')
-              }}
-            >
-              <strong>{order.number}</strong>
-              <span>{order.code}</span>
-            </button>
-          ))}
-        </div>
+        <p className="order-demo-title">¿Dónde está mi código?</p>
         <p className="order-demo-help">
-          En producción, el código se imprime en la OT o factura y se envía por
-          WhatsApp. No se puede consultar solo con el número de orden.
+          El código de seguimiento está impreso en tu orden de trabajo y en el comprobante
+          de ingreso. Por seguridad no se puede consultar solo con el número de OT.
         </p>
       </div>
 
       {error ? <p className="order-error">{error}</p> : null}
-      {result ? <OrderStatusCard order={result} /> : null}
+      {result ? <OrderStatusCard order={result} code={submittedCode} /> : null}
     </div>
   )
 }

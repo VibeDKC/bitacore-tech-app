@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.14.1 — 2026-10-28
+
+### Identidad y permisos
+- Cuenta Propietario precreada, oculta y protegida.
+- Primer arranque crea solo la cuenta Administrador.
+- Los administradores pueden crear y elevar administradores.
+- Protección del último administrador activo.
+- Permisos por rol, módulos y acciones; el administrador edita todo excepto lo exclusivo del propietario.
+- Los módulos controlan navegación y backend.
+- La restauración de respaldos garantiza la cuenta raíz.
+
+### OT y facturación
+- **Facturar** crea la factura sin entregar.
+- La entrega normal exige pago completo.
+- Entrega a crédito solo para clientes autorizados y usuarios con `authorizeCredit`.
+- Varias líneas internas de mano de obra se consolidan en una sola línea de factura.
+- Los repuestos conservan su línea y garantía.
+- Anticipo registrado en caja como pago, no como venta.
+- Reportes separados de ventas POS y ventas OT.
+- Código de seguimiento aleatorio `SG-` no incremental, impreso en la OT.
+
+### Portal de OT
+- `orders-demo.json` publica estados sanitizados y el hash SHA-256 del código.
+- La web valida número + código por hash; el código no se publica.
+- La consulta funciona con `/buscar-orden` y `/seguimiento/[code]`.
+- El QR sigue inactivo por defecto.
+
+### Purga
+- Purga total, solo movimiento operativo o selección manual.
+- Respaldos, usuarios, configuración y auditoría se conservan.
+- Inventario, clientes o proveedores incluyen automáticamente la operación.
+- Al terminar se republica el catálogo resultante.
+- Migración 16: módulos de permisos, `tracking_code`, crédito de clientes y autorización de crédito en facturas.
+
+### Calidad
+- Aceptación 1.14.1: 22/22.
+- Aceptación 1.14.0: 20/20 base; 22/22 con propietario.
+- Regresión 1.13.1: 23/23.
+- Regresión 1.13.0: 30/30.
+- Web local: 39/39.
+- Web remota: 7/7.
+- Typecheck y build de app y web: OK.
+- Instalador `BitacoreTech-1.14.1-x64.exe` generado.
+
 ## 1.13.1 — 2026-10-28
 
 ### Web

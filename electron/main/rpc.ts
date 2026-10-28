@@ -3,7 +3,7 @@ import path from 'node:path'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import { dialog, safeStorage, shell } from 'electron'
 import { z } from 'zod'
-import type { PromotionInput } from '@shared/index'
+import type { ModuleKey, PromotionInput } from '@shared/index'
 import type { Database } from './database'
 import {
   BACKUP_DATABASE_FILENAME,
@@ -40,13 +40,15 @@ import {
 } from './mappers'
 import {
   ALL_CAPABILITIES,
+  ALL_MODULES,
   ROOT_ONLY_CAPABILITIES,
+  ROOT_ONLY_MODULES,
   RpcError,
   can,
   capabilitiesForRole,
   requireCapability,
-  requireModule,
   roleLabel,
+  roleModulesForRole,
   type BackendCapability
 } from './permissions'
 import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './security'
@@ -338,6 +340,12 @@ function sessionResponse(session: Session) {
     session.role,
     session.role !== session.actualRole
   )
+  const modules = effectiveModules(
+    db,
+    session.userId,
+    session.role,
+    session.role !== session.actualRole
+  )
   return {
     user: {
       id: session.userId,
@@ -353,7 +361,8 @@ function sessionResponse(session: Session) {
     canPreviewRoles: session.actualRole === 'superadmin',
     expiresAt: session.expiresAt,
     roleLabel: roleLabels[session.role],
-    permissions
+    permissions,
+    modules
   }
 }
 
@@ -376,7 +385,33 @@ function audit(db: Database, session: Session, action: string, entity: string, d
 }
 
 function requireModuleAccess(session: Session, module: string) {
-  requireModule(session.role as any, module)
+  const db = currentSession()
+  const modules = effectiveModules(
+    db,
+    session.userId,
+    session.role,
+    session.role !== session.actualRole
+  )
+  if (!modules.includes(module as ModuleKey)) {
+    fail(`Tu rol (${roleLabel(session.role as any)}) no tiene acceso a este módulo.`, 'FORBIDDEN')
+  }
+}
+
+function effectiveModules(db: Database, userId: string, role: string, preview = false) {
+  const rows = db.all<{ module: string; allowed: number }>(
+    'SELECT module, allowed FROM role_modules WHERE role = ?',
+    role
+  )
+  const granted = new Set<ModuleKey>(
+    rows.length
+      ? rows
+          .filter((row) => row.allowed)
+          .map((row) => row.module as ModuleKey)
+          .filter((module) => ALL_MODULES.includes(module))
+      : roleModulesForRole(role as any)
+  )
+  if (preview) return ALL_MODULES.filter((module) => granted.has(module))
+  return ALL_MODULES.filter((module) => granted.has(module))
 }
 
 function effectiveCapabilities(db: Database, userId: string, role: string, preview = false) {
@@ -955,7 +990,32 @@ function createOrderInvoice(
   )
   const items = db.all<any>('SELECT * FROM work_order_items WHERE work_order_id = ? ORDER BY rowid ASC', order.id)
   if (items.length) {
-    for (const item of items) {
+    const laborItems = items.filter((item) => item.type === 'servicio')
+    const partItems = items.filter((item) => item.type !== 'servicio')
+
+    if (laborItems.length) {
+      const laborTotal = laborItems.reduce(
+        (sum, item) => sum + Number(item.unit_price_cents) * Number(item.quantity),
+        0
+      )
+      const laborCost = laborItems.reduce(
+        (sum, item) => sum + Number(item.unit_cost_cents) * Number(item.quantity),
+        0
+      )
+      db.run(
+        `INSERT INTO invoice_items
+          (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type, note)
+         VALUES (?, ?, NULL, 'Mano de obra', 1, ?, ?, ?, 'servicio', ?)`,
+        `ii_${sha256(`${id}|labor`).slice(0, 20)}`,
+        id,
+        laborTotal,
+        laborCost,
+        laborTotal,
+        laborItems.length > 1 ? `${laborItems.length} líneas de mano de obra` : null
+      )
+    }
+
+    for (const item of partItems) {
       db.run(
         `INSERT INTO invoice_items
           (id, invoice_id, product_id, description, quantity, unit_price_cents, unit_cost_cents, line_total_cents, item_type, note)
@@ -1053,6 +1113,11 @@ function settingsData(db: Database, runtime: Runtime) {
         'SELECT role, capability, allowed FROM role_permissions ORDER BY role ASC, capability ASC'
       )
       .map((row) => ({ role: row.role, capability: row.capability, allowed: Boolean(row.allowed) })),
+    roleModules: db
+      .all<{ role: string; module: string; allowed: number }>(
+        'SELECT role, module, allowed FROM role_modules ORDER BY role ASC, module ASC'
+      )
+      .map((row) => ({ role: row.role, module: row.module, allowed: Boolean(row.allowed) })),
     statuses: db.all<any>('SELECT * FROM order_status_config ORDER BY position ASC').map((row) => ({
       status: row.status,
       label: row.label,
@@ -1951,6 +2016,16 @@ function reportData(db: Database, session: Session, period: string) {
     cogsCents = items.reduce((sum, item) => sum + Number(item.unit_cost_cents) * Number(item.quantity), 0)
   }
   const salesCents = invoices.reduce((sum, invoice) => sum + Number(invoice.total_cents), 0)
+  const posInvoices = invoices.filter((invoice) => invoice.type === 'venta')
+  const otInvoices = invoices.filter((invoice) => invoice.type === 'ot')
+  const salesPosCents = posInvoices.reduce(
+    (sum, invoice) => sum + Number(invoice.total_cents),
+    0
+  )
+  const salesOtCents = otInvoices.reduce(
+    (sum, invoice) => sum + Number(invoice.total_cents),
+    0
+  )
   const grossCents = salesCents - cogsCents
   const expenseCents = expenses.reduce((sum, movement) => sum + Number(movement.amount_cents), 0)
   const netCents = grossCents - expenseCents
@@ -2229,7 +2304,11 @@ function reportData(db: Database, session: Session, period: string) {
   return {
     period,
     salesTotal: money(salesCents),
+    salesPos: money(salesPosCents),
+    salesOt: money(salesOtCents),
     invoiceCount: invoices.length,
+    invoiceCountPos: posInvoices.length,
+    invoiceCountOt: otInvoices.length,
     avgTicket: invoices.length ? money(Math.round(salesCents / invoices.length)) : 0,
     grossMargin: canGross ? money(grossCents) : null,
     grossMarginPercent: canGross && salesCents ? Math.round((grossCents / salesCents) * 1000) / 10 : null,
@@ -2670,7 +2749,8 @@ function sessionPayload(db: Database, user: any, token: string, expires: string)
     canPreviewRoles: user.role === 'superadmin',
     expiresAt: expires,
     roleLabel: roleLabels[user.role],
-    permissions: effectiveCapabilities(db, user.id, user.role)
+    permissions: effectiveCapabilities(db, user.id, user.role),
+    modules: effectiveModules(db, user.id, user.role)
   }
 }
 
@@ -2813,13 +2893,31 @@ export async function handleRpc(command: string, payload: Payload, token: string
   if (command === 'auth.status') {
     const db = currentSession()
     const users = db.count('users')
-    return { setupRequired: users === 0, hasUsers: users > 0 }
+    const admin = db.get<{ id: string }>(
+      "SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1"
+    )
+    const setup = db.get<{ value: string }>(
+      "SELECT value FROM meta WHERE key = 'setup_completed'"
+    )
+    const setupRequired = setup?.value !== '1' || !admin
+    return { setupRequired, hasUsers: users > 0, hasAdmin: Boolean(admin) }
   }
 
   if (command === 'auth.setup') {
     const db = currentSession()
-    if (db.count('users') > 0) fail('La aplicación ya está configurada.', 'ALREADY_SETUP')
-    const name = text(payload?.name, 'Nombre del propietario', 3, 160)
+    const currentAdmin = db.get<{ id: string }>(
+      "SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1"
+    )
+    const setup = db.get<{ value: string }>(
+      "SELECT value FROM meta WHERE key = 'setup_completed'"
+    )
+    if (setup?.value === '1' && currentAdmin) {
+      fail('La aplicación ya está configurada.', 'ALREADY_SETUP')
+    }
+    if (!db.get("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) {
+      fail('No se encontró la cuenta raíz protegida. Reinstala o restaura un respaldo válido.', 'OWNER_MISSING')
+    }
+    const name = text(payload?.name, 'Nombre del administrador', 3, 160)
     const username = text(payload?.username, 'Usuario', 3, 60).toLowerCase()
     if (!/^[a-z0-9._-]+$/.test(username)) {
       fail('El usuario solo puede tener letras, números, punto, guion y guion bajo.')
@@ -2832,32 +2930,35 @@ export async function handleRpc(command: string, payload: Payload, token: string
       ? payload.businessName.trim().slice(0, 160)
       : DEFAULT_LEGAL.businessName
     const demo = Boolean(payload?.demo)
-    const owner: SeedOwner = { id: 'u1', username, name, email, password }
+    const adminId = db.get("SELECT id FROM users WHERE id = 'u1'") ? `u_admin_${sha256(`${username}|${Date.now()}`).slice(0, 12)}` : 'u1'
+    const admin: SeedOwner = { id: adminId, username, name, email, password }
 
     db.tx(() => {
-      if (demo) runDemoSeed(db, owner)
-      if (db.count('users') === 0) {
+      if (demo) {
+        runDemoSeed(db, admin)
+      } else {
         db.run(
           `INSERT INTO users (id, username, name, email, role, password_hash, active, is_protected, created_at, created_by)
-           VALUES (?, ?, ?, ?, 'superadmin', ?, 1, 1, ?, NULL)`,
-          owner.id,
-          owner.username,
-          owner.name,
-          owner.email,
-          hashPassword(owner.password),
+           VALUES (?, ?, ?, ?, 'admin', ?, 1, 0, ?, NULL)`,
+          admin.id,
+          admin.username,
+          admin.name,
+          admin.email,
+          hashPassword(admin.password),
           new Date().toISOString()
         )
-      } else {
-        // El seed demo ya creó u1; se asegura que use las credenciales elegidas.
+      }
+      // El seed demo ya creó el administrador; se asegura que use las credenciales elegidas.
+      if (demo) {
         db.run(
           `UPDATE users
-           SET username = ?, name = ?, email = ?, password_hash = ?, role = 'superadmin', active = 1, is_protected = 1
+           SET username = ?, name = ?, email = ?, password_hash = ?, role = 'admin', active = 1, is_protected = 0
            WHERE id = ?`,
-          owner.username,
-          owner.name,
-          owner.email,
-          hashPassword(owner.password),
-          owner.id
+          admin.username,
+          admin.name,
+          admin.email,
+          hashPassword(admin.password),
+          admin.id
         )
       }
 
@@ -2870,23 +2971,23 @@ export async function handleRpc(command: string, payload: Payload, token: string
         'legal_setup',
         nextLegal.version,
         JSON.stringify(nextLegal),
-        owner.id,
+        admin.id,
         updatedAt
       )
 
       db.appendAudit({
-        userId: owner.id,
-        userName: owner.name,
-        role: 'Propietario',
+        userId: admin.id,
+        userName: admin.name,
+        role: 'Administrador',
         action: 'Configuración inicial',
         entity: 'Sistema',
-        detail: `Propietario ${owner.username} creado. Negocio: ${businessName}.${demo ? ' Datos de demostración cargados.' : ''}`
+        detail: `Administrador ${admin.username} creado. Negocio: ${businessName}.${demo ? ' Datos de demostración cargados.' : ''}`
       })
       db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('setup_completed', '1')")
     })
 
-    const created = db.get<any>('SELECT * FROM users WHERE id = ?', owner.id)
-    if (!created) fail('No se pudo crear la cuenta del propietario.', 'INTERNAL_ERROR')
+    const created = db.get<any>('SELECT * FROM users WHERE id = ?', admin.id)
+    if (!created) fail('No se pudo crear la cuenta del administrador.', 'INTERNAL_ERROR')
     const issued = issueSession(db, created)
     const sessionLike = {
       token: issued.token,
@@ -2895,8 +2996,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
       userName: created.name,
       username: created.username,
       email: created.email ?? '',
-      actualRole: 'superadmin',
-      role: 'superadmin',
+      actualRole: 'admin',
+      role: 'admin',
       expiresAt: issued.expires
     } as Session
     try {
@@ -2909,8 +3010,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
 
   if (command === 'auth.login') {
     const db = currentSession()
-    if (db.count('users') === 0) {
-      fail('La aplicación aún no está configurada. Crea la cuenta del propietario.', 'SETUP_REQUIRED')
+    const setupAdmin = db.get<{ id: string }>(
+      "SELECT id FROM users WHERE role = 'admin' AND active = 1 LIMIT 1"
+    )
+    const setup = db.get<{ value: string }>(
+      "SELECT value FROM meta WHERE key = 'setup_completed'"
+    )
+    if (!setupAdmin || setup?.value !== '1') {
+      fail('La aplicación aún no está configurada. Crea la cuenta del administrador.', 'SETUP_REQUIRED')
     }
     const username = text(payload?.username, 'Usuario', 3, 80).toLowerCase()
     const password = typeof payload?.password === 'string' ? payload.password : ''
@@ -3121,14 +3228,16 @@ export async function handleRpc(command: string, payload: Payload, token: string
         fail('El cliente debe tener al menos un teléfono principal.')
       }
       const primaryPhone = phones.find((item) => item.isPrimary)?.phone ?? '—'
+      const creditEnabled = Boolean(payload?.creditEnabled)
+      if (creditEnabled) requireCap(session, 'manageLoyalty')
       const nowIso = new Date().toISOString()
       db.tx(() => {
         db.run(
           `INSERT INTO customers
             (id, name, document_type, document, phone, email, address, is_final_consumer, is_foreign_document,
              document_missing, loyalty_active, loyalty_discount_type, loyalty_discount_value, loyalty_valid_until,
-             loyalty_notes, created_at, updated_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?)`,
+             loyalty_notes, credit_enabled, created_at, updated_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, 'percent', 0, NULL, NULL, ?, ?, ?, ?)`,
           id,
           name,
           documentType,
@@ -3138,6 +3247,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           text(payload?.address ?? 'Sin dirección', 'Dirección', 1, 240) || 'Sin dirección',
           isForeignDocument ? 1 : 0,
           documentMissing ? 1 : 0,
+          creditEnabled ? 1 : 0,
           nowIso,
           nowIso,
           session.userId
@@ -3210,6 +3320,11 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
         updates.push('document_type = ?', 'document = ?', 'is_foreign_document = ?', 'document_missing = ?')
         params.push(documentType, document, isForeignDocument ? 1 : 0, documentMissing ? 1 : 0)
+      }
+      if (payload?.creditEnabled !== undefined) {
+        requireCap(session, 'manageLoyalty')
+        updates.push('credit_enabled = ?')
+        params.push(payload.creditEnabled ? 1 : 0)
       }
       const loyaltyFields = [
         'loyaltyActive',
@@ -4294,6 +4409,10 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const id = `wo_${sha256(`${customerId}|${Date.now()}|${Math.random()}`).slice(0, 20)}`
       const number = db.orderNumber()
+      let trackingCode = ''
+      do {
+        trackingCode = `SG-${randomBytes(8).toString('hex').toUpperCase()}`
+      } while (db.get('SELECT id FROM work_orders WHERE tracking_code = ?', trackingCode))
       const intake = {
         ...intakeInput,
         category,
@@ -4389,12 +4508,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
         db.run(
           `INSERT INTO work_orders
-            (id, number, customer_id, equipment_id, device_category, category_label, equipment_type, brand, model, serial,
+            (id, number, tracking_code, customer_id, equipment_id, device_category, category_label, equipment_type, brand, model, serial,
              accessories, physical_condition, reported_issue, diagnosis, status, technician_id, created_at,
              promised_at, notes, intake_json, received_by, created_by, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'recibido', ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'recibido', ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           number,
+          trackingCode,
           customerId,
           equipmentId,
           category,
@@ -4642,6 +4762,14 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
       if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada.')
+      if (
+        db.get(
+          "SELECT id FROM invoices WHERE order_id = ? AND status = 'activa' LIMIT 1",
+          row.id
+        )
+      ) {
+        fail('La OT ya está facturada; no admite nuevos ítems.')
+      }
       const type = schema(payload?.type, z.enum(['servicio', 'repuesto']))
       const description = text(payload?.description, 'Descripción', 2, 300)
       const quantity = numberValue(payload?.quantity ?? 1, 'Cantidad', { min: 0.01 })
@@ -4720,7 +4848,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireCap(session, 'settleOrder')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
       if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada; no admite anticipos.')
-      const totalCents = orderItemsTotal(db, row.id) || toCents(JSON.parse(row.intake_json ?? '{}').estimate ?? 0)
+      const invoice = db.get<any>(
+        "SELECT * FROM invoices WHERE order_id = ? AND status = 'activa' ORDER BY created_at DESC LIMIT 1",
+        row.id
+      )
+      const totalCents = invoice
+        ? Number(invoice.total_cents)
+        : orderItemsTotal(db, row.id) || toCents(JSON.parse(row.intake_json ?? '{}').estimate ?? 0)
       if (!totalCents) fail('Primero registra ítems o un presupuesto en la OT.')
       const paidCents = Number(orderPaidTotal(db, row.id))
       const balanceCents = totalCents - paidCents
@@ -4797,80 +4931,202 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return orderDto(db, getOrderOrFail(db, row.id))
     }
 
-    case 'orders.settle': {
+    case 'orders.invoice': {
       requireModuleAccess(session, 'orders')
       requireCap(session, 'settleOrder')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
       if (row.status === 'entregado') fail('La OT ya fue entregada y cerrada.')
-      if (row.status !== 'listo') fail('La OT debe estar en estado Listo para entrega antes de cobrar y entregar.')
+      if (row.status !== 'listo') fail('La OT debe estar en estado Listo para entrega antes de facturar.')
+      const existing = db.get<any>(
+        "SELECT * FROM invoices WHERE order_id = ? AND status = 'activa' ORDER BY created_at DESC LIMIT 1",
+        row.id
+      )
+      if (existing) return orderDto(db, getOrderOrFail(db, row.id))
       const intake = JSON.parse(row.intake_json ?? '{}')
       const subtotalCents = orderItemsTotal(db, row.id) || toCents(intake.estimate ?? 0)
+      if (subtotalCents <= 0) {
+        fail('No hay valores por cobrar. Agrega ítems o un presupuesto en la OT.')
+      }
       const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', row.customer_id)
-      const noCharge = Boolean(payload?.noCharge)
-      if (noCharge) {
-        requireCap(session, 'authorizeNoCharge')
-        if (Number(orderPaidTotal(db, row.id)) > 0) fail('No se puede entregar sin cobro una OT que ya tiene pagos registrados.')
-      } else if (subtotalCents <= 0) {
-        fail('No hay valores por cobrar. Agrega ítems, presupuesto o autoriza la entrega sin cobro.')
-      }
-      const discount = noCharge
-        ? { type: 'percent' as const, value: 0, source: 'none' as const }
-        : resolveSaleDiscount(customer, payload, session, subtotalCents)
-      const discountCents = noCharge ? 0 : discountCentsFor(discount.type, discount.value, subtotalCents)
+      const discount = resolveSaleDiscount(customer, payload, session, subtotalCents)
+      const discountCents = discountCentsFor(discount.type, discount.value, subtotalCents)
       const orderItemRows = db.all<any>('SELECT * FROM work_order_items WHERE work_order_id = ?', row.id)
-      if (!noCharge) {
-        assertDiscountFloor(
-          orderItemRows.map((item) => ({
-            name: item.description,
-            quantity: Number(item.quantity),
-            unitPriceCents: Number(item.unit_price_cents),
-            unitCostCents: Number(item.unit_cost_cents),
-            isService: item.type === 'servicio'
-          })),
-          subtotalCents,
-          discountCents
-        )
-      }
+      assertDiscountFloor(
+        orderItemRows.map((item) => ({
+          name: item.description,
+          quantity: Number(item.quantity),
+          unitPriceCents: Number(item.unit_price_cents),
+          unitCostCents: Number(item.unit_cost_cents),
+          isService: item.type === 'servicio'
+        })),
+        subtotalCents,
+        discountCents
+      )
       const totalCents = subtotalCents - discountCents
-      const paidCents = Number(orderPaidTotal(db, row.id))
-      const method = schema(payload?.method ?? 'Efectivo', z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
-      const exceptionReason = noCharge ? text(payload?.exceptionReason, 'Motivo de la excepción', 5, 500) : ''
-      const balanceCents = Math.max(totalCents - paidCents, 0)
-      const chargeCents = noCharge ? 0 : balanceCents
-      const receivedCents = numberValue(payload?.received ?? money(chargeCents), 'Efectivo recibido', { min: 0 })
-      const received = toCents(receivedCents)
-      if (!noCharge && method === 'Efectivo' && received < chargeCents) fail('El efectivo recibido es menor al saldo por cobrar.')
-      const changeCents = method === 'Efectivo' && !noCharge ? Math.max(received - chargeCents, 0) : 0
-      const nowIso = new Date().toISOString()
-      requireCashSession(db)
-      const paymentNumber = !noCharge && chargeCents > 0 ? db.paymentNumber() : ''
-      const paymentId =
-        paymentNumber
-          ? `pay_${sha256(`${row.id}|${paymentNumber}|${Date.now()}`).slice(0, 20)}`
-          : ''
-      const incomeAccount =
-        noCharge || method === 'Efectivo' || method === 'Mixto' ? null : requireIncomeAccount(db)
-      const preparedReceipt =
-        paymentId ? prepareReceiptFromPayload(runtime, paymentId, payload?.receipt) : null
       let invoice: { id: string; number: string } | null = null
-      try {
-        db.tx(() => {
+      db.tx(() => {
         invoice = createOrderInvoice(
           db,
           session,
           row,
           subtotalCents,
           totalCents,
-          method,
-          noCharge,
-          exceptionReason,
+          'Pendiente',
+          false,
+          '',
           {
             type: discount.type as 'percent' | 'amount',
             value: discount.value,
             cents: discountCents
           }
         )
-        if (!noCharge && chargeCents > 0) {
+        audit(
+          db,
+          session,
+          'Facturación de OT',
+          'Orden de trabajo',
+          `${row.number} · ${invoice!.number} · ${new Intl.NumberFormat('es-CO', {
+            style: 'currency',
+            currency: 'COP',
+            maximumFractionDigits: 0
+          }).format(money(totalCents))}`,
+          row.id
+        )
+      })
+      return orderDto(db, getOrderOrFail(db, row.id))
+    }
+
+    case 'orders.settle': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'settleOrder')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      if (row.status === 'entregado') fail('La OT ya fue entregada y cerrada.')
+      if (row.status !== 'listo') fail('La OT debe estar en estado Listo para entrega antes de cobrar y entregar.')
+      const existingInvoice = db.get<any>(
+        "SELECT * FROM invoices WHERE order_id = ? AND status = 'activa' ORDER BY created_at DESC LIMIT 1",
+        row.id
+      )
+      const intake = JSON.parse(row.intake_json ?? '{}')
+      const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', row.customer_id)
+      const noCharge = Boolean(payload?.noCharge)
+      const credit = Boolean(payload?.credit)
+      if (noCharge && credit) fail('No se puede combinar entrega sin cobro con entrega a crédito.')
+      if (credit) {
+        requireCap(session, 'authorizeCredit')
+        if (!customer?.credit_enabled) {
+          fail('El cliente no está autorizado para entrega a crédito.')
+        }
+        if (Number(orderPaidTotal(db, row.id)) >= Number(existingInvoice?.total_cents ?? 0) && existingInvoice) {
+          fail('La OT ya está pagada; registra la entrega normal.')
+        }
+      }
+      if (noCharge) {
+        requireCap(session, 'authorizeNoCharge')
+        if (existingInvoice) fail('La OT ya está facturada; anula la factura antes de entregar sin cobro.')
+        if (Number(orderPaidTotal(db, row.id)) > 0) fail('No se puede entregar sin cobro una OT que ya tiene pagos registrados.')
+      }
+      const subtotalCents = existingInvoice
+        ? Number(existingInvoice.subtotal_cents)
+        : orderItemsTotal(db, row.id) || toCents(intake.estimate ?? 0)
+      if (!existingInvoice && !noCharge && subtotalCents <= 0) {
+        fail('No hay valores por cobrar. Agrega ítems, presupuesto o autoriza la entrega sin cobro.')
+      }
+      let discount: { type: 'percent' | 'amount'; value: number; source: string }
+      let discountCents: number
+      if (existingInvoice) {
+        discount = {
+          type: existingInvoice.discount_type === 'amount' ? 'amount' : 'percent',
+          value: Number(existingInvoice.discount_value ?? 0),
+          source: 'invoice'
+        }
+        discountCents = Number(existingInvoice.discount_cents ?? 0)
+      } else {
+        discount = noCharge
+          ? { type: 'percent', value: 0, source: 'none' }
+          : resolveSaleDiscount(customer, payload, session, subtotalCents)
+        discountCents = noCharge
+          ? 0
+          : discountCentsFor(discount.type, discount.value, subtotalCents)
+        const orderItemRows = db.all<any>('SELECT * FROM work_order_items WHERE work_order_id = ?', row.id)
+        if (!noCharge) {
+          assertDiscountFloor(
+            orderItemRows.map((item) => ({
+              name: item.description,
+              quantity: Number(item.quantity),
+              unitPriceCents: Number(item.unit_price_cents),
+              unitCostCents: Number(item.unit_cost_cents),
+              isService: item.type === 'servicio'
+            })),
+            subtotalCents,
+            discountCents
+          )
+        }
+      }
+      const totalCents = existingInvoice
+        ? Number(existingInvoice.total_cents)
+        : subtotalCents - discountCents
+      const paidCents = Number(orderPaidTotal(db, row.id))
+      const method = schema(payload?.method ?? 'Efectivo', z.enum(['Efectivo', 'Transferencia', 'Tarjeta', 'Mixto']))
+      const exceptionReason = noCharge ? text(payload?.exceptionReason, 'Motivo de la excepción', 5, 500) : ''
+      const balanceCents = Math.max(totalCents - paidCents, 0)
+      const chargeCents = noCharge || credit ? 0 : balanceCents
+      const receivedCents = numberValue(payload?.received ?? money(chargeCents), 'Efectivo recibido', { min: 0 })
+      const received = toCents(receivedCents)
+      if (!noCharge && !credit && method === 'Efectivo' && received < chargeCents) {
+        fail('El efectivo recibido es menor al saldo por cobrar.')
+      }
+      const changeCents = method === 'Efectivo' && !noCharge && !credit ? Math.max(received - chargeCents, 0) : 0
+      const nowIso = new Date().toISOString()
+      if (!credit) requireCashSession(db)
+      const paymentNumber = !noCharge && !credit && chargeCents > 0 ? db.paymentNumber() : ''
+      const paymentId =
+        paymentNumber
+          ? `pay_${sha256(`${row.id}|${paymentNumber}|${Date.now()}`).slice(0, 20)}`
+          : ''
+      const incomeAccount =
+        noCharge || credit || method === 'Efectivo' || method === 'Mixto'
+          ? null
+          : requireIncomeAccount(db)
+      const preparedReceipt =
+        paymentId ? prepareReceiptFromPayload(runtime, paymentId, payload?.receipt) : null
+      let invoice: { id: string; number: string } | null = existingInvoice
+        ? { id: existingInvoice.id, number: existingInvoice.number }
+        : null
+      try {
+        db.tx(() => {
+        if (!invoice) {
+          invoice = createOrderInvoice(
+            db,
+            session,
+            row,
+            subtotalCents,
+            totalCents,
+            credit ? 'Crédito' : method,
+            noCharge,
+            exceptionReason,
+            {
+              type: discount.type as 'percent' | 'amount',
+              value: discount.value,
+              cents: discountCents
+            }
+          )
+        }
+        if (credit && invoice) {
+          db.run(
+            'UPDATE invoices SET credit_authorized = 1, credit_authorized_by = ?, credit_authorized_at = ? WHERE id = ?',
+            displayUser(session).name,
+            nowIso,
+            invoice.id
+          )
+        }
+        if (!noCharge && !credit) {
+          db.run(
+            'UPDATE invoices SET payment_method = ? WHERE id = ?',
+            chargeCents > 0 ? method : 'Anticipos',
+            invoice!.id
+          )
+        }
+        if (!noCharge && !credit && chargeCents > 0) {
           db.run(
             `INSERT INTO payments
               (id, number, kind, order_id, invoice_id, method, amount_cents, received_cents, change_cents, reference,
@@ -4921,10 +5177,12 @@ export async function handleRpc(command: string, payload: Payload, token: string
            VALUES (?, ?, 'entregado', ?, ?, ?, ?, 'current', ?)`,
           `evt_${Date.now()}`,
           row.id,
-          noCharge ? 'Entregado sin cobro' : 'Entregado y facturado',
+          noCharge ? 'Entregado sin cobro' : credit ? 'Entregado a crédito' : 'Entregado y facturado',
           noCharge
             ? `Entrega autorizada sin cobro. Motivo: ${exceptionReason}.`
-            : `Factura interna ${invoice!.number} por ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))}.`,
+            : credit
+              ? `Entrega a crédito autorizada. Saldo pendiente: ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(balanceCents))}.`
+              : `Factura interna ${invoice!.number} por ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))}.`,
           session.userId,
           displayUser(session).name,
           nowIso
@@ -4939,11 +5197,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
         audit(
           db,
           session,
-          noCharge ? 'Entrega sin cobro' : 'Cobro y entrega de OT',
+          noCharge ? 'Entrega sin cobro' : credit ? 'Entrega a crédito' : 'Cobro y entrega de OT',
           'Orden de trabajo',
           noCharge
             ? `${row.number} · sin cobro · ${exceptionReason}`
-            : `${row.number} · ${invoice!.number} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · saldo ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(chargeCents))}`,
+            : credit
+              ? `${row.number} · ${invoice!.number} · crédito autorizado · saldo ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(balanceCents))}`
+              : `${row.number} · ${invoice!.number} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(totalCents))} · saldo ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(money(chargeCents))}`,
           row.id
         )
         })
@@ -6368,8 +6628,15 @@ export async function handleRpc(command: string, payload: Payload, token: string
         payload?.permissions,
         z.array(z.object({ capability: z.string().min(1), allowed: z.boolean() }))
       )
+      const moduleItems = schema(
+        payload?.modules ?? [],
+        z.array(z.object({ module: z.string().min(1), allowed: z.boolean() }))
+      )
       const actorCapabilities = new Set(
         effectiveCapabilities(db, session.userId, session.role, session.role !== session.actualRole)
+      )
+      const actorModules = new Set(
+        effectiveModules(db, session.userId, session.role, session.role !== session.actualRole)
       )
       const now = new Date().toISOString()
       db.tx(() => {
@@ -6378,6 +6645,9 @@ export async function handleRpc(command: string, payload: Payload, token: string
           if (!ALL_CAPABILITIES.includes(capability)) fail(`Permiso desconocido: ${capability}`)
           if (item.allowed && ROOT_ONLY_CAPABILITIES.includes(capability)) {
             fail(`${capability} es exclusivo del propietario y no puede delegarse al rol ${role}.`, 'FORBIDDEN')
+          }
+          if (item.allowed && capability === 'manageAdmins' && role !== 'admin') {
+            fail('La gestión de administradores solo puede asignarse al rol Administrador.', 'FORBIDDEN')
           }
           if (session.actualRole !== 'superadmin') {
             if (item.allowed && !actorCapabilities.has(capability)) {
@@ -6397,12 +6667,36 @@ export async function handleRpc(command: string, payload: Payload, token: string
             now
           )
         }
+        for (const item of moduleItems) {
+          const module = item.module as ModuleKey
+          if (!ALL_MODULES.includes(module)) fail(`Módulo desconocido: ${module}`)
+          if (item.allowed && ROOT_ONLY_MODULES.includes(module)) {
+            fail(`El módulo ${module} es exclusivo del propietario.`, 'FORBIDDEN')
+          }
+          if (session.actualRole !== 'superadmin') {
+            if (item.allowed && !actorModules.has(module)) {
+              fail('No puedes conceder un módulo que tu propia cuenta no tiene.', 'FORBIDDEN')
+            }
+            if (role === 'admin' && module === 'settings' && !item.allowed) {
+              fail('Solo el propietario puede retirar Configuración al rol Administrador.', 'FORBIDDEN')
+            }
+          }
+          db.run(
+            `INSERT INTO role_modules (role, module, allowed, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(role, module) DO UPDATE SET allowed = excluded.allowed, updated_at = excluded.updated_at`,
+            role,
+            module,
+            item.allowed ? 1 : 0,
+            now
+          )
+        }
         audit(
           db,
           session,
           'Actualización de matriz de permisos',
           'Configuración',
-          `Rol ${roleLabels[role]} · ${items.length} permisos revisados.`
+          `Rol ${roleLabels[role]} · ${items.length} permisos y ${moduleItems.length} módulos revisados.`
         )
       })
       return settingsData(db, runtime)
@@ -7214,6 +7508,18 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (row.role === 'superadmin') fail('La cuenta raíz no se modifica desde este panel.', 'FORBIDDEN')
       if (row.role === 'admin') requireCap(session, 'manageAdmins')
       if (payload?.role === 'admin') requireCap(session, 'manageAdmins')
+      if (row.role === 'admin') {
+        const activeAdmins = Number(
+          db.get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND active = 1"
+          )?.count ?? 0
+        )
+        const demoting = payload?.role !== undefined && payload.role !== 'admin'
+        const deactivating = payload?.active === false || payload?.active === 0
+        if ((demoting || deactivating) && activeAdmins <= 1) {
+          fail('Debe quedar al menos un administrador activo.')
+        }
+      }
       const updates: string[] = []
       const params: any[] = []
       if (typeof payload?.name === 'string') {
@@ -7493,6 +7799,34 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const password = typeof payload?.password === 'string' ? payload.password : ''
       const user = db.get<any>('SELECT * FROM users WHERE id = ?', session.userId)
       if (!user || !verifyPassword(password, user.password_hash)) fail('Contraseña del propietario incorrecta.', 'INVALID_CREDENTIALS')
+      const scope = schema(
+        payload?.scope ?? 'all',
+        z.enum(['all', 'operation', 'custom'])
+      )
+      const requestedSelection = Array.isArray(payload?.selection)
+        ? schema(
+            payload.selection,
+            z.array(
+              z.enum(['operation', 'inventory', 'customers', 'suppliers', 'promotions'])
+            )
+          )
+        : []
+      const selected = new Set<string>(
+        scope === 'all'
+          ? ['operation', 'inventory', 'customers', 'suppliers', 'promotions']
+          : scope === 'operation'
+            ? ['operation']
+            : requestedSelection
+      )
+      if (selected.has('inventory') || selected.has('customers') || selected.has('suppliers')) {
+        selected.add('operation')
+      }
+      if (!selected.size) fail('Selecciona al menos un bloque para purgar.')
+      const operation = selected.has('operation')
+      const inventory = selected.has('inventory')
+      const customers = selected.has('customers')
+      const suppliers = selected.has('suppliers')
+      const promotions = selected.has('promotions') || inventory
       // createBackup registra la copia previa en la tabla de respaldos.
       const backup = await createBackup(db, runtime, session)
       db.tx(() => {
@@ -7500,31 +7834,42 @@ export async function handleRpc(command: string, payload: Payload, token: string
         db.exec('DROP TRIGGER IF EXISTS payments_no_update; DROP TRIGGER IF EXISTS payments_no_delete;')
         db.exec('DROP TRIGGER IF EXISTS cash_movements_no_update; DROP TRIGGER IF EXISTS cash_movements_no_delete;')
         db.exec('DROP TRIGGER IF EXISTS stock_movements_no_update; DROP TRIGGER IF EXISTS stock_movements_no_delete;')
-        db.exec(`
-          DELETE FROM account_movements;
-          DELETE FROM cash_transfers;
-          DELETE FROM payment_receipts;
-          DELETE FROM payments;
-          DELETE FROM invoice_items;
-          DELETE FROM invoices;
-          DELETE FROM cash_movements;
-          DELETE FROM cash_sessions;
-          DELETE FROM work_order_evidence;
-          DELETE FROM work_order_events;
-          DELETE FROM work_order_items;
-          DELETE FROM work_orders;
-          DELETE FROM supplier_payments;
-          DELETE FROM purchase_items;
-          DELETE FROM purchases;
-          DELETE FROM stock_movements;
-          DELETE FROM promotion_targets;
-          DELETE FROM promotions;
-          DELETE FROM product_serials;
-          DELETE FROM products;
-          DELETE FROM customers WHERE is_final_consumer = 0;
-          DELETE FROM suppliers;
-          DELETE FROM sequences;
-        `)
+        if (operation) {
+          db.exec(`
+            DELETE FROM account_movements;
+            DELETE FROM cash_transfers;
+            DELETE FROM payment_receipts;
+            DELETE FROM payments;
+            DELETE FROM invoice_items;
+            DELETE FROM invoices;
+            DELETE FROM cash_movements;
+            DELETE FROM cash_sessions;
+            DELETE FROM work_order_evidence;
+            DELETE FROM work_order_events;
+            DELETE FROM work_order_items;
+            DELETE FROM work_orders;
+            DELETE FROM supplier_payments;
+            DELETE FROM purchase_items;
+            DELETE FROM purchases;
+            DELETE FROM sequences;
+          `)
+        }
+        if (promotions) {
+          db.exec('DELETE FROM promotion_targets; DELETE FROM promotions;')
+        }
+        if (inventory) {
+          db.exec(`
+            DELETE FROM stock_movements;
+            DELETE FROM product_serials;
+            DELETE FROM products;
+          `)
+        }
+        if (customers) {
+          db.exec('DELETE FROM customers WHERE is_final_consumer = 0;')
+        }
+        if (suppliers) {
+          db.exec('DELETE FROM suppliers;')
+        }
         db.exec(`
           CREATE TRIGGER payments_no_update BEFORE UPDATE ON payments BEGIN SELECT RAISE(ABORT, 'payments es append-only'); END;
           CREATE TRIGGER payments_no_delete BEFORE DELETE ON payments BEGIN SELECT RAISE(ABORT, 'payments es append-only'); END;
@@ -7540,50 +7885,50 @@ export async function handleRpc(command: string, payload: Payload, token: string
           action: 'Purga de datos',
           entity: 'Sistema',
           entityId: backup.id,
-          detail: `Datos operativos purgados. Respaldo previo: ${backup.name}.`
+          detail: `Datos purgados (${scope}): ${[...selected].join(', ')}. Respaldo previo: ${backup.name}.`
         })
       })
-      const evidenceRoot = getEvidencePath(runtime.userDataPath)
-      if (fs.existsSync(evidenceRoot)) fs.rmSync(evidenceRoot, { recursive: true, force: true })
-      fs.mkdirSync(evidenceRoot, { recursive: true })
-      const productImagesRoot = productImageRoot(runtime.userDataPath)
-      if (fs.existsSync(productImagesRoot)) {
-        fs.rmSync(productImagesRoot, { recursive: true, force: true })
+      if (operation) {
+        const evidenceRoot = getEvidencePath(runtime.userDataPath)
+        if (fs.existsSync(evidenceRoot)) fs.rmSync(evidenceRoot, { recursive: true, force: true })
+        fs.mkdirSync(evidenceRoot, { recursive: true })
+        const paymentReceiptsRoot = paymentReceiptRoot(runtime.userDataPath)
+        if (fs.existsSync(paymentReceiptsRoot)) {
+          fs.rmSync(paymentReceiptsRoot, { recursive: true, force: true })
+        }
+        fs.mkdirSync(paymentReceiptsRoot, { recursive: true })
+        db.appendAudit({
+          userId: session.userId,
+          userName: displayUser(session).name,
+          role: roleLabel(session.role as any),
+          action: 'Purga de evidencias',
+          entity: 'Sistema',
+          entityId: backup.id,
+          detail: `Evidencias y comprobantes de las OT/pagos purgados eliminados del disco. El respaldo completo ${backup.name} los conserva.`
+        })
       }
-      fs.mkdirSync(productImagesRoot, { recursive: true })
-      const paymentReceiptsRoot = paymentReceiptRoot(runtime.userDataPath)
-      if (fs.existsSync(paymentReceiptsRoot)) {
-        fs.rmSync(paymentReceiptsRoot, { recursive: true, force: true })
+      if (inventory) {
+        const productImagesRoot = productImageRoot(runtime.userDataPath)
+        if (fs.existsSync(productImagesRoot)) {
+          fs.rmSync(productImagesRoot, { recursive: true, force: true })
+        }
+        fs.mkdirSync(productImagesRoot, { recursive: true })
+        db.appendAudit({
+          userId: session.userId,
+          userName: displayUser(session).name,
+          role: roleLabel(session.role as any),
+          action: 'Purga de imágenes de inventario',
+          entity: 'Sistema',
+          entityId: backup.id,
+          detail: `Imágenes de productos eliminadas del disco. El respaldo completo ${backup.name} conserva las imágenes.`
+        })
       }
-      fs.mkdirSync(paymentReceiptsRoot, { recursive: true })
-      db.appendAudit({
-        userId: session.userId,
-        userName: displayUser(session).name,
-        role: roleLabel(session.role as any),
-        action: 'Purga de evidencias',
-        entity: 'Sistema',
-        entityId: backup.id,
-        detail: `Fotografías de las OT purgadas eliminadas del disco. El respaldo completo ${backup.name} conserva las evidencias.`
-      })
-      db.appendAudit({
-        userId: session.userId,
-        userName: displayUser(session).name,
-        role: roleLabel(session.role as any),
-        action: 'Purga de imágenes de inventario',
-        entity: 'Sistema',
-        entityId: backup.id,
-        detail: `Imágenes de productos eliminadas del disco. El respaldo completo ${backup.name} conserva las imágenes.`
-      })
-      db.appendAudit({
-        userId: session.userId,
-        userName: displayUser(session).name,
-        role: roleLabel(session.role as any),
-        action: 'Purga de comprobantes de pago',
-        entity: 'Sistema',
-        entityId: backup.id,
-        detail: `Comprobantes de pago eliminados del disco. El respaldo completo ${backup.name} conserva los comprobantes.`
-      })
-      return { purged: true, backup, requiresReload: true }
+      let catalog: { ok: boolean; error?: string } | undefined
+      if (payload?.publishCatalog === true) {
+        const published = await publishCatalog(db, runtime)
+        catalog = { ok: published.ok, error: published.error }
+      }
+      return { purged: true, backup, requiresReload: true, scope, selection: [...selected], catalog }
     }
 
     default:

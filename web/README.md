@@ -29,7 +29,7 @@ Abrir-demo-catalogo.bat
 | Variable | Obligatoria | Uso |
 | --- | --- | --- |
 | `CATALOG_URL` | No | URL pública de `catalog.json` en Supabase. Sin ella se usa el snapshot local. |
-| `ORDERS_URL` | No | URL de `orders-demo.json`. Si falta, se deriva desde `CATALOG_URL`. |
+| `ORDERS_URL` | No | URL de `orders-demo.json` con los estados sanitizados y el hash de cada código. Si falta, se deriva desde `CATALOG_URL`. |
 | `CATALOG_REVALIDATE_SECONDS` | No | Revalidación ISR. Por defecto 60 segundos, mínimo 30. |
 | `NEXT_PUBLIC_SITE_URL` | No | URL canónica del sitio para metadatos. |
 
@@ -41,6 +41,13 @@ NEXT_PUBLIC_SITE_URL=https://bitacore-tech-app.vercel.app
 ```
 
 `CATALOG_URL` es de servidor: no se expone al navegador. La clave secreta de Supabase **no** se configura en Vercel; solo vive cifrada en la app.
+
+## Portal de OT
+
+`orders-demo.json` ya no contiene códigos en texto plano. Cada orden publica
+`codeHash` (SHA-256 del código), estado, tipo de equipo, marca, modelo y fechas.
+La web valida número + código en `/api/seguimiento` y en
+`/seguimiento/[code]`; el código nunca se envía al catálogo público.
 
 ## Regenerar el snapshot local
 
@@ -107,7 +114,7 @@ En modo desarrollo no uses `127.0.0.1` para la prueba de humo: Next bloquea el H
 - Promociones con alcance por SKU/categoría/todo, vigencia, prioridad y publicación web.
 - Publicación remota en Supabase y respaldo local.
 - Servicios sin precio por hora; revisión inicial sujeta a cotización.
-- Consulta demo de OT con número y código.
+- Consulta real de OT por número y código; el código se valida por hash y nunca se publica en texto plano.
 - Diseño responsive y contacto por WhatsApp en la barra superior y el pie.
 
-No incluye pagos en línea, cuentas de cliente, portal de OT con datos reales ni edición del catálogo desde la web. Eso queda para fases posteriores.
+No incluye pagos en línea, cuentas de cliente ni edición del catálogo desde la web. El portal de OT ya consulta estados reales por número y código validado por hash.

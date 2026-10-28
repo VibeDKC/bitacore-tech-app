@@ -36,9 +36,9 @@ import {
   X
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { AiModelOption, AppUser, BackupRecord, LegalConfig, Role } from '@/types'
+import type { AiModelOption, AppUser, BackupRecord, LegalConfig, ModuleKey, Role } from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
-import { can, capabilityLabels, allCapabilities, permissionMatrix, roleCan, roleDescriptions, roleLabels, rootOnlyCapabilities } from '@/lib/permissions'
+import { can, canAccessModule, capabilityLabels, allCapabilities, moduleCatalog, permissionMatrix, roleCan, roleDescriptions, roleLabels, roleModulesForRole, rootOnlyCapabilities, rootOnlyModules } from '@/lib/permissions'
 import { defaultLegalConfig } from '@/lib/legalConfig'
 import { formatDateTime } from '@/lib/format'
 import { calculateNitDv, normalizeNit } from '@/lib/nit'
@@ -176,6 +176,14 @@ export function SettingsPage() {
   const [purgeOpen, setPurgeOpen] = useState(false)
   const [purgeText, setPurgeText] = useState('')
   const [purgePassword, setPurgePassword] = useState('')
+  const [purgeScope, setPurgeScope] = useState<'all' | 'operation' | 'custom'>('all')
+  const [purgeSelection, setPurgeSelection] = useState({
+    operation: true,
+    inventory: true,
+    customers: true,
+    suppliers: true,
+    promotions: true
+  })
   const [saving, setSaving] = useState<string | null>(null)
   const [userSaving, setUserSaving] = useState(false)
   const [photoMember, setPhotoMember] = useState<AppUser | null>(null)
@@ -241,6 +249,8 @@ export function SettingsPage() {
   const [aiModelsLoading, setAiModelsLoading] = useState(false)
   const [adminModelSaving, setAdminModelSaving] = useState(false)
   const [rolePermissionsDraft, setRolePermissionsDraft] = useState<Record<string, boolean>>({})
+  const [roleModulesDraft, setRoleModulesDraft] = useState<Record<string, boolean>>({})
+  const [permissionRole, setPermissionRole] = useState<Role>('admin')
 
   const canManageStaff = can(role, 'manageStaff')
   const canDictionaries = can(role, 'manageDictionaries')
@@ -312,6 +322,18 @@ export function SettingsPage() {
       }
     }
     setRolePermissionsDraft(permissions)
+    const modules: Record<string, boolean> = {}
+    for (const role of ['admin', 'tecnico', 'cajero'] as const) {
+      for (const module of moduleCatalog) {
+        const row = current.roleModules?.find(
+          (item) => item.role === role && item.module === module.key
+        )
+        modules[`${role}:${module.key}`] = row
+          ? row.allowed
+          : roleModulesForRole(role).includes(module.key)
+      }
+    }
+    setRoleModulesDraft(modules)
   }, [data])
 
   const visibleStaff = isSuperadmin ? staff : staff.filter((member) => member.role !== 'superadmin')
@@ -573,7 +595,14 @@ export function SettingsPage() {
                 ? false
                 : Boolean(rolePermissionsDraft[`${role}:${capability}`])
           }))
-        updated = await api.permissions.updateRole(role, items)
+        const modules = moduleCatalog
+          .filter((module) => isSuperadmin || !rootOnlyModules.includes(module.key))
+          .filter((module) => isSuperadmin || canAccessModule(role, module.key))
+          .map((module) => ({
+            module: module.key,
+            allowed: Boolean(roleModulesDraft[`${role}:${module.key}`])
+          }))
+        updated = await api.permissions.updateRole(role, items, modules)
       }
       if (updated) applySettings(updated)
       toast.success('Matriz de permisos actualizada', {
@@ -819,12 +848,27 @@ export function SettingsPage() {
     if (backupSaving) return
     setBackupSaving(true)
     try {
-      const result = await api.backups.purge('PURGAR', purgePassword)
+      const result = await api.backups.purge('PURGAR', purgePassword, {
+        scope: purgeScope,
+        selection:
+          purgeScope === 'custom'
+            ? (Object.entries(purgeSelection)
+                .filter(([, selected]) => selected)
+                .map(([key]) => key) as Array<
+                'operation' | 'inventory' | 'customers' | 'suppliers' | 'promotions'
+              >)
+            : undefined,
+        publishCatalog: true
+      })
       setPurgeOpen(false)
       setPurgeText('')
       setPurgePassword('')
       toast.success('Purga completada', {
-        description: `Se conservó el respaldo completo ${result.backup.name}, incluidas las fotos. La operación quedó auditada.`
+        description: `Respaldo previo: ${result.backup.name}. ${
+          result.catalog?.ok
+            ? 'El catálogo resultante se publicó.'
+            : 'No se pudo republicar el catálogo; revisa Catálogo web.'
+        }`
       })
       reload()
     } catch (failure) {
@@ -1553,9 +1597,10 @@ export function SettingsPage() {
               <div className="card p-5 lg:p-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="font-display text-[16px] font-bold text-ink">Matriz configurable por rol</h2>
+                    <h2 className="font-display text-[16px] font-bold text-ink">Permisos por rol</h2>
                     <p className="mt-0.5 text-[11px] text-slate-400">
-                      Estos son los permisos base de cada rol. Luego puedes permitir o denegar acciones a un usuario específico desde su ficha.
+                      Elige un rol y marca los módulos y acciones permitidas. Las opciones
+                      exclusivas del propietario no aparecen aquí.
                     </p>
                   </div>
                   <Badge variant={canPermissions ? 'warning' : 'neutral'}>
@@ -1563,71 +1608,137 @@ export function SettingsPage() {
                   </Badge>
                 </div>
 
-                <div className="mt-4 overflow-x-auto">
-                  <table className="w-full min-w-[620px]">
-                    <thead>
-                      <tr className="border-b border-line">
-                        <th className="table-th pl-3">Permiso</th>
-                        {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => (
-                          <th key={roleItem} className="table-th text-center">
-                            {roleLabels[roleItem]}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allCapabilities.map((capability) => {
-                        const rootOnly = rootOnlyCapabilities.includes(capability)
-                        return (
-                          <tr key={capability} className="border-b border-line/70 last:border-0">
-                            <td className="table-td pl-3">
-                              <p className="text-[11px] text-slate-600">{capabilityLabels[capability]}</p>
-                              {rootOnly ? <p className="text-[8px] text-slate-400">Exclusivo del propietario</p> : null}
-                            </td>
-                            {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => {
-                              const lockedAdminPermission =
-                                !isSuperadmin && roleItem === 'admin' && capability === 'managePermissions'
-                              return (
-                              <td key={roleItem} className="table-td text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean(rolePermissionsDraft[`${roleItem}:${capability}`])}
-                                  disabled={
-                                    !canPermissions ||
-                                    rootOnly ||
-                                    lockedAdminPermission ||
-                                    (!isSuperadmin && !can(role, capability)) ||
-                                    saving === 'permisos'
-                                  }
-                                  title={
-                                    lockedAdminPermission
-                                      ? 'Solo el propietario puede retirar este permiso al rol Administrador.'
-                                      : undefined
-                                  }
-                                  onChange={(event) =>
-                                    setRolePermissionsDraft((current) => ({
-                                      ...current,
-                                      [`${roleItem}:${capability}`]: event.target.checked
-                                    }))
-                                  }
-                                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
-                                />
-                              </td>
-                              )
-                            })}
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {(['admin', 'tecnico', 'cajero'] as Role[]).map((roleItem) => (
+                    <button
+                      key={roleItem}
+                      type="button"
+                      onClick={() => setPermissionRole(roleItem)}
+                      className={cn(
+                        'focus-ring rounded-xl border px-3.5 py-2 text-[11px] font-semibold transition',
+                        permissionRole === roleItem
+                          ? 'border-brand-300 bg-brand-50 text-brand-700'
+                          : 'border-line bg-white text-slate-500 hover:border-slate-300'
+                      )}
+                    >
+                      {roleLabels[roleItem]}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {moduleCatalog
+                    .filter((module) => !rootOnlyModules.includes(module.key))
+                    .map((module) => {
+                      const moduleAllowed = Boolean(
+                        roleModulesDraft[`${permissionRole}:${module.key}`]
+                      )
+                      const lockedAdminModule =
+                        !isSuperadmin && permissionRole === 'admin' && module.key === 'settings'
+                      return (
+                        <div
+                          key={module.key}
+                          className="rounded-2xl border border-line bg-white p-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <label className="flex cursor-pointer items-start gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={moduleAllowed}
+                                disabled={
+                                  !canPermissions ||
+                                  lockedAdminModule ||
+                                  saving === 'permisos'
+                                }
+                                onChange={(event) =>
+                                  setRoleModulesDraft((current) => ({
+                                    ...current,
+                                    [`${permissionRole}:${module.key}`]: event.target.checked
+                                  }))
+                                }
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
+                              />
+                              <span>
+                                <span className="block text-[12px] font-semibold text-ink">
+                                  {module.label}
+                                </span>
+                                <span className="mt-0.5 block text-[9px] leading-relaxed text-slate-500">
+                                  {module.description}
+                                </span>
+                              </span>
+                            </label>
+                            <Badge variant={moduleAllowed ? 'success' : 'neutral'}>
+                              {moduleAllowed ? 'Acceso' : 'Sin acceso'}
+                            </Badge>
+                          </div>
+
+                          {module.capabilities.length ? (
+                            <div className="mt-3 grid gap-2 border-t border-line/70 pt-3 sm:grid-cols-2">
+                              {module.capabilities.map((capability) => {
+                                const rootOnly = rootOnlyCapabilities.includes(capability)
+                                if (!isSuperadmin && rootOnly) return null
+                                const lockedAdminPermission =
+                                  !isSuperadmin &&
+                                  permissionRole === 'admin' &&
+                                  capability === 'managePermissions'
+                                return (
+                                  <label
+                                    key={capability}
+                                    className={cn(
+                                      'flex items-start gap-2 rounded-xl border px-3 py-2 text-[10px]',
+                                      lockedAdminPermission
+                                        ? 'border-line bg-slate-50 text-slate-400'
+                                        : 'border-line bg-slate-50/50 text-slate-600'
+                                    )}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(
+                                        rolePermissionsDraft[
+                                          `${permissionRole}:${capability}`
+                                        ]
+                                      )}
+                                      disabled={
+                                        !canPermissions ||
+                                        rootOnly ||
+                                        lockedAdminPermission ||
+                                        (!isSuperadmin && !can(role, capability)) ||
+                                        saving === 'permisos'
+                                      }
+                                      onChange={(event) =>
+                                        setRolePermissionsDraft((current) => ({
+                                          ...current,
+                                          [`${permissionRole}:${capability}`]:
+                                            event.target.checked
+                                        }))
+                                      }
+                                      className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-200 disabled:opacity-40"
+                                    />
+                                    <span>
+                                      {capabilityLabels[capability]}
+                                      {rootOnly ? (
+                                        <span className="mt-0.5 block text-[8px] text-slate-400">
+                                          Exclusivo del propietario
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })}
                 </div>
 
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-[9px] leading-relaxed text-slate-400">
-                    Los permisos exclusivos del propietario no se pueden delegar. Un administrador solo puede
-                    conceder permisos que su propia cuenta ya tiene. Los cambios en la columna Administrador
-                    afectan a todas las cuentas admin y pueden retirarte acceso; el propietario puede restaurarlo.
-                    Todo queda auditado.
+                    Elige un rol y marca los módulos y acciones que puede usar. Las opciones
+                    exclusivas del propietario están ocultas. Un administrador solo puede
+                    conceder permisos que su propia cuenta ya tiene; el módulo Configuración
+                    del rol Administrador solo lo puede retirar el propietario. Todo queda
+                    auditado.
                   </p>
                   {canPermissions ? (
                     <Button
@@ -1636,7 +1747,7 @@ export function SettingsPage() {
                       loading={saving === 'permisos'}
                       leftIcon={<Save className="h-4 w-4" />}
                     >
-                      Guardar matriz
+                      Guardar permisos
                     </Button>
                   ) : null}
                 </div>
@@ -2492,8 +2603,8 @@ export function SettingsPage() {
           </label>
           <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-brand-800 sm:col-span-2">
             {canManageAdmins
-              ? 'Como propietario puedes crear administradores. Comparte la clave temporal por un canal seguro.'
-              : 'Como Administrador solo puedes crear técnicos y cajeros. Los administradores y la cuenta raíz están reservados al propietario.'}
+              ? 'Puedes crear administradores. Comparte la clave temporal por un canal seguro.'
+              : 'No tienes permiso para crear administradores. La cuenta raíz nunca está disponible desde este panel.'}
           </div>
         </div>
       </Modal>
@@ -2897,17 +3008,86 @@ export function SettingsPage() {
             <div>
               <p className="text-[11px] font-semibold text-danger-800">Se eliminarán</p>
               <ul className="mt-1.5 space-y-0.5 text-[10px] text-danger-700">
-                <li>· Ventas, facturas y movimientos de caja</li>
-                <li>· Órdenes de trabajo e historial de equipos</li>
-                <li>· Fotografías de las OT purgadas (quedan en el respaldo previo)</li>
-                <li>· Inventario, clientes y proveedores</li>
+                <li>· Ventas, facturas y movimientos de caja del alcance elegido</li>
+                <li>· Órdenes de trabajo e historial de equipos del alcance elegido</li>
+                <li>· Evidencias y comprobantes asociados (quedan en el respaldo previo)</li>
+                <li>· Inventario, clientes o proveedores solo si los seleccionas</li>
               </ul>
             </div>
           </div>
+          <div className="rounded-xl border border-line p-3.5">
+            <p className="text-[11px] font-semibold text-ink">Alcance de la purga</p>
+            <div className="mt-2 space-y-2">
+              {[
+                {
+                  value: 'all' as const,
+                  label: 'Todo',
+                  detail: 'Operación, inventario, clientes, proveedores y promociones.'
+                },
+                {
+                  value: 'operation' as const,
+                  label: 'Solo movimiento operativo',
+                  detail: 'Ventas, OT, compras, caja y numeraciones. Conserva inventario y clientes.'
+                },
+                {
+                  value: 'custom' as const,
+                  label: 'Selección manual',
+                  detail: 'Elige los bloques que quieres borrar.'
+                }
+              ].map((option) => (
+                <label key={option.value} className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="radio"
+                    name="purge-scope"
+                    checked={purgeScope === option.value}
+                    onChange={() => setPurgeScope(option.value)}
+                    className="mt-0.5 h-4 w-4 border-slate-300 text-danger-600"
+                  />
+                  <span>
+                    <span className="block text-[10px] font-semibold text-ink">{option.label}</span>
+                    <span className="block text-[9px] leading-relaxed text-slate-500">
+                      {option.detail}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {purgeScope === 'custom' ? (
+              <div className="mt-3 grid gap-2 border-t border-line pt-3 sm:grid-cols-2">
+                {[
+                  ['operation', 'Operación'],
+                  ['inventory', 'Inventario'],
+                  ['customers', 'Clientes'],
+                  ['suppliers', 'Proveedores'],
+                  ['promotions', 'Promociones']
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-[10px] text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={purgeSelection[key as keyof typeof purgeSelection]}
+                      onChange={(event) =>
+                        setPurgeSelection((current) => ({
+                          ...current,
+                          [key as keyof typeof purgeSelection]: event.target.checked
+                        }))
+                      }
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-danger-600"
+                    />
+                    {label}
+                  </label>
+                ))}
+                <p className="text-[9px] leading-relaxed text-slate-400 sm:col-span-2">
+                  Inventario, clientes o proveedores incluyen automáticamente el movimiento
+                  operativo para no dejar referencias huérfanas.
+                </p>
+              </div>
+            ) : null}
+          </div>
           <p className="text-[10px] leading-relaxed text-slate-500">
             Se creará automáticamente un respaldo completo antes de borrar. Se conservarán la cuenta raíz, la
-            configuración, los respaldos y la auditoría. Escribe <span className="font-bold text-ink">PURGAR</span> y
-            confirma con tu contraseña.
+            configuración, los respaldos y la auditoría. Al terminar se republica el catálogo
+            resultante. Escribe <span className="font-bold text-ink">PURGAR</span> y confirma con tu
+            contraseña.
           </p>
           <input
             value={purgeText}
