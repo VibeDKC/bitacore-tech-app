@@ -1,6 +1,8 @@
 # Contrato — Demo de catálogo web (F6)
 
 > **Actualización 1.12.0:** la web consume promociones reales y el snapshot se publica localmente desde la app. Ver `docs/plan/15-contrato-1.12.0.md`.
+>
+> **Actualización 1.13.0:** la publicación es remota en Supabase Storage y la web lee `CATALOG_URL`. Ver `docs/plan/16-contrato-1.13.0.md`.
 
 | Dato | Valor |
 | --- | --- |

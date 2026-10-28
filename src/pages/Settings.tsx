@@ -64,7 +64,7 @@ const tabs: Array<{ value: SettingsTab; label: string; description: string; icon
   { value: 'diccionarios', label: 'Diccionarios', description: 'Catálogos y desplegables', icon: BookOpen },
   { value: 'impresion', label: 'Impresión', description: 'Formatos y comprobantes', icon: Printer },
   { value: 'mensajes', label: 'Mensajes', description: 'WhatsApp y reportes', icon: MessageCircle },
-  { value: 'catalogo', label: 'Catálogo web', description: 'Publicación local', icon: Globe2 },
+  { value: 'catalogo', label: 'Catálogo web', description: 'Supabase y respaldo', icon: Globe2 },
   { value: 'respaldos', label: 'Respaldos', description: 'Backup y restauración', icon: DatabaseBackup },
   { value: 'ia', label: 'IA y API', description: 'Facturas y modelos', icon: Sparkles },
   { value: 'seguridad', label: 'Seguridad', description: 'Acceso y protección', icon: ShieldCheck }

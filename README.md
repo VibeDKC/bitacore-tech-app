@@ -28,27 +28,34 @@ npm start
 
 ## Catálogo web y promociones
 
-La carpeta `web/` contiene el catálogo público en Next.js, separado de la aplicación Electron. Usa un snapshot local de 39 referencias activas y 24 imágenes. Desde 1.12.0 la app tiene un módulo real de promociones y publica el snapshot localmente, manualmente o de forma automática opcional, en la carpeta configurada.
+La carpeta `web/` contiene el catálogo público en Next.js, separado de la aplicación Electron. Desde 1.13.0 la app publica el catálogo y las imágenes en **Supabase Storage** y la web los lee desde ahí con revalidación cada 60 segundos. La sincronización es **unidireccional**: la app escribe y la web solo lee.
+
+- Bucket `catalogo-web`, público de lectura y escritura solo con la clave secreta.
+- La clave se guarda cifrada en la app; la web nunca la recibe.
+- Si el remoto falla, la web usa el snapshot local commiteado.
+- La app conserva la publicación local como respaldo y la publicación automática opcional.
+- Despliegue actual: `https://bitacore-tech-app.vercel.app`.
 
 Incluye:
 
 - Home con hero y carrusel de destacados uno a uno.
 - Catálogo con búsqueda/filtro/orden.
 - Ficha de producto con promociones reales.
+- Etiqueta “Más vendido” con la regla de 30 días y mínimo 2 unidades (solo cuando hay datos).
 - Servicios sin precio por hora.
 - Consulta demo de OT con número y código.
 - Promociones por SKU/categoría/todo, porcentaje o monto fijo, vigencia, prioridad y publicación web.
 - Exclusión de servicios, inactivos, insumos de taller y productos no publicados.
 
-Para abrirla desde la raíz:
+Para abrirla localmente desde la raíz:
 
 ```text
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato en `docs/plan/15-contrato-1.12.0.md`, el acta en `docs/actas/1.12.0.md` y los pendientes en `docs/pendientes/1.12.0.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato en `docs/plan/16-contrato-1.13.0.md`, el acta en `docs/actas/1.13.0.md` y los pendientes en `docs/pendientes/1.13.0.md`.
 
-La sincronización remota con Supabase/Vercel, el carrito y el portal de OT con datos reales quedan para 1.13.
+El carrito, los pedidos en línea y el portal de OT con datos reales siguen pendientes. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
 ## Primer arranque
 
@@ -160,7 +167,7 @@ Las acciones sensibles quedan en la auditoría encadenada por hash SHA-256. Las 
 - Caja con apertura, movimientos, arqueo por denominaciones y cierre de turno.
 - Reportes de ventas, compras, margen bruto, utilidad neta restringida y estadísticas por técnico.
 - Promociones por SKU, categoría o todo el catálogo, con porcentaje o monto fijo, vigencia, prioridad y publicación web.
-- Publicación local del catálogo web desde Configuración o Promociones, con aviso de bajo costo y estado de sincronización.
+- Publicación del catálogo web en Supabase Storage desde Configuración o Promociones, con clave cifrada, prueba de conexión, respaldo local y estado de sincronización.
 - Inventario con SKU, código de barras Code128, seriales, ubicaciones, condición, origen, stock mínimo y exportación CSV.
 - Configuración de negocio, usuarios, permisos, impresión, respaldos completos, cláusulas legales, IA/API y seguridad.
 - Cláusulas legales versionadas con snapshot inmutable por orden de trabajo.
@@ -197,6 +204,7 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.10.1` | Catálogo, cambio de modelo, respaldo automático, cuota 429 y reintento. |
 | `npm run test:acceptance:1.10.2` | SKU interno/proveedor, seriales, higiene, margen con IVA y crédito con abonos. |
 | `npm run test:acceptance:1.12.0` | Promociones, POS, publicación local y permisos. |
+| `npm run test:acceptance:1.13.0` | Supabase simulado: conexión, clave cifrada, subida, limpieza, permisos y más vendidos. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
@@ -227,6 +235,8 @@ npm run test:acceptance:1.10.2
 npm run test:acceptance:1.10.3
 npm run test:acceptance:1.11.0
 npm run test:acceptance:1.12.0
+npm run test:acceptance:1.13.0
+cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
 npm run test:migration:1.7.0
@@ -239,7 +249,7 @@ npm run test:migration:1.11.0
 npm run test:migration:1.12.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34` y `22/22`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22` y `30/30`; la web remota suma `7/7` y la local `37/37`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -247,7 +257,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.12.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.13.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -264,8 +274,10 @@ El instalador queda en `release/` como `BitacoreTech-1.12.0-x64.exe`. La configu
 - Las alertas de stock son opcionales por referencia y las referencias de prueba pueden quedar sin aviso.
 - Las promociones aplican a ventas POS y al catálogo web; no a OT. No se acumulan con descuento manual ni fidelidad.
 - Los precios promocionales bajo costo requieren autorización explícita y quedan auditados.
-- El catálogo web se publica localmente desde la app; Supabase/Vercel y las imágenes remotas quedan para 1.13.
+- El catálogo web se publica en Supabase Storage y la web de Vercel lo lee con `CATALOG_URL`; la app conserva el respaldo local.
+- La sincronización es unidireccional: la web no modifica el catálogo ni la base de la app.
 - La publicación excluye servicios, inactivos, insumos de taller y productos con `publish_web = 0`.
+- “Más vendido” usa ventas activas de los últimos 30 días con mínimo 2 unidades; las facturas antiguas sin `product_id` no cuentan.
 - Los clientes tienen teléfono principal, múltiples teléfonos y documento opcional; se pueden buscar por cualquiera de sus teléfonos.
 - Los diccionarios alimentan la ficha técnica, las categorías, ubicaciones, condiciones y orígenes de inventario, las categorías de proveedor, las marcas de componentes y los motivos de ingreso de la OT.
 - La ficha técnica estructurada se guarda en el intake y se copia al snapshot legal de cada OT; las OT anteriores conservan su texto original.

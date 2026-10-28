@@ -29,6 +29,14 @@ export function ProductCard({ product }: { product: Product }) {
                 {product.promotion.badge}
               </span>
             ) : null}
+            {product.bestSeller ? (
+              <span
+                className="badge badge-best-seller"
+                title="Más vendido en los últimos 30 días"
+              >
+                Más vendido
+              </span>
+            ) : null}
           </div>
           <span className={`badge badge-stock ${tone}`}>{stockLabel(product.stock)}</span>
         </div>

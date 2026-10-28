@@ -3,10 +3,14 @@ import { TrustBar } from '@/components/trust-bar'
 import { CategoryCard } from '@/components/category-card'
 import { ServiceBand } from '@/components/service-band'
 import { SectionHeading } from '@/components/section-heading'
-import { catalog, getHeroCarouselProducts } from '@/lib/catalog'
+import { getHeroCarouselProducts } from '@/lib/catalog'
+import { getCatalog } from '@/lib/catalog-server'
 
-export default function HomePage() {
-  const heroProducts = getHeroCarouselProducts()
+export const revalidate = 60
+
+export default async function HomePage() {
+  const catalog = await getCatalog()
+  const heroProducts = getHeroCarouselProducts(catalog)
 
   return (
     <>

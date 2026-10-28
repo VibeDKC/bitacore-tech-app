@@ -37,6 +37,8 @@ import type {
   PromotionInput,
   PromotionPreview,
   CatalogSyncStatus,
+  CatalogPublishResult,
+  CatalogConnectionResult,
   Purchase,
   PurchaseReviewInput,
   ReportData,
@@ -448,8 +450,23 @@ export const api = {
     status() {
       return rpc<CatalogSyncStatus>('catalog.status')
     },
+    configureRemote(input: { enabled?: boolean; supabaseUrl?: string; bucket?: string }) {
+      return rpc<CatalogSyncStatus>('catalog.configureRemote', input)
+    },
+    saveSecret(secret: string) {
+      return rpc<CatalogSyncStatus>('catalog.saveSecret', { secret })
+    },
+    clearSecret() {
+      return rpc<CatalogSyncStatus>('catalog.clearSecret')
+    },
+    testConnection() {
+      return rpc<CatalogConnectionResult>('catalog.testConnection')
+    },
     publish() {
-      return rpc<{ ok: boolean; status: CatalogSyncStatus; error?: string }>('catalog.publish')
+      return rpc<CatalogPublishResult>('catalog.publish')
+    },
+    publishRemote() {
+      return rpc<CatalogPublishResult>('catalog.publishRemote')
     },
     chooseFolder() {
       return rpc<{ canceled: boolean; status?: CatalogSyncStatus }>('catalog.chooseFolder')

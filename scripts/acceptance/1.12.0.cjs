@@ -271,7 +271,7 @@ async function rpc(command, payload = {}, token = ownerToken) {
 
   await page.getByText('Configuración', { exact: true }).first().click()
   await page.getByText('Catálogo web', { exact: true }).first().click()
-  await page.getByText('Catálogo web local', { exact: true }).first().waitFor({ timeout: 20000 })
+  await page.getByText('Supabase Storage', { exact: true }).first().waitFor({ timeout: 20000 })
   await page.screenshot({ path: path.join(shots, 'catalogo-web.png') })
   check('interfaz de catálogo web visible', true)
 

@@ -1,103 +1,115 @@
-# Pendientes — Catálogo web (demo)
+# Pendientes — Catálogo web
 
-Fecha: 27 de octubre de 2026
+Fecha: 28 de octubre de 2026
 
-Este archivo registra lo que queda fuera de la demo local del catálogo web y los siguientes pasos para convertirla en un canal público real. No incluye los pendientes de la aplicación 1.11.0, que siguen en `docs/pendientes/1.11.0.md`.
+Este archivo registra lo que queda fuera de 1.13.0 y los siguientes pasos del catálogo público. Los pendientes de la aplicación están en `docs/pendientes/1.13.0.md`.
 
-## Promociones reales
+## Estado actual
 
-La app ya tiene el módulo real de promociones (1.12.0) y la web consume solo promociones activas, vigentes y publicadas. Queda pendiente:
+- La app publica el catálogo, las órdenes demo y las imágenes en Supabase Storage (`catalogo-web`).
+- La web de Next.js lee `CATALOG_URL` con ISR de 60 segundos y fallback local.
+- La sincronización es unidireccional: app → Supabase → web.
+- La web está desplegada en `https://bitacore-tech-app.vercel.app`.
+- El bucket es público de lectura; la escritura usa una clave secreta cifrada en la app.
+- Las promociones demo fueron eliminadas; la web usa promociones reales.
+- La regla de “Más vendido” está implementada: 30 días, mínimo 2 unidades.
 
-- Alcance por SKU, por categoría o para todo el catálogo.
+## Promociones
+
+Hecho en 1.12/1.13:
+
+- Alcance por SKU, categoría o todo el catálogo.
 - Descuento por porcentaje o monto fijo.
-- Vigencia con fecha inicial y final.
-- Estado activa/inactiva.
-- Publicar o no en el catálogo web.
-- Prioridad cuando varias promociones aplican al mismo producto.
-- Aviso y bloqueo si el precio promocional baja del costo de compra.
-- Historial y auditoría de cambios.
-- Regla de precio anterior y vigencia visible en la ficha.
+- Vigencia, estado activa/inactiva y publicación web.
+- Prioridad y resolución por especificidad.
+- Aviso y bloqueo si el precio promocional baja del costo.
+- Historial y auditoría.
+- Precio anterior y vigencia visible en la ficha.
+- Publicación remota sin recompilar la web.
 
-Las promociones demo fueron eliminadas. La base real no tiene promociones cargadas al cierre de 1.12.0; se crean desde la app.
+Pendiente:
+
+- Decidir si se permiten varios objetivos por promoción en la interfaz.
+- Programación por días u horarios.
+- Reporte de margen de ventas con promoción.
+- Reactivar una promoción vencida sin duplicarla.
 
 ## Más vendidos y carrusel del hero
 
-El carrusel del hero muestra hoy 9 destacados: 3 promociones y 6 destacados. La etiqueta “Más vendido” todavía no se usa.
+Implementado:
 
-Regla definida para cuando exista el módulo:
+- Ventana de 30 días.
+- Mínimo 2 unidades por referencia.
+- `bestSellers` y `bestSeller` en el snapshot.
+- Etiqueta “Más vendido” solo cuando hay datos.
+- El carrusel sigue mostrando 9 destacados; las promociones y los más vendidos entran primero.
 
-- Ventana de **30 días**.
-- Mínimo **2 unidades por referencia**.
-- Si una referencia solo vendió 1 unidad en el periodo, se ignora.
-- Si ninguna referencia cumple, no se inventan slides de “Más vendido”; quedan promociones y destacados.
-- Se necesita vincular las ventas al `product_id`. Hoy `invoice_items.product_id` está nulo y `stock_movements` solo tiene carga inicial.
-- Falta definir si el carrusel sincroniza **promociones + destacados** o **solo promociones**. Esa opción debe vivir en el módulo de promociones; si la integración no lo permite, se ignora.
-- No publicar promociones inactivas, vencidas o no marcadas para web.
+Pendiente:
 
-Secuencia recomendada: cerrar 1.12 (promociones + publicación local), resolver la sincronización remota y el hosting en 1.13, implementar la regla de más vendidos y publicar con datos reales. Si se necesita lanzar antes, publicar solo catálogo sin promociones.
+- Definir si se muestran top 3, top 5 o todos los que cumplan.
+- Definir si se incluyen ventas de OT o solo POS.
+- Las facturas antiguas sin `product_id` no cuentan; el ranking empezará a llenarse con ventas nuevas.
+- Definir si el carrusel sincroniza promociones + destacados o solo promociones.
 
-## Sincronización catálogo ↔ base
-
-En 1.12.0 la app publica el snapshot local (manual o automático) en la carpeta configurada. También queda el comando manual:
-
-```bash
-cd web
-npm run export:catalog
-```
+## Sincronización
 
 Hecho:
 
-- Publicación local automática después de cambios de inventario, compras, ventas, OT y promociones.
-- Exclusión de servicios, inactivos, insumos de taller, `publish_web = 0` y SKU de prueba.
-- Imágenes copiadas y archivos huérfanos eliminados.
-- Extensiones de imagen preservadas.
-- Estado de publicación y aviso a administradores.
+- Supabase Storage con `catalog.json`, `orders-demo.json` e imágenes.
+- Clave secreta cifrada y prueba de conexión.
+- URLs absolutas de imagen con hash de contenido.
+- Limpieza de imágenes huérfanas.
+- Estado remoto y avisos de error.
+- Publicación automática opcional.
+- Respaldo local y exportador manual.
 
-Falta para 1.13:
+Pendiente:
 
-- Sincronización remota con Supabase/Vercel.
-- Subir imágenes a Storage y servir URLs remotas.
+- Validar contra el proyecto Supabase real con la clave definitiva.
+- Agregar `CATALOG_URL` en Vercel y redeploy.
 - Resolver slugs estables si se edita el nombre.
-- Validar el snapshot contra Supabase y manejar reintentos sin internet.
-- Publicar solo campos autorizados: hoy se incluyen stock exacto, ids internos y fechas de creación/actualización.
-- Reemplazar la web estática de MTO APP y definir carrito.
+- Definir reintentos automáticos con espera si no hay internet.
+- Publicar solo campos autorizados: hoy se incluyen stock exacto, ids internos y fechas.
+- Evaluar revalidación instantánea con Deploy Hook o endpoint protegido.
 
-## Publicación real
+## Web y despliegue
 
-- No hay despliegue en Vercel ni integración con Supabase.
-- No hay dominio ni variables de entorno de producción.
-- Falta definir la URL pública en `NEXT_PUBLIC_SITE_URL`.
+- Vercel está desplegado con Root Directory `web`.
+- Falta `CATALOG_URL` en las variables de entorno.
+- Falta definir el dominio definitivo y el corte de la web vieja de MTO APP.
+- Falta `NEXT_PUBLIC_SITE_URL` de producción.
 - Falta revisar la política de caché de imágenes, páginas y JSON.
-- Falta definir qué pasa con el catálogo si la base local está apagada.
+- Falta definir qué pasa si Supabase está caído: hoy se usa el snapshot local.
+- Falta carrito, pedidos en línea, pagos y cuentas de cliente.
+- Falta analítica, cookies, aviso legal y política de privacidad.
+- Falta validar Safari/iOS y Firefox; la prueba actual usa Edge.
 
 ## Portal de OT real
 
-- La consulta actual usa `web/data/orders-demo.json`; no consulta la base real.
+- La consulta usa `web/data/orders-demo.json` o el `orders-demo.json` remoto; no consulta la base real.
 - El acceso es por número de OT + código, o por `/seguimiento/[code]`.
-- El QR debe quedar **inactivo por defecto** y activarse desde configuración.
+- El QR debe quedar inactivo por defecto.
 - Falta una API segura que valide el código y devuelva solo estado, equipo, fechas y pasos.
 - No se deben publicar nombre, teléfono, serial, credenciales ni notas internas.
-- Falta rotar códigos demo antes de cualquier publicación.
-- Falta definir la vigencia del enlace y la revocación del código.
+- Falta rotar códigos demo antes de publicar.
+- Falta definir vigencia y revocación del código.
 
 ## Datos del negocio
 
 - Falta correo de contacto.
 - Falta dirección física.
-- Las fotos de las 15 referencias sin imagen se irán cargando poco a poco.
+- Las 15 referencias sin imagen se irán cargando poco a poco.
 - Falta decidir si se publican horarios especiales, festivos o tiempos de respuesta.
 
 ## Galería de imágenes
 
 - Solo existe una imagen principal por producto.
 - Pendiente heredado de `docs/pendientes/1.10.3.md`: imágenes adicionales, orden, portada y límite por producto.
-- Falta definir el comportamiento de la galería en la ficha y en el catálogo.
+- Falta definir la galería en la ficha y en el catálogo.
 
 ## Otros
 
 - El carrusel del hero muestra 9 slides uno a uno; si cambia la cantidad, revisar dots, contador y controles.
 - La búsqueda normaliza tildes, pero no errores ortográficos ni sinónimos.
 - La página de seguimiento no tiene autenticación adicional; el código es la única barrera.
-- La demo no tiene analítica, cookies, aviso legal ni política de privacidad.
 - Falta una prueba de carga con más referencias e imágenes.
-- Falta validar el comportamiento en Safari/iOS y Firefox; la prueba actual usa Edge.

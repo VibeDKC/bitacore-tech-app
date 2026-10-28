@@ -1,4 +1,4 @@
-import { DEFAULT_MESSAGES } from '@shared/index'
+import { DEFAULT_MESSAGES, type CatalogSyncState } from '@shared/index'
 
 export interface LegalConfig {
   businessName: string
@@ -94,11 +94,24 @@ export const DEFAULT_SETTINGS = {
     targetPath: '',
     autoPublish: false,
     lastPublishedAt: null as string | null,
-    lastStatus: 'idle' as 'idle' | 'success' | 'error' | 'pending',
+    lastStatus: 'idle' as CatalogSyncState,
     lastMessage: '',
     lastProductCount: 0,
     lastImageCount: 0,
-    lastPromotionCount: 0
+    lastPromotionCount: 0,
+    remote: {
+      enabled: false,
+      supabaseUrl: 'https://lvcwyceaxxwsdobghrlj.supabase.co',
+      bucket: 'catalogo-web',
+      secretCipher: null as string | null,
+      lastPublishedAt: null as string | null,
+      lastStatus: 'idle' as CatalogSyncState,
+      lastMessage: '',
+      lastProductCount: 0,
+      lastImageCount: 0,
+      lastPromotionCount: 0,
+      lastBytes: 0
+    }
   }
 }
 

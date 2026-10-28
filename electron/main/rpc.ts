@@ -53,8 +53,12 @@ import { hashPassword, newToken, sha256, sha256Bytes, verifyPassword } from './s
 import { calculateNitDv, isValidNit, normalizeNit } from './nit'
 import {
   catalogStatus,
+  clearRemoteSecret,
   publishCatalog,
+  publishCatalogRemote,
+  saveRemoteSecret,
   scheduleCatalogPublish,
+  testSupabaseConnection,
   updateCatalogConfig
 } from './catalogPublisher'
 import {
@@ -2329,6 +2333,26 @@ function notificationData(db: Database, session?: Session) {
           id: 'catalog-publish-pending',
           title: 'Publicación del catálogo web en curso',
           description: String(catalog.lastMessage || 'Espera a que termine la publicación.'),
+          time: 'Ahora',
+          tone: 'info'
+        })
+      }
+      if (catalog?.remote?.enabled && catalog.remote?.lastStatus === 'error') {
+        data.push({
+          id: 'catalog-remote-error',
+          title: 'No se pudo publicar el catálogo en Supabase',
+          description: String(
+            catalog.remote.lastMessage ||
+              'Revisa la URL, el bucket y la clave secreta de Supabase.'
+          ),
+          time: 'Ahora',
+          tone: 'danger'
+        })
+      } else if (catalog?.remote?.enabled && catalog.remote?.lastStatus === 'pending') {
+        data.push({
+          id: 'catalog-remote-pending',
+          title: 'Publicación en Supabase en curso',
+          description: String(catalog.remote.lastMessage || 'Espera a que termine la publicación.'),
           time: 'Ahora',
           tone: 'info'
         })
@@ -6712,15 +6736,92 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return catalogStatus(db, runtime)
     }
 
+    case 'catalog.configureRemote': {
+      requireCap(session, 'publishCatalog')
+      const status = updateCatalogConfig(db, runtime, {
+        remote: {
+          enabled:
+            payload?.enabled === undefined ? undefined : Boolean(payload.enabled),
+          supabaseUrl:
+            typeof payload?.supabaseUrl === 'string' ? payload.supabaseUrl : undefined,
+          bucket: typeof payload?.bucket === 'string' ? payload.bucket : undefined
+        }
+      })
+      audit(
+        db,
+        session,
+        'Configuración de Supabase actualizada',
+        'Catálogo web',
+        `${status.remote.supabaseUrl} · bucket ${status.remote.bucket} · ${
+          status.remote.enabled ? 'activada' : 'desactivada'
+        }`,
+        'catalog'
+      )
+      return status
+    }
+
+    case 'catalog.saveSecret': {
+      requireCap(session, 'publishCatalog')
+      const secret = text(payload?.secret, 'Clave secreta de Supabase', 20, 500)
+      const status = saveRemoteSecret(db, runtime, secret)
+      audit(
+        db,
+        session,
+        'Clave de Supabase guardada',
+        'Catálogo web',
+        'La clave secreta se almacenó cifrada en este equipo.',
+        'catalog'
+      )
+      return status
+    }
+
+    case 'catalog.clearSecret': {
+      requireCap(session, 'publishCatalog')
+      const status = clearRemoteSecret(db, runtime)
+      audit(
+        db,
+        session,
+        'Clave de Supabase eliminada',
+        'Catálogo web',
+        'Se retiró la clave secreta del equipo.',
+        'catalog'
+      )
+      return status
+    }
+
+    case 'catalog.testConnection': {
+      requireCap(session, 'publishCatalog')
+      return testSupabaseConnection(db, runtime)
+    }
+
+    case 'catalog.publishRemote': {
+      requireCap(session, 'publishCatalog')
+      const result = await publishCatalogRemote(db, runtime)
+      audit(
+        db,
+        session,
+        result.ok ? 'Publicación en Supabase' : 'Error de publicación en Supabase',
+        'Catálogo web',
+        result.ok ? result.status.remote.lastMessage : result.error ?? result.status.remote.lastMessage,
+        'catalog'
+      )
+      return result
+    }
+
     case 'catalog.publish': {
       requireCap(session, 'publishCatalog')
-      const result = publishCatalog(db, runtime)
+      const result = await publishCatalog(db, runtime)
+      const message = result.ok
+        ? result.status.remote.enabled
+          ? `${result.status.lastMessage} · ${result.status.remote.lastMessage}`
+          : result.status.lastMessage
+        : result.error ?? result.status.lastMessage
       audit(
         db,
         session,
         result.ok ? 'Publicación de catálogo web' : 'Error de publicación de catálogo web',
         'Catálogo web',
-        result.ok ? result.status.lastMessage : result.error ?? result.status.lastMessage,
+        message,
         'catalog'
       )
       return result
@@ -6863,9 +6964,20 @@ export async function handleRpc(command: string, payload: Payload, token: string
       if (section === 'catalog') requireCap(session, 'publishCatalog')
       if (section === 'catalog') {
         const value = payload?.value && typeof payload.value === 'object' ? payload.value : {}
+        const remote =
+          value.remote && typeof value.remote === 'object' ? value.remote : undefined
         updateCatalogConfig(db, runtime, {
           targetPath: typeof value.targetPath === 'string' ? value.targetPath : undefined,
-          autoPublish: value.autoPublish === undefined ? undefined : Boolean(value.autoPublish)
+          autoPublish: value.autoPublish === undefined ? undefined : Boolean(value.autoPublish),
+          remote: remote
+            ? {
+                enabled:
+                  remote.enabled === undefined ? undefined : Boolean(remote.enabled),
+                supabaseUrl:
+                  typeof remote.supabaseUrl === 'string' ? remote.supabaseUrl : undefined,
+                bucket: typeof remote.bucket === 'string' ? remote.bucket : undefined
+              }
+            : undefined
         })
         audit(db, session, 'Actualización de catálogo web', 'Configuración', 'Sección catálogo actualizada.', 'catalog')
         return settingsData(db, runtime)

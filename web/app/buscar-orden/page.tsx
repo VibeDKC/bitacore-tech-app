@@ -1,6 +1,9 @@
 import type { Metadata } from 'next'
 import { QrCode, ShieldCheck } from 'lucide-react'
 import { OrderSearch } from '@/components/order-search'
+import { getOrdersDemo } from '@/lib/orders-demo-server'
+
+export const revalidate = 60
 
 export const metadata: Metadata = {
   title: 'Buscar orden',
@@ -8,7 +11,8 @@ export const metadata: Metadata = {
     'Consulta el estado de tu orden de trabajo con el número de OT y el código de seguimiento.'
 }
 
-export default function OrderSearchPage() {
+export default async function OrderSearchPage() {
+  const orders = await getOrdersDemo()
   return (
     <div className="container order-page">
       <section className="order-hero">
@@ -26,7 +30,7 @@ export default function OrderSearchPage() {
         </div>
       </section>
 
-      <OrderSearch />
+      <OrderSearch orders={orders.orders} />
 
       <div className="order-qr-note">
         <QrCode aria-hidden="true" />

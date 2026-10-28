@@ -1,10 +1,18 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CatalogSyncStatus, ProductPromotion } from '@shared/index'
+import { safeStorage } from 'electron'
+import type {
+  CatalogRemoteStatus,
+  CatalogSyncState,
+  CatalogSyncStatus,
+  ProductPromotion
+} from '@shared/index'
 import type { Database } from './database'
 import { DEFAULT_SETTINGS } from './defaults'
+import { RpcError } from './permissions'
 import { resolveProductImageFile } from './productImages'
 import { activePromotionRows, resolvePromotionForProductRow } from './promotions'
+import { sha256Bytes } from './security'
 
 const DEMO_ORDERS = [
   { number: 'OT-002332', code: 'DEMO-01' },
@@ -23,11 +31,43 @@ const BUSINESS = {
 }
 
 const CATEGORY_ORDER = ['Accesorios', 'Almacenamiento', 'Periféricos']
+const BEST_SELLER_DAYS = 30
+const BEST_SELLER_MIN_UNITS = 2
+const REQUEST_TIMEOUT_MS = 45_000
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.gif': 'image/gif'
+}
+
+interface CatalogImage {
+  filename: string
+  bytes: Buffer
+  contentType: string
+}
+
+interface CatalogBuildResult {
+  catalog: Record<string, any>
+  orders: Record<string, any>
+  images: CatalogImage[]
+}
 
 let publishTimer: NodeJS.Timeout | null = null
 
 function money(cents: number) {
   return Math.round(Number(cents || 0)) / 100
+}
+
+function promotionCount(catalog: { products?: any[] }) {
+  return new Set(
+    (catalog.products ?? [])
+      .filter((product) => product?.promotion?.id)
+      .map((product) => String(product.promotion.id))
+  ).size
 }
 
 function slugify(value: string) {
@@ -58,43 +98,134 @@ function defaultTargetPath(runtime: { userDataPath: string }) {
 }
 
 function storedConfig(db: Database) {
-  return db.getSetting<any>('catalog_config', DEFAULT_SETTINGS.catalog)
+  const stored = db.getSetting<Record<string, any>>('catalog_config', {})
+  const defaults = DEFAULT_SETTINGS.catalog
+  const remote =
+    stored?.remote && typeof stored.remote === 'object' && !Array.isArray(stored.remote)
+      ? stored.remote
+      : {}
+  return {
+    ...defaults,
+    ...(stored && typeof stored === 'object' ? stored : {}),
+    remote: { ...defaults.remote, ...remote }
+  }
+}
+
+function syncState(value: unknown): CatalogSyncState {
+  return value === 'success' || value === 'error' || value === 'pending' ? value : 'idle'
+}
+
+function normalizeSupabaseUrl(value: string) {
+  const trimmed = String(value ?? '').trim().replace(/\/+$/, '')
+  if (!trimmed) throw new RpcError('Escribe la URL del proyecto Supabase.', 'BAD_REQUEST')
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    throw new RpcError('La URL de Supabase no es válida.', 'BAD_REQUEST')
+  }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+  if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) {
+    throw new RpcError('La URL de Supabase debe usar HTTPS.', 'BAD_REQUEST')
+  }
+  if (url.pathname !== '/' && url.pathname !== '') {
+    throw new RpcError('Usa solo la URL base del proyecto, sin rutas adicionales.', 'BAD_REQUEST')
+  }
+  return trimmed
+}
+
+function normalizeBucket(value: string) {
+  const bucket = String(value ?? '').trim()
+  if (!/^[a-z0-9][a-z0-9._-]{1,62}$/.test(bucket)) {
+    throw new RpcError(
+      'El bucket debe tener entre 2 y 63 caracteres: minúsculas, números, punto, guion o guion bajo.',
+      'BAD_REQUEST'
+    )
+  }
+  return bucket
 }
 
 export function catalogStatus(db: Database, runtime: { userDataPath: string }): CatalogSyncStatus {
   const stored = storedConfig(db)
+  const remote = stored.remote
   return {
     targetPath: String(stored.targetPath || defaultTargetPath(runtime)),
-    autoPublish: stored.autoPublish !== false,
+    autoPublish: stored.autoPublish === true,
     lastPublishedAt: stored.lastPublishedAt ?? null,
-    lastStatus: stored.lastStatus ?? 'idle',
+    lastStatus: syncState(stored.lastStatus),
     lastMessage: String(stored.lastMessage ?? ''),
     lastProductCount: Number(stored.lastProductCount ?? 0),
     lastImageCount: Number(stored.lastImageCount ?? 0),
-    lastPromotionCount: Number(stored.lastPromotionCount ?? 0)
+    lastPromotionCount: Number(stored.lastPromotionCount ?? 0),
+    remote: {
+      enabled: Boolean(remote.enabled),
+      supabaseUrl: String(remote.supabaseUrl || DEFAULT_SETTINGS.catalog.remote.supabaseUrl),
+      bucket: String(remote.bucket || DEFAULT_SETTINGS.catalog.remote.bucket),
+      hasSecret: Boolean(remote.secretCipher),
+      lastPublishedAt: remote.lastPublishedAt ?? null,
+      lastStatus: syncState(remote.lastStatus),
+      lastMessage: String(remote.lastMessage ?? ''),
+      lastProductCount: Number(remote.lastProductCount ?? 0),
+      lastImageCount: Number(remote.lastImageCount ?? 0),
+      lastPromotionCount: Number(remote.lastPromotionCount ?? 0),
+      lastBytes: Number(remote.lastBytes ?? 0)
+    }
   }
 }
 
 export function updateCatalogConfig(
   db: Database,
   runtime: { userDataPath: string },
-  patch: { targetPath?: string; autoPublish?: boolean }
+  patch: {
+    targetPath?: string
+    autoPublish?: boolean
+    remote?: { enabled?: boolean; supabaseUrl?: string; bucket?: string }
+  }
 ) {
   const current = storedConfig(db)
+  const nextRemote = { ...current.remote }
+  let endpointChanged = false
+  if (patch.remote) {
+    if (patch.remote.enabled !== undefined) {
+      nextRemote.enabled = Boolean(patch.remote.enabled)
+    }
+    if (patch.remote.supabaseUrl !== undefined) {
+      const url = normalizeSupabaseUrl(patch.remote.supabaseUrl)
+      if (url !== nextRemote.supabaseUrl) endpointChanged = true
+      nextRemote.supabaseUrl = url
+    }
+    if (patch.remote.bucket !== undefined) {
+      const bucket = normalizeBucket(patch.remote.bucket)
+      if (bucket !== nextRemote.bucket) endpointChanged = true
+      nextRemote.bucket = bucket
+    }
+  }
+  if (endpointChanged) {
+    nextRemote.lastStatus = 'idle'
+    nextRemote.lastMessage = ''
+  }
   const next = {
     ...current,
     ...(patch.targetPath !== undefined
       ? { targetPath: String(patch.targetPath).trim() || defaultTargetPath(runtime) }
       : {}),
-    ...(patch.autoPublish !== undefined ? { autoPublish: Boolean(patch.autoPublish) } : {})
+    ...(patch.autoPublish !== undefined ? { autoPublish: Boolean(patch.autoPublish) } : {}),
+    remote: nextRemote
   }
   db.setSetting('catalog_config', next)
   return catalogStatus(db, runtime)
 }
 
-function writeStatus(
+function writeLocalStatus(
   db: Database,
-  patch: Partial<CatalogSyncStatus> & { lastStatus: CatalogSyncStatus['lastStatus'] }
+  patch: {
+    lastStatus: CatalogSyncState
+    lastPublishedAt?: string | null
+    lastMessage?: string
+    lastProductCount?: number
+    lastImageCount?: number
+    lastPromotionCount?: number
+  }
 ) {
   const current = storedConfig(db)
   db.setSetting('catalog_config', {
@@ -105,14 +236,136 @@ function writeStatus(
   })
 }
 
-export function buildCatalogSnapshot(
+function writeRemoteStatus(
+  db: Database,
+  patch: {
+    lastStatus: CatalogSyncState
+    lastPublishedAt?: string | null
+    lastMessage?: string
+    lastProductCount?: number
+    lastImageCount?: number
+    lastPromotionCount?: number
+    lastBytes?: number
+  }
+) {
+  const current = storedConfig(db)
+  db.setSetting('catalog_config', {
+    ...current,
+    remote: {
+      ...current.remote,
+      ...patch,
+      lastMessage: patch.lastMessage ?? current.remote.lastMessage ?? '',
+      lastPublishedAt:
+        patch.lastPublishedAt !== undefined
+          ? patch.lastPublishedAt
+          : current.remote.lastPublishedAt ?? null
+    }
+  })
+}
+
+function decryptRemoteSecret(db: Database) {
+  const config = storedConfig(db)
+  const cipher = config.remote.secretCipher
+  if (!cipher) return null
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new RpcError(
+      'El almacén seguro de Windows no está disponible; no se puede leer la clave de Supabase.',
+      'BAD_REQUEST'
+    )
+  }
+  try {
+    return safeStorage.decryptString(Buffer.from(String(cipher), 'base64'))
+  } catch {
+    throw new RpcError(
+      'No se pudo descifrar la clave de Supabase. Vuelve a guardarla en este equipo.',
+      'BAD_REQUEST'
+    )
+  }
+}
+
+export function saveRemoteSecret(
   db: Database,
   runtime: { userDataPath: string },
-  targetPath: string
+  secretInput: string
 ) {
-  const productsRoot = path.join(targetPath, 'public', 'products')
-  fs.mkdirSync(productsRoot, { recursive: true })
+  const secret = String(secretInput ?? '').trim()
+  if (secret.length < 20 || secret.length > 500) {
+    throw new RpcError('La clave de Supabase no tiene un formato válido.', 'BAD_REQUEST')
+  }
+  if (secret.startsWith('sb_publishable_')) {
+    throw new RpcError(
+      'Esa es la clave pública. Usa la clave secreta del proyecto, que solo se guarda en la app.',
+      'BAD_REQUEST'
+    )
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new RpcError(
+      'El almacén seguro de Windows no está disponible; no se puede guardar la clave de Supabase.',
+      'BAD_REQUEST'
+    )
+  }
+  const current = storedConfig(db)
+  db.setSetting('catalog_config', {
+    ...current,
+    remote: {
+      ...current.remote,
+      secretCipher: safeStorage.encryptString(secret).toString('base64'),
+      lastStatus: 'idle',
+      lastMessage: ''
+    }
+  })
+  return catalogStatus(db, runtime)
+}
 
+export function clearRemoteSecret(db: Database, runtime: { userDataPath: string }) {
+  const current = storedConfig(db)
+  db.setSetting('catalog_config', {
+    ...current,
+    remote: {
+      ...current.remote,
+      secretCipher: null,
+      lastStatus: 'idle',
+      lastMessage: ''
+    }
+  })
+  return catalogStatus(db, runtime)
+}
+
+function authHeaders(secret: string) {
+  return {
+    apikey: secret,
+    Authorization: `Bearer ${secret}`
+  }
+}
+
+async function responseError(response: Response) {
+  const text = await response.text().catch(() => '')
+  try {
+    const data = JSON.parse(text)
+    const message = data?.message ?? data?.error ?? data?.statusCode
+    if (message) return String(message).slice(0, 400)
+  } catch {
+    // La respuesta no era JSON.
+  }
+  return text.trim().slice(0, 400) || `HTTP ${response.status}`
+}
+
+function networkError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/timeout|aborted/i.test(message)) {
+    return 'La conexión con Supabase agotó el tiempo de espera. Revisa internet e inténtalo de nuevo.'
+  }
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN/i.test(message)) {
+    return 'No se pudo conectar con Supabase. Revisa internet y la URL del proyecto.'
+  }
+  return message.slice(0, 400)
+}
+
+function buildCatalogData(
+  db: Database,
+  runtime: { userDataPath: string },
+  imageUrlFor: (filename: string, bytes: Buffer) => string
+): CatalogBuildResult {
   const promos = activePromotionRows(db, true)
   const rows = db.all<any>(
     `SELECT * FROM products
@@ -121,8 +374,31 @@ export function buildCatalogSnapshot(
        AND sku <> '00000000000'
      ORDER BY category ASC, price_cents DESC, name ASC`
   )
+
+  const since = new Date(Date.now() - BEST_SELLER_DAYS * 24 * 60 * 60 * 1000).toISOString()
+  const bestSellerRows = db.all<{ product_id: string; quantity: number }>(
+    `SELECT ii.product_id AS product_id, SUM(ii.quantity) AS quantity
+     FROM invoice_items ii
+     JOIN invoices i ON i.id = ii.invoice_id
+     WHERE i.type = 'venta'
+       AND i.status = 'activa'
+       AND ii.product_id IS NOT NULL
+       AND ii.product_id <> ''
+       AND i.created_at >= ?
+     GROUP BY ii.product_id
+     HAVING SUM(ii.quantity) >= ?
+     ORDER BY SUM(ii.quantity) DESC, ii.product_id ASC`,
+    since,
+    BEST_SELLER_MIN_UNITS
+  )
+  const bestSellerIds = new Set(bestSellerRows.map((row) => String(row.product_id)))
+  const bestSellers = bestSellerRows.map((row) => ({
+    productId: String(row.product_id),
+    quantity: Number(row.quantity || 0)
+  }))
+
   const usedSlugs = new Set<string>()
-  const imageFiles = new Set<string>()
+  const images: CatalogImage[] = []
   const products: any[] = []
 
   for (const row of rows) {
@@ -135,9 +411,13 @@ export function buildCatalogSnapshot(
         if (fs.existsSync(source)) {
           const extension = path.extname(source).toLowerCase() || '.jpg'
           const filename = `${row.id}${extension}`
-          fs.copyFileSync(source, path.join(productsRoot, filename))
-          image = `/products/${filename}`
-          imageFiles.add(filename)
+          const bytes = fs.readFileSync(source)
+          images.push({
+            filename,
+            bytes,
+            contentType: MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
+          })
+          image = imageUrlFor(filename, bytes)
         }
       } catch {
         image = null
@@ -157,6 +437,7 @@ export function buildCatalogSnapshot(
       condition: row.condition || '',
       warrantyDays: Number(row.warranty_days || 0),
       image,
+      bestSeller: bestSellerIds.has(String(row.id)),
       promotion: promotion
         ? {
             id: promotion.id,
@@ -176,16 +457,6 @@ export function buildCatalogSnapshot(
     })
   }
 
-  for (const entry of fs.readdirSync(productsRoot)) {
-    if (!imageFiles.has(entry)) {
-      try {
-        fs.rmSync(path.join(productsRoot, entry), { force: true })
-      } catch {
-        // La limpieza no debe impedir la publicación.
-      }
-    }
-  }
-
   const categories = [...new Set(products.map((product) => product.category))]
     .sort((a, b) => {
       const ai = CATEGORY_ORDER.indexOf(a)
@@ -203,11 +474,13 @@ export function buildCatalogSnapshot(
     })
 
   const promoted = products.filter((product) => product.promotion)
+  const best = products.filter((product) => product.bestSeller)
   const featured: string[] = []
   const addFeatured = (product: { id: string }) => {
     if (featured.length < 9 && !featured.includes(product.id)) featured.push(product.id)
   }
   promoted.forEach(addFeatured)
+  best.forEach(addFeatured)
   for (const category of categories) {
     products
       .filter((product) => product.category === category.name && product.image)
@@ -218,6 +491,7 @@ export function buildCatalogSnapshot(
 
   const heroProduct =
     promoted.find((product) => product.image) ??
+    best.find((product) => product.image) ??
     products.find((product) => product.image && featured.includes(product.id)) ??
     products[0]
 
@@ -230,18 +504,21 @@ export function buildCatalogSnapshot(
   const byNumber = new Map(orderRows.map((order) => [String(order.number), order]))
 
   return {
-    generatedAt: new Date().toISOString(),
-    source: 'OCTESTR',
-    business: BUSINESS,
-    stats: {
-      products: products.length,
-      withImage: products.filter((product) => product.image).length,
-      categories: categories.length
+    catalog: {
+      generatedAt: new Date().toISOString(),
+      source: 'OCTESTR',
+      business: BUSINESS,
+      stats: {
+        products: products.length,
+        withImage: products.filter((product) => product.image).length,
+        categories: categories.length
+      },
+      bestSellers,
+      heroProductId: heroProduct?.id ?? null,
+      featured,
+      categories,
+      products
     },
-    heroProductId: heroProduct?.id ?? null,
-    featured,
-    categories,
-    products,
     orders: {
       generatedAt: new Date().toISOString(),
       demo: true,
@@ -261,60 +538,323 @@ export function buildCatalogSnapshot(
           updatedAt: order.updated_at
         }
       }).filter(Boolean)
-    }
+    },
+    images
   }
 }
 
-export function publishCatalog(
-  db: Database,
-  runtime: { userDataPath: string }
-): { ok: boolean; status: CatalogSyncStatus; error?: string } {
+function publishCatalogLocal(db: Database, runtime: { userDataPath: string }) {
   const config = catalogStatus(db, runtime)
-  writeStatus(db, { lastStatus: 'pending', lastMessage: 'Publicando catálogo…' })
+  writeLocalStatus(db, { lastStatus: 'pending', lastMessage: 'Publicando catálogo local…' })
   try {
-    const snapshot = buildCatalogSnapshot(db, runtime, config.targetPath)
+    const built = buildCatalogData(
+      db,
+      runtime,
+      (filename) => `/products/${filename}`
+    )
+    const productsRoot = path.join(config.targetPath, 'public', 'products')
+    fs.mkdirSync(productsRoot, { recursive: true })
+    for (const image of built.images) {
+      fs.writeFileSync(path.join(productsRoot, image.filename), image.bytes)
+    }
+    const imageFiles = new Set(built.images.map((image) => image.filename))
+    for (const entry of fs.readdirSync(productsRoot)) {
+      if (!imageFiles.has(entry)) {
+        try {
+          fs.rmSync(path.join(productsRoot, entry), { force: true })
+        } catch {
+          // La limpieza no debe impedir la publicación.
+        }
+      }
+    }
     const dataDir = path.join(config.targetPath, 'data')
     fs.mkdirSync(dataDir, { recursive: true })
     fs.writeFileSync(
       path.join(dataDir, 'catalog.json'),
-      `${JSON.stringify({ ...snapshot, orders: undefined }, null, 2)}\n`,
+      `${JSON.stringify(built.catalog, null, 2)}\n`,
       'utf8'
     )
     fs.writeFileSync(
       path.join(dataDir, 'orders-demo.json'),
-      `${JSON.stringify(snapshot.orders, null, 2)}\n`,
+      `${JSON.stringify(built.orders, null, 2)}\n`,
       'utf8'
     )
-    const status = catalogStatus(db, runtime)
-    writeStatus(db, {
+    writeLocalStatus(db, {
       lastStatus: 'success',
-      lastPublishedAt: snapshot.generatedAt,
-      lastMessage: `Catálogo publicado: ${snapshot.stats.products} productos y ${snapshot.stats.withImage} imágenes.`,
-      lastProductCount: snapshot.stats.products,
-      lastImageCount: snapshot.stats.withImage,
-      lastPromotionCount: snapshot.products.filter((product: any) => product.promotion).length
+      lastPublishedAt: built.catalog.generatedAt,
+      lastMessage: `Catálogo local publicado: ${built.catalog.stats.products} productos y ${built.catalog.stats.withImage} imágenes.`,
+      lastProductCount: built.catalog.stats.products,
+      lastImageCount: built.catalog.stats.withImage,
+      lastPromotionCount: promotionCount(built.catalog)
+    })
+    return { ok: true as const, error: undefined }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    writeLocalStatus(db, { lastStatus: 'error', lastMessage: message.slice(0, 500) })
+    return { ok: false as const, error: message }
+  }
+}
+
+async function uploadObject(
+  config: { supabaseUrl: string; bucket: string },
+  secret: string,
+  objectPath: string,
+  body: Buffer,
+  contentType: string,
+  cacheControl: string
+) {
+  const encodedPath = objectPath
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+  const response = await fetch(
+    `${config.supabaseUrl}/storage/v1/object/${encodeURIComponent(config.bucket)}/${encodedPath}`,
+    {
+      method: 'POST',
+      headers: {
+        ...authHeaders(secret),
+        'Content-Type': contentType,
+        'cache-control': cacheControl,
+        'x-upsert': 'true'
+      },
+      body: new Uint8Array(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    }
+  )
+  if (!response.ok) {
+    throw new Error(`Supabase rechazó ${objectPath}: ${await responseError(response)}`)
+  }
+}
+
+async function listObjects(
+  config: { supabaseUrl: string; bucket: string },
+  secret: string,
+  prefix: string
+) {
+  const names: string[] = []
+  const limit = 100
+  let offset = 0
+  for (;;) {
+    const response = await fetch(
+      `${config.supabaseUrl}/storage/v1/object/list/${encodeURIComponent(config.bucket)}`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders(secret),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ prefix, limit, offset }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      }
+    )
+    if (!response.ok) {
+      throw new Error(`No se pudo listar el bucket: ${await responseError(response)}`)
+    }
+    const data = await response.json().catch(() => [])
+    if (!Array.isArray(data) || !data.length) break
+    for (const item of data) {
+      if (!item || typeof item.name !== 'string') continue
+      if (item.name === '.emptyFolderPlaceholder') continue
+      if (item.id === null && item.metadata === null) continue
+      names.push(item.name.startsWith(`${prefix}/`) ? item.name : `${prefix}/${item.name}`)
+    }
+    if (data.length < limit) break
+    offset += limit
+  }
+  return names
+}
+
+async function deleteObjects(
+  config: { supabaseUrl: string; bucket: string },
+  secret: string,
+  prefixes: string[]
+) {
+  if (!prefixes.length) return
+  const response = await fetch(
+    `${config.supabaseUrl}/storage/v1/object/${encodeURIComponent(config.bucket)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        ...authHeaders(secret),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ prefixes }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    }
+  )
+  if (!response.ok) {
+    throw new Error(`No se pudieron limpiar imágenes antiguas: ${await responseError(response)}`)
+  }
+}
+
+export async function testSupabaseConnection(
+  db: Database,
+  runtime: { userDataPath: string }
+): Promise<{ ok: boolean; message: string; publicBucket?: boolean }> {
+  const config = catalogStatus(db, runtime).remote
+  let secret: string | null
+  try {
+    secret = decryptRemoteSecret(db)
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) }
+  }
+  if (!secret) {
+    return { ok: false, message: 'Falta guardar la clave secreta de Supabase.' }
+  }
+  try {
+    const response = await fetch(
+      `${config.supabaseUrl}/storage/v1/bucket/${encodeURIComponent(config.bucket)}`,
+      {
+        headers: authHeaders(secret),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      }
+    )
+    if (!response.ok) {
+      return {
+        ok: false,
+        message: `Supabase respondió: ${await responseError(response)}`
+      }
+    }
+    const data = (await response.json().catch(() => null)) as { public?: boolean } | null
+    const isPublic = data && typeof data.public === 'boolean' ? data.public : undefined
+    return {
+      ok: true,
+      publicBucket: isPublic,
+      message:
+        isPublic === false
+          ? `Conexión correcta con el bucket ${config.bucket}, pero el bucket no es público. La web no podrá leer el catálogo ni las imágenes.`
+          : `Conexión correcta con el bucket ${config.bucket}.`
+    }
+  } catch (error) {
+    return { ok: false, message: networkError(error) }
+  }
+}
+
+export async function publishCatalogRemote(
+  db: Database,
+  runtime: { userDataPath: string }
+): Promise<{ ok: boolean; status: CatalogSyncStatus; error?: string }> {
+  const config = catalogStatus(db, runtime).remote
+  let secret: string | null
+  try {
+    secret = decryptRemoteSecret(db)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    writeRemoteStatus(db, { lastStatus: 'error', lastMessage: message })
+    return { ok: false, status: catalogStatus(db, runtime), error: message }
+  }
+  if (!secret) {
+    const message = 'Falta guardar la clave secreta de Supabase.'
+    writeRemoteStatus(db, { lastStatus: 'error', lastMessage: message })
+    return { ok: false, status: catalogStatus(db, runtime), error: message }
+  }
+
+  writeRemoteStatus(db, { lastStatus: 'pending', lastMessage: 'Publicando en Supabase…' })
+  try {
+    const publicBase = `${config.supabaseUrl}/storage/v1/object/public/${encodeURIComponent(
+      config.bucket
+    )}`
+    const built = buildCatalogData(
+      db,
+      runtime,
+      (filename, bytes) => `${publicBase}/products/${encodeURIComponent(filename)}?v=${sha256Bytes(bytes).slice(0, 12)}`
+    )
+
+    for (const image of built.images) {
+      await uploadObject(
+        config,
+        secret,
+        `products/${image.filename}`,
+        image.bytes,
+        image.contentType,
+        'max-age=31536000'
+      )
+    }
+
+    const catalogJson = Buffer.from(`${JSON.stringify(built.catalog, null, 2)}\n`, 'utf8')
+    const ordersJson = Buffer.from(`${JSON.stringify(built.orders, null, 2)}\n`, 'utf8')
+    await uploadObject(
+      config,
+      secret,
+      'catalog.json',
+      catalogJson,
+      'application/json; charset=utf-8',
+      'max-age=0'
+    )
+    await uploadObject(
+      config,
+      secret,
+      'orders-demo.json',
+      ordersJson,
+      'application/json; charset=utf-8',
+      'max-age=0'
+    )
+
+    const keep = new Set(built.images.map((image) => `products/${image.filename}`))
+    const existing = await listObjects(config, secret, 'products')
+    const orphans = existing.filter((name) => !keep.has(name))
+    await deleteObjects(config, secret, orphans)
+
+    const bytes =
+      built.images.reduce((sum, image) => sum + image.bytes.length, 0) +
+      catalogJson.length +
+      ordersJson.length
+    writeRemoteStatus(db, {
+      lastStatus: 'success',
+      lastPublishedAt: built.catalog.generatedAt,
+      lastMessage: `Supabase actualizado: ${built.catalog.stats.products} productos, ${built.images.length} imágenes y ${promotionCount(built.catalog)} promociones.`,
+      lastProductCount: built.catalog.stats.products,
+      lastImageCount: built.images.length,
+      lastPromotionCount: promotionCount(built.catalog),
+      lastBytes: bytes
     })
     return { ok: true, status: catalogStatus(db, runtime) }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    writeStatus(db, {
-      lastStatus: 'error',
-      lastMessage: message.slice(0, 500)
-    })
+    const message = networkError(error)
+    writeRemoteStatus(db, { lastStatus: 'error', lastMessage: message.slice(0, 500) })
     return { ok: false, status: catalogStatus(db, runtime), error: message }
   }
 }
 
-export function scheduleCatalogPublish(
+export async function publishCatalog(
   db: Database,
   runtime: { userDataPath: string }
-) {
+): Promise<{
+  ok: boolean
+  status: CatalogSyncStatus
+  error?: string
+  local?: { ok: boolean; error?: string }
+  remote?: { ok: boolean; error?: string } | null
+}> {
+  const local = publishCatalogLocal(db, runtime)
+  const config = catalogStatus(db, runtime)
+  if (!config.remote.enabled) {
+    return {
+      ok: local.ok,
+      status: catalogStatus(db, runtime),
+      error: local.error,
+      local: { ok: local.ok, error: local.error },
+      remote: null
+    }
+  }
+  const remote = await publishCatalogRemote(db, runtime)
+  const error = [local.error, remote.error].filter(Boolean).join(' · ') || undefined
+  return {
+    ok: local.ok && remote.ok,
+    status: catalogStatus(db, runtime),
+    error,
+    local: { ok: local.ok, error: local.error },
+    remote: { ok: remote.ok, error: remote.error }
+  }
+}
+
+export function scheduleCatalogPublish(db: Database, runtime: { userDataPath: string }) {
   const config = catalogStatus(db, runtime)
   if (!config.autoPublish) return
   if (publishTimer) clearTimeout(publishTimer)
   publishTimer = setTimeout(() => {
     publishTimer = null
-    publishCatalog(db, runtime)
+    void publishCatalog(db, runtime)
   }, 1200)
   publishTimer.unref?.()
 }

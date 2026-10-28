@@ -4,6 +4,9 @@ import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { OrderStatusCard } from '@/components/order-status-card'
 import { findDemoOrderByCode } from '@/lib/orders-demo'
+import { getOrdersDemo } from '@/lib/orders-demo-server'
+
+export const revalidate = 60
 
 type TrackingPageProps = {
   params: Promise<{ code: string }>
@@ -19,7 +22,8 @@ export const metadata: Metadata = {
 
 export default async function TrackingPage({ params }: TrackingPageProps) {
   const { code } = await params
-  const order = findDemoOrderByCode(code)
+  const orders = await getOrdersDemo()
+  const order = findDemoOrderByCode(orders.orders, code)
   if (!order) notFound()
 
   return (

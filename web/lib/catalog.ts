@@ -10,6 +10,11 @@ export type Promotion = {
   endsOn?: string | null
 }
 
+export type BestSeller = {
+  productId: string
+  quantity: number
+}
+
 export type Product = {
   id: string
   sku: string
@@ -23,6 +28,7 @@ export type Product = {
   condition: string
   warrantyDays: number
   image: string | null
+  bestSeller?: boolean
   promotion: Promotion | null
   createdAt: string
   updatedAt: string
@@ -52,24 +58,30 @@ export type Catalog = {
     withImage: number
     categories: number
   }
+  bestSellers?: BestSeller[]
   heroProductId: string | null
   featured: string[]
   categories: Category[]
   products: Product[]
 }
 
-const data = catalogJson as unknown as Catalog
-
 const categoryOrder = ['Periféricos', 'Almacenamiento', 'Accesorios']
 
-export const catalog = {
-  ...data,
-  categories: [...data.categories].sort(
-    (a, b) => categoryOrder.indexOf(a.name) - categoryOrder.indexOf(b.name)
-  )
+export function normalizeCatalog(data: Catalog): Catalog {
+  return {
+    ...data,
+    categories: [...data.categories].sort(
+      (a, b) => categoryOrder.indexOf(a.name) - categoryOrder.indexOf(b.name)
+    )
+  }
 }
 
-export const business = catalog.business
+export const localCatalog = normalizeCatalog(catalogJson as unknown as Catalog)
+
+// Alias para desarrollos que aún no usan getCatalog(). La web pública usa
+// getCatalog() para preferir el snapshot remoto de Supabase.
+export const catalog = localCatalog
+export const business = localCatalog.business
 
 export function formatPrice(value: number) {
   return new Intl.NumberFormat('es-CO', {
@@ -110,37 +122,38 @@ export const serviceWhatsAppUrl = whatsappUrl(
   'Hola BitacoreTech, necesito servicio técnico para un equipo. ¿Me pueden ayudar?'
 )
 
-export function getHeroProduct() {
+export function getHeroProduct(data: Catalog) {
   return (
-    catalog.products.find((product) => product.id === catalog.heroProductId) ??
-    catalog.products.find((product) => product.image) ??
-    catalog.products[0]
+    data.products.find((product) => product.id === data.heroProductId) ??
+    data.products.find((product) => product.image) ??
+    data.products[0]
   )
 }
 
-export function getHeroCarouselProducts() {
-  const hero = getHeroProduct()
-  const byId = new Map(catalog.products.map((product) => [product.id, product]))
-  const selected = catalog.featured
+export function getHeroCarouselProducts(data: Catalog) {
+  const hero = getHeroProduct(data)
+  const byId = new Map(data.products.map((product) => [product.id, product]))
+  const selected = data.featured
     .map((id) => byId.get(id))
     .filter((product): product is Product => Boolean(product))
   return [...selected].sort(
     (a, b) =>
       Number(b.id === hero?.id) - Number(a.id === hero?.id) ||
-      Number(Boolean(b.promotion)) - Number(Boolean(a.promotion))
+      Number(Boolean(b.promotion)) - Number(Boolean(a.promotion)) ||
+      Number(Boolean(b.bestSeller)) - Number(Boolean(a.bestSeller))
   )
 }
 
-export function getProductBySlug(slug: string) {
-  return catalog.products.find((product) => product.slug === slug)
+export function getProductBySlug(data: Catalog, slug: string) {
+  return data.products.find((product) => product.slug === slug)
 }
 
-export function getCategoryBySlug(slug: string) {
-  return catalog.categories.find((category) => category.slug === slug)
+export function getCategoryBySlug(data: Catalog, slug: string) {
+  return data.categories.find((category) => category.slug === slug)
 }
 
-export function getRelatedProducts(product: Product, limit = 4) {
-  return catalog.products
+export function getRelatedProducts(data: Catalog, product: Product, limit = 4) {
+  return data.products
     .filter(
       (item) =>
         item.id !== product.id &&

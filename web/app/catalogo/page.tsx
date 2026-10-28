@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { CatalogExplorer } from '@/components/catalog-explorer'
-import { catalog } from '@/lib/catalog'
+import { getCatalog } from '@/lib/catalog-server'
+
+export const revalidate = 60
 
 export const metadata: Metadata = {
   title: 'Catálogo',
@@ -14,6 +16,7 @@ export default async function CatalogPage({
   searchParams: Promise<{ q?: string; categoria?: string }>
 }) {
   const params = await searchParams
+  const catalog = await getCatalog()
   const initialQuery = typeof params.q === 'string' ? params.q : ''
   const initialCategory = typeof params.categoria === 'string' ? params.categoria : ''
 

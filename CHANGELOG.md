@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.13.0 — 2026-10-28
+
+### Catálogo remoto
+- Publicación del catálogo, las órdenes demo y las imágenes en Supabase Storage (`catalogo-web`).
+- Sincronización unidireccional: la app publica y la web solo lee.
+- Clave secreta cifrada con `safeStorage`; nunca se envía a la web ni se muestra en la interfaz.
+- Prueba de conexión, activación de Supabase, publicación manual y estado remoto independiente.
+- URLs absolutas de imágenes con hash de contenido para invalidar caché.
+- Limpieza de imágenes huérfanas en el bucket.
+- Publicación automática opcional después de cambios de inventario, ventas, OT o promociones.
+- Avisos in-app para errores de publicación remota.
+- Sin migración nueva: el esquema sigue en 14.
+
+### Web
+- Lectura de `CATALOG_URL` con revalidación ISR de 60 segundos.
+- Fallback automático al snapshot local si el remoto falla.
+- Imágenes servidas desde Supabase.
+- Fichas nuevas con `dynamicParams`.
+- Etiqueta “Más vendido” con ventas de los últimos 30 días y mínimo 2 unidades.
+- Despliegue en Vercel con Root Directory `web`.
+
+### Seguridad y permisos
+- Solo propietario y administradores configuran, prueban y publican en Supabase.
+- La clave pública (`sb_publishable_`) se rechaza para escritura.
+- El estado y la configuración no exponen la clave ni el texto cifrado.
+- La web no recibe credenciales de escritura.
+
+### Calidad
+- Aceptación 1.13.0 con Supabase simulado: 30/30.
+- Smoke empaquetado 1.13.0: 30/30.
+- Web remota: 7/7.
+- Web local: 37/37.
+- Regresión 1.12.0: 22/22.
+- Migración 1.12.0 (esquema 14): OK.
+- Regresión 1.11.0: 34/34.
+- Regresión 1.10.3: 26/26.
+- Typecheck y build de app y web: OK.
+- Prueba contra el proyecto Supabase real pendiente de ingresar la clave en la app.
+
 ## 1.12.0 — 2026-10-27
 
 ### Promociones

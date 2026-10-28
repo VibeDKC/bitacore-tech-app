@@ -6,9 +6,13 @@ import { SiteTopBar } from '@/components/site-topbar'
 import { SiteHeader } from '@/components/site-header'
 import { SearchStrip } from '@/components/search-strip'
 import { SiteFooter } from '@/components/site-footer'
-import { catalog } from '@/lib/catalog'
+import { getCatalog } from '@/lib/catalog-server'
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3001'
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : 'http://localhost:3001')
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -37,11 +41,14 @@ export const viewport: Viewport = {
   themeColor: '#0b1220'
 }
 
-export default function RootLayout({
+export const revalidate = 60
+
+export default async function RootLayout({
   children
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const catalog = await getCatalog()
   return (
     <html lang="es" data-scroll-behavior="smooth">
       <body>

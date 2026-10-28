@@ -10,7 +10,6 @@ import {
 import { ProductCard } from '@/components/product-card'
 import { ProductImage } from '@/components/product-image'
 import {
-  catalog,
   formatPrice,
   getProductBySlug,
   getRelatedProducts,
@@ -19,18 +18,24 @@ import {
   stockLabel,
   stockTone
 } from '@/lib/catalog'
+import { getCatalog } from '@/lib/catalog-server'
+
+export const revalidate = 60
+export const dynamicParams = true
 
 type ProductPageProps = {
   params: Promise<{ slug: string }>
 }
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const catalog = await getCatalog()
   return catalog.products.map((product) => ({ slug: product.slug }))
 }
 
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { slug } = await params
-  const product = getProductBySlug(slug)
+  const catalog = await getCatalog()
+  const product = getProductBySlug(catalog, slug)
   if (!product) return { title: 'Producto no encontrado' }
   return {
     title: product.name,
@@ -48,10 +53,11 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
 
 export default async function ProductPage({ params }: ProductPageProps) {
   const { slug } = await params
-  const product = getProductBySlug(slug)
+  const catalog = await getCatalog()
+  const product = getProductBySlug(catalog, slug)
   if (!product) notFound()
 
-  const related = getRelatedProducts(product, 4)
+  const related = getRelatedProducts(catalog, product, 4)
   const tone = stockTone(product.stock)
 
   return (
@@ -100,10 +106,14 @@ export default async function ProductPage({ params }: ProductPageProps) {
             {product.promotion ? (
               <span className="detail-promo">{product.promotion.badge}</span>
             ) : null}
+            {product.bestSeller ? (
+              <span className="detail-best-seller">Más vendido</span>
+            ) : null}
           </div>
           <p className="detail-price-note">
             Precio en COP · Disponibilidad sujeta a confirmación
             {product.promotion ? ' · Promoción vigente' : ''}
+            {product.bestSeller ? ' · Más vendido este mes' : ''}
           </p>
 
           <p className="detail-copy">

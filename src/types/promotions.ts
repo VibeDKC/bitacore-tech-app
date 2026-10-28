@@ -87,13 +87,44 @@ export interface PromotionPreview {
   products: PromotionPreviewProduct[]
 }
 
-export interface CatalogSyncStatus {
-  targetPath: string
-  autoPublish: boolean
+export type CatalogSyncState = 'idle' | 'success' | 'error' | 'pending'
+
+export interface CatalogRemoteStatus {
+  enabled: boolean
+  supabaseUrl: string
+  bucket: string
+  hasSecret: boolean
   lastPublishedAt: string | null
-  lastStatus: 'idle' | 'success' | 'error' | 'pending'
+  lastStatus: CatalogSyncState
   lastMessage: string
   lastProductCount: number
   lastImageCount: number
   lastPromotionCount: number
+  lastBytes: number
+}
+
+export interface CatalogSyncStatus {
+  targetPath: string
+  autoPublish: boolean
+  lastPublishedAt: string | null
+  lastStatus: CatalogSyncState
+  lastMessage: string
+  lastProductCount: number
+  lastImageCount: number
+  lastPromotionCount: number
+  remote: CatalogRemoteStatus
+}
+
+export interface CatalogPublishResult {
+  ok: boolean
+  status: CatalogSyncStatus
+  error?: string
+  local?: { ok: boolean; error?: string }
+  remote?: { ok: boolean; error?: string } | null
+}
+
+export interface CatalogConnectionResult {
+  ok: boolean
+  message: string
+  publicBucket?: boolean
 }

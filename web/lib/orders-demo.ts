@@ -99,18 +99,18 @@ export function statusSteps(status: string) {
   })
 }
 
-export function findDemoOrder(number: string, code: string) {
+export function findDemoOrder(orders: DemoOrder[], number: string, code: string) {
   const normalizedNumber = number.trim().toUpperCase()
   const normalizedCode = code.trim().toUpperCase()
-  return ordersDemo.orders.find(
+  return orders.find(
     (order) =>
       order.number.toUpperCase() === normalizedNumber &&
       order.code.toUpperCase() === normalizedCode
   )
 }
 
-export function findDemoOrderByCode(code: string) {
-  return ordersDemo.orders.find(
+export function findDemoOrderByCode(orders: DemoOrder[], code: string) {
+  return orders.find(
     (order) => order.code.toUpperCase() === code.trim().toUpperCase()
   )
 }

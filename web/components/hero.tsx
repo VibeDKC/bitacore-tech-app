@@ -71,7 +71,11 @@ export function Hero({ products }: { products: Product[] }) {
             <div className="hero-panel-top">
               <span className="hero-kicker">
                 <ShieldCheck aria-hidden="true" />
-                {product.promotion ? 'Promoción' : 'Destacado'}
+                {product.promotion
+                  ? 'Promoción'
+                  : product.bestSeller
+                    ? 'Más vendido'
+                    : 'Destacado'}
               </span>
               <span className="hero-guarantee">
                 <ShieldCheck aria-hidden="true" />

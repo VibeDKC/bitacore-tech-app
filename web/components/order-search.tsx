@@ -4,9 +4,9 @@ import { useState } from 'react'
 import { Search } from 'lucide-react'
 import { OrderStatusCard } from '@/components/order-status-card'
 import type { DemoOrder } from '@/lib/orders-demo'
-import { findDemoOrder, ordersDemo } from '@/lib/orders-demo'
+import { findDemoOrder } from '@/lib/orders-demo'
 
-export function OrderSearch() {
+export function OrderSearch({ orders }: { orders: DemoOrder[] }) {
   const [number, setNumber] = useState('')
   const [code, setCode] = useState('')
   const [result, setResult] = useState<DemoOrder | null>(null)
@@ -15,7 +15,7 @@ export function OrderSearch() {
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
-    const order = findDemoOrder(number, code)
+    const order = findDemoOrder(orders, number, code)
     if (!order) {
       setResult(null)
       setError('No encontramos una orden con esos datos. Verifica el número y el código.')
@@ -56,7 +56,7 @@ export function OrderSearch() {
       <div className="order-demo-box">
         <p className="order-demo-title">Datos de prueba para esta demo</p>
         <div className="order-demo-list">
-          {ordersDemo.orders.map((order) => (
+          {orders.map((order) => (
             <button
               key={order.number}
               type="button"
