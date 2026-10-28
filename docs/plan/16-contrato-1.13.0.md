@@ -86,7 +86,7 @@ La publicación automática sigue desactivada por defecto. Si se activa, publica
 
 ## Fuera de alcance
 
-- Carrito y pedidos en línea (1.13.1/1.14).
+- Carrito y pedidos en línea: el carrito se entregó en 1.13.1; los pedidos en línea siguen pendientes.
 - Portal de OT con datos reales.
 - Sincronización bidireccional.
 - Edición del catálogo desde la web.
