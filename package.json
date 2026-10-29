@@ -1,7 +1,7 @@
 {
   "name": "bitacoretech",
   "private": true,
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "BitacoreTech Taller & POS - gestión integral para talleres técnicos",
   "author": "BitacoreTech",
   "type": "module",
@@ -36,6 +36,8 @@
     "test:acceptance:1.16.1": "node scripts/acceptance/1.16.1.cjs",
     "test:acceptance:1.16.2": "node scripts/acceptance/1.16.2.cjs",
     "test:acceptance:1.17.0": "node scripts/acceptance/1.17.0.cjs",
+    "test:acceptance:1.18.0": "node scripts/acceptance/1.18.0.cjs",
+    "test:acceptance:1.18.0:lockout": "node scripts/acceptance/1.18.0-lockout.cjs",
     "test:migration:1.7.0": "node scripts/acceptance/migration-1.7.0.cjs",
     "test:migration:1.8.0": "node scripts/acceptance/migration-1.8.0.cjs",
     "test:migration:1.9.0": "node scripts/acceptance/migration-1.9.0.cjs",
@@ -46,6 +48,7 @@
     "test:migration:1.12.0": "node scripts/acceptance/migration-1.12.0.cjs",
     "test:migration:1.16.0": "node scripts/acceptance/migration-1.16.0.cjs",
     "test:migration:1.17.0": "node scripts/acceptance/migration-1.17.0.cjs",
+    "test:migration:1.18.0": "node scripts/acceptance/migration-1.18.0.cjs",
     "test:migration:1.5.0": "node scripts/acceptance/migration-1.5.0.cjs",
     "test:migration:1.6.0": "node scripts/acceptance/migration-1.6.0.cjs",
     "lint": "npm run typecheck"

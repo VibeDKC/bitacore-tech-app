@@ -57,7 +57,7 @@ Para abrirla localmente desde la raíz:
 Abrir-demo-catalogo.bat
 ```
 
-Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/23-contrato-1.17.0.md`, el acta en `docs/actas/1.17.0.md` y los pendientes en `docs/pendientes/1.17.0.md`.
+Queda en `http://localhost:3001`. La documentación está en `web/README.md`, el contrato de la versión en `docs/plan/24-contrato-1.18.0.md`, el acta en `docs/actas/1.18.0.md` y los pendientes en `docs/pendientes/1.18.0.md`.
 
 Los pedidos en línea y los pagos siguen pendientes. El portal de OT con datos reales consulta por número (solo dígitos, sin `#OT-`) y clave de seguimiento, sin publicar la clave en texto plano. La web vieja de MTO APP se mantiene hasta validar el corte de dominio.
 
@@ -102,6 +102,23 @@ Desde 1.17.0 la ficha del producto incorpora:
 
 El catálogo publica la descripción, las imágenes y el slug estable. La web muestra la galería y la descripción comercial; las notas internas nunca salen de la app.
 
+## Garant?as y abandono
+
+Desde 1.18.0:
+
+- Una OT entregada con garant?a vigente puede generar un **reclamo de garant?a** vinculado.
+- El reclamo conserva cliente, equipo, OT original, fecha de garant?a y c?digo de seguimiento.
+- La OT de garant?a permite registrar **pruebas en taller**, condiciones en casa del cliente, resultado y recomendaciones.
+- La entrega de garant?a es **sin cobro**, no genera factura ni pago y no pasa por caja.
+- Los repuestos cubiertos descuentan stock y registran costo, pero no se cobran.
+- Si la falla no se reproduce, se entrega sin cobro con resultado **sin falla reproducida**.
+- Si la garant?a no est? cubierta, se debe crear una OT normal para cobrar.
+- La garant?a original no se extiende autom?ticamente.
+
+El **abandono con traspaso a despiece** cierra la OT como abandonada y crea un producto en la categor?a **Despiece**, ubicaci?n **Caja de despiece**, sin publicaci?n web. La deuda pendiente no se cancela autom?ticamente.
+
+El bloqueo de acceso se mantiene en **5 intentos fallidos** y ahora es persistente entre reinicios.
+
 ## Marca
 
 Desde 1.16.1 la app usa el logo oficial de BitacoreTech:
@@ -111,6 +128,7 @@ Desde 1.16.1 la app usa el logo oficial de BitacoreTech:
 - Icono sin texto para el instalador, la ventana y los accesos directos.
 - Favicon propio en el renderer.
 - La web conserva sus assets de marca alineados con el mismo logo.
+- Variante del logo para fondos oscuros en la pantalla 404.
 
 ## Primer arranque
 
@@ -274,9 +292,12 @@ El formato predeterminado de **Configuración → Impresión** solo preseleccion
 | `npm run test:acceptance:1.16.1` | Logo, símbolo, icono, favicon y wordmark en la app. |
 | `npm run test:acceptance:1.16.2` | Actualización con base existente, acceso del propietario y recuperación de clave. |
 | `npm run test:acceptance:1.17.0` | Galería, descripciones, slug estable, historial de compras y catálogo. |
+| `npm run test:acceptance:1.18.0` | Garant?as vinculadas, pruebas, entrega sin cobro y abandono/despiece. |
+| `npm run test:acceptance:1.18.0:lockout` | Bloqueo persistente despu?s de 5 intentos fallidos. |
 | `npm run test:migration:1.12.0` | Migración 14 de promociones y catálogo sobre copia de la base real. |
 | `npm run test:migration:1.16.0` | Migración 17 de cartera, cupo de crédito y vencimientos sobre copia de la base real. |
 | `npm run test:migration:1.17.0` | Migración 18 de galería, descripciones y slugs sobre copia de la base real. |
+| `npm run test:migration:1.18.0` | Migraci?n 19 de garant?as, abandono/despiece y bloqueo persistente. |
 | `npm run test:migration:1.5.0` | Migración 5 sobre una copia de la base real. |
 | `npm run test:migration:1.6.0` | Migración 6 y diccionarios sobre una copia de la base real. |
 | `npm run test:migration:1.7.0` | Migración 7 y tabla de credenciales cifradas. |
@@ -315,6 +336,10 @@ npm run test:acceptance:1.16.0
 npm run test:acceptance:1.16.1
 npm run test:acceptance:1.16.2
 npm run test:acceptance:1.17.0
+npm run test:acceptance:1.18.0
+npm run test:acceptance:1.18.0:lockout
+npm run test:acceptance:1.18.0
+npm run test:acceptance:1.18.0:lockout
 cd web && npm run test:remote && cd ..
 npm run test:migration:1.5.0
 npm run test:migration:1.6.0
@@ -328,9 +353,11 @@ npm run test:migration:1.11.0
 npm run test:migration:1.12.0
 npm run test:migration:1.16.0
 npm run test:migration:1.17.0
+npm run test:migration:1.18.0
+npm run test:migration:1.18.0
 ```
 
-Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36`, `6/6`, `16/16` y `20/20`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
+Las evidencias quedan en la carpeta temporal que imprime cada script. Los resultados esperados son `8/8`, `15/15`, `14/14`, `12/12`, `14/14`, `12/12`, `11/11`, `13/13`, `9/9`, `7/7`, `15/15`, `21/21`, `26/26`, `34/34`, `22/22`, `30/30`, `23/23`, `22/22`, `22/22`, `44/44`, `36/36`, `6/6`, `16/16`, `20/20`, `16/16` y `4/4`; la web remota suma `7/7` y la local `39/39`. Las pruebas de migración usan una copia de `%APPDATA%\BitacoreTech\bitacoretech.db` y no modifican la base real.
 
 ## Empaquetado
 
@@ -338,7 +365,7 @@ Las evidencias quedan en la carpeta temporal que imprime cada script. Los result
 npm run dist
 ```
 
-El instalador queda en `release/` como `BitacoreTech-1.17.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
+El instalador queda en `release/` como `BitacoreTech-1.18.0-x64.exe`. La configuración de electron-builder está en el bloque `build` de `package.json`:
 
 - `appId`: `co.bitacoretech.taller`
 - `productName`: `BitacoreTech`
@@ -361,6 +388,8 @@ El instalador queda en `release/` como `BitacoreTech-1.17.0-x64.exe`. La configu
 - Los abonos de cartera usan los mismos métodos de pago que la caja y respetan la regla de comprobante digital.
 - La garantía de una OT entregada se calcula con los días del snapshot legal; los repuestos conservan su garantía individual.
 - El riesgo de abandono se calcula con los días del snapshot legal y se muestra en la OT y en las notificaciones.
+- Un reclamo de garant?a se vincula a la OT original y se entrega sin cobro; no genera una venta nueva.
+- El abandono traslada el equipo a un producto de despiece y conserva la deuda pendiente.
 - No se emiten facturas electrónicas DIAN.
 - No hay integración con hardware de impresión ni básculas; se usa el diálogo de impresión del sistema.
 - El inventario permite editar referencias solo a administradores y propietario; el stock se mueve mediante ajustes auditados.

@@ -7,7 +7,9 @@ export const workOrderStatusOrder: WorkOrderStatus[] = [
   'reparacion',
   'pruebas',
   'listo',
-  'entregado'
+  'entregado',
+  'no_reparado',
+  'abandonado'
 ]
 
 export const workOrderStatusConfig: Record<
@@ -75,6 +77,13 @@ export const workOrderStatusConfig: Record<
     tone: 'danger',
     dot: 'bg-danger-500',
     description: 'El equipo no pudo repararse o el cliente rechazó el trabajo.'
+  },
+  abandonado: {
+    label: 'Abandonado',
+    shortLabel: 'Abandonado',
+    tone: 'danger',
+    dot: 'bg-danger-600',
+    description: 'Equipo no reclamado y trasladado a despiece.'
   }
 }
 
@@ -89,18 +98,28 @@ export function stockStatusLabel(status: StockStatus) {
   return status === 'in' ? 'En stock' : status === 'low' ? 'Stock bajo' : 'Agotado'
 }
 
+const progressOrder: WorkOrderStatus[] = [
+  'recibido',
+  'diagnostico',
+  'aprobacion',
+  'reparacion',
+  'pruebas',
+  'listo',
+  'entregado'
+]
+
 export function getWorkOrderProgress(status: WorkOrderStatus) {
-  if (status === 'no_reparado') return 100
-  const index = workOrderStatusOrder.indexOf(status)
-  return Math.round(((index + 1) / workOrderStatusOrder.length) * 100)
+  if (status === 'entregado' || status === 'no_reparado' || status === 'abandonado') return 100
+  const index = progressOrder.indexOf(status)
+  return Math.round(((index + 1) / progressOrder.length) * 100)
 }
 
 export function nextWorkOrderStatus(status: WorkOrderStatus): WorkOrderStatus | null {
-  if (status === 'no_reparado' || status === 'entregado') return null
-  const index = workOrderStatusOrder.indexOf(status)
-  return workOrderStatusOrder[index + 1] ?? null
+  if (status === 'no_reparado' || status === 'entregado' || status === 'abandonado') return null
+  const index = progressOrder.indexOf(status)
+  return progressOrder[index + 1] ?? null
 }
 
 export function canCancelWorkOrder(status: WorkOrderStatus) {
-  return status !== 'entregado' && status !== 'no_reparado'
+  return status !== 'entregado' && status !== 'no_reparado' && status !== 'abandonado'
 }

@@ -144,7 +144,17 @@ export class Database {
       'UPDATE invoice_items SET original_unit_price_cents = unit_price_cents WHERE original_unit_price_cents = 0'
     )
     this.ensureColumn('work_order_items', 'warranty_days', 'INTEGER NOT NULL DEFAULT 0')
+    this.ensureColumn('work_order_items', 'warranty_covered', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('work_orders', 'tracking_code', 'TEXT')
+    this.ensureColumn('work_orders', 'warranty_of_order_id', 'TEXT REFERENCES work_orders(id)')
+    this.ensureColumn('work_orders', 'warranty_claim_reason', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('work_orders', 'warranty_checks_json', 'TEXT')
+    this.ensureColumn('work_orders', 'warranty_result', "TEXT NOT NULL DEFAULT ''")
+    this.ensureColumn('work_orders', 'abandoned_at', 'TEXT')
+    this.ensureColumn('work_orders', 'disassembly_product_id', 'TEXT REFERENCES products(id)')
+    this.db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_work_orders_warranty_of ON work_orders(warranty_of_order_id)'
+    )
     this.ensureColumn('invoices', 'credit_authorized', 'INTEGER NOT NULL DEFAULT 0')
     this.ensureColumn('invoices', 'credit_authorized_by', 'TEXT')
     this.ensureColumn('invoices', 'credit_authorized_at', 'TEXT')
@@ -190,7 +200,22 @@ export class Database {
       this.backfillProductSlugs()
     }
     const now = new Date().toISOString()
-    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]) {
+    this.run(
+      `INSERT OR IGNORE INTO order_status_config
+        (status, label, short_label, description, tone, position, is_terminal, requires_payment, is_cancel)
+       VALUES ('abandonado', 'Abandonado', 'Abandonado', 'Equipo no reclamado y trasladado a despiece.', 'danger', 8, 1, 0, 1)`
+    )
+    if (!this.get("SELECT id FROM dictionary_nodes WHERE type = 'inventory_category' AND name = 'Despiece'")) {
+      this.run(
+        `INSERT INTO dictionary_nodes
+          (id, parent_id, type, code, channel, name, sort_order, active, system,
+           responsible_user_id, linked_income_account_id, created_at, updated_at)
+         VALUES ('dict_despiece', NULL, 'inventory_category', NULL, NULL, 'Despiece', 12, 1, 0, NULL, NULL, ?, ?)`,
+        now,
+        now
+      )
+    }
+    for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]) {
       this.run('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)', version, now)
     }
   }

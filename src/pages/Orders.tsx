@@ -61,16 +61,20 @@ export function OrdersPage() {
   const now = Date.now()
   const counts = useMemo(
     () => ({
-      open: orders.filter((order) => !['entregado', 'no_reparado'].includes(order.status)).length,
+      open: orders.filter(
+        (order) => !['entregado', 'no_reparado', 'abandonado'].includes(order.status)
+      ).length,
       diagnostic: orders.filter((order) => order.status === 'diagnostico').length,
       ready: orders.filter((order) => order.status === 'listo').length,
       delayed: orders.filter(
         (order) =>
-          !['entregado', 'no_reparado'].includes(order.status) &&
+          !['entregado', 'no_reparado', 'abandonado'].includes(order.status) &&
           new Date(order.promisedAt).getTime() < now
       ).length,
       warranties: orders.filter(
-        (order) => order.warranty && order.warranty.status !== 'vencida'
+        (order) =>
+          order.isWarrantyClaim ||
+          (order.warranty && order.warranty.status !== 'vencida')
       ).length,
       abandonment: orders.filter((order) => order.abandonment?.atRisk).length
     }),
@@ -82,13 +86,15 @@ export function OrdersPage() {
     return orders.filter((order) => {
       const matchesTab =
         tab === 'todas' ||
-        (tab === 'abiertas' && !['entregado', 'no_reparado'].includes(order.status)) ||
+        (tab === 'abiertas' &&
+          !['entregado', 'no_reparado', 'abandonado'].includes(order.status)) ||
         (tab === 'diagnostico' && order.status === 'diagnostico') ||
         (tab === 'listas' && order.status === 'listo') ||
-        (tab === 'cerradas' && ['entregado', 'no_reparado'].includes(order.status)) ||
+        (tab === 'cerradas' &&
+          ['entregado', 'no_reparado', 'abandonado'].includes(order.status)) ||
         (tab === 'garantias' &&
-          Boolean(order.warranty) &&
-          order.warranty?.status !== 'vencida')
+          (order.isWarrantyClaim ||
+            (Boolean(order.warranty) && order.warranty?.status !== 'vencida')))
       const matchesTech = technician === 'Todos' || order.technician === technician
       const matchesQuery =
         !term ||
@@ -256,7 +262,7 @@ export function OrdersPage() {
             <tbody>
               {filtered.map((order) => {
                 const delayed =
-                  !['entregado', 'no_reparado'].includes(order.status) &&
+                  !['entregado', 'no_reparado', 'abandonado'].includes(order.status) &&
                   new Date(order.promisedAt).getTime() < now
                 const customer = customers.find((item) => item.id === order.customerId)
                 return (
@@ -298,6 +304,17 @@ export function OrdersPage() {
                           )}
                         >
                           Garantía hasta {formatShortDate(order.warranty.until)}
+                        </p>
+                      ) : null}
+                      {order.warrantyOf ? (
+                        <p className="mt-1 text-[9px] font-semibold text-brand-600">
+                          Garantía de {order.warrantyOf.number}
+                        </p>
+                      ) : null}
+                      {order.warrantyClaims?.length ? (
+                        <p className="mt-1 text-[9px] font-semibold text-brand-600">
+                          {order.warrantyClaims.length} reclamo
+                          {order.warrantyClaims.length === 1 ? '' : 's'} de garantía
                         </p>
                       ) : null}
                       {order.abandonment?.atRisk ? (

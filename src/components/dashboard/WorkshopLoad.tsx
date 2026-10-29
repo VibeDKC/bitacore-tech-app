@@ -14,7 +14,8 @@ const progressTone: Record<WorkOrderStatus, 'brand' | 'success' | 'warning' | 'd
   pruebas: 'brand',
   listo: 'success',
   entregado: 'success',
-  no_reparado: 'danger'
+  no_reparado: 'danger',
+  abandonado: 'danger'
 }
 
 export function WorkshopLoad({ orders: allOrders = [], technician = 'Julián Vélez' }: { orders?: WorkOrder[]; technician?: string }) {

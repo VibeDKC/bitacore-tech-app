@@ -80,6 +80,7 @@ import { listGeminiModels, scanInvoice, testGeminiConnection, type InvoiceExtrac
 import { resolveInternalSku } from './sku'
 import { cleanProductText } from './productText'
 import { slugify, uniqueSlug } from './slug'
+import { isTerminalOrderStatus, warrantyForOrder } from './orderStatus'
 import {
   PRODUCT_IMAGE_FOLDER,
   prepareProductImage,
@@ -129,8 +130,46 @@ const simulatedIdentity: Record<string, { username: string; name: string; email:
   cajero: { username: 'camila.restrepo', name: 'Camila Restrepo', email: 'camila@bitacoretech.co' }
 }
 
-const loginAttempts = new Map<string, { fails: number; blockedUntil: number }>()
 const STATUS_FLOW = ['recibido', 'diagnostico', 'aprobacion', 'reparacion', 'pruebas', 'listo', 'entregado']
+
+function loginBlockRemaining(db: Database, username: string) {
+  const row = db.get<{ blocked_until: string | null }>(
+    'SELECT blocked_until FROM login_attempts WHERE username = ?',
+    username
+  )
+  if (!row?.blocked_until) return 0
+  const remaining = new Date(row.blocked_until).getTime() - Date.now()
+  return Number.isFinite(remaining) && remaining > 0 ? Math.ceil(remaining / 1000) : 0
+}
+
+function registerLoginFailure(db: Database, username: string) {
+  const now = new Date()
+  const current = db.get<{ fails: number }>(
+    'SELECT fails FROM login_attempts WHERE username = ?',
+    username
+  )
+  const fails = Number(current?.fails ?? 0) + 1
+  if (fails >= 5) {
+    db.run(
+      `INSERT INTO login_attempts (username, fails, blocked_until, updated_at)
+       VALUES (?, 0, ?, ?)
+       ON CONFLICT(username) DO UPDATE SET fails = 0, blocked_until = excluded.blocked_until, updated_at = excluded.updated_at`,
+      username,
+      new Date(now.getTime() + 60_000).toISOString(),
+      now.toISOString()
+    )
+    return 0
+  }
+  db.run(
+    `INSERT INTO login_attempts (username, fails, blocked_until, updated_at)
+     VALUES (?, ?, NULL, ?)
+     ON CONFLICT(username) DO UPDATE SET fails = excluded.fails, blocked_until = NULL, updated_at = excluded.updated_at`,
+    username,
+    fails,
+    now.toISOString()
+  )
+  return Math.max(0, 5 - fails)
+}
 
 function fail(message: string, code = 'BAD_REQUEST'): never {
   throw new RpcError(message, code)
@@ -2273,7 +2312,7 @@ function reportData(db: Database, session: Session, period: string) {
     const tech = db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', order.technician_id)?.name ?? 'Sin asignar'
     const current = techMap.get(tech) ?? { total: 0, open: 0, closed: 0 }
     current.total += 1
-    if (['entregado', 'no_reparado'].includes(order.status)) current.closed += 1
+    if (['entregado', 'no_reparado', 'abandonado'].includes(order.status)) current.closed += 1
     else current.open += 1
     techMap.set(tech, current)
   }
@@ -3265,9 +3304,12 @@ export async function handleRpc(command: string, payload: Payload, token: string
     const password = typeof payload?.password === 'string' ? payload.password : ''
     if (!password) fail('La contraseña es obligatoria')
 
-    const attempts = loginAttempts.get(username)
-    if (attempts && attempts.blockedUntil > Date.now()) {
-      fail('Demasiados intentos fallidos. Espera un minuto antes de reintentar.', 'LOCKED')
+    const blockedSeconds = loginBlockRemaining(db, username)
+    if (blockedSeconds > 0) {
+      fail(
+        `Demasiados intentos fallidos. Espera ${blockedSeconds} segundo${blockedSeconds === 1 ? '' : 's'} antes de reintentar.`,
+        'LOCKED'
+      )
     }
 
     const user = db.get<any>('SELECT * FROM users WHERE username = ? COLLATE NOCASE', username)
@@ -3281,25 +3323,24 @@ export async function handleRpc(command: string, payload: Payload, token: string
     }
     const matches = Boolean(user?.active) && verifyPassword(password, user.password_hash)
     if (!matches) {
-      const current = loginAttempts.get(username) ?? { fails: 0, blockedUntil: 0 }
-      current.fails += 1
-      if (current.fails >= 5) {
-        current.fails = 0
-        current.blockedUntil = Date.now() + 60_000
-      }
-      loginAttempts.set(username, current)
+      const remaining = registerLoginFailure(db, username)
       db.appendAudit({
         userId: user?.id ?? null,
         userName: user?.name ?? username,
         role: user?.role ?? 'desconocido',
         action: 'Intento de acceso fallido',
         entity: 'Sesión',
-        detail: `Usuario ${username}.`
+        detail: `Usuario ${username}.${remaining === 0 ? ' Bloqueo de un minuto aplicado.' : ` Intentos restantes: ${remaining}.`}`
       })
-      fail('Usuario o contraseña incorrectos.', 'INVALID_CREDENTIALS')
+      fail(
+        remaining === 0
+          ? 'Demasiados intentos fallidos. Espera un minuto antes de reintentar.'
+          : `Usuario o contraseña incorrectos. Intentos restantes: ${remaining}.`,
+        remaining === 0 ? 'LOCKED' : 'INVALID_CREDENTIALS'
+      )
     }
 
-    loginAttempts.delete(username)
+    db.run('DELETE FROM login_attempts WHERE username = ?', username)
     const issued = issueSession(db, user)
     db.appendAudit({
       userId: user.id,
@@ -3399,7 +3440,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         }
       }
       const report = reportData(db, session, '30d')
-      const open = orders.filter((order: any) => !['entregado', 'no_reparado'].includes(order.status))
+      const open = orders.filter((order: any) => !['entregado', 'no_reparado', 'abandonado'].includes(order.status))
       const cash = currentCashSession(db)
       const performanceStart = new Date(Date.now() - 30 * 24 * 3600_000).toISOString()
       const sellerPerformance = db.get<any>(
@@ -4754,7 +4795,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireModuleAccess(session, 'orders')
       requireCap(session, 'diagnoseOrder')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
-      if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada; no admite credenciales.')
+      if (['entregado', 'no_reparado', 'abandonado'].includes(row.status)) fail('La OT ya está cerrada; no admite credenciales.')
       requireCredentialAccess(session, row)
       if (typeof payload?.secret !== 'string' || !payload.secret.trim()) {
         fail('Escribe la contraseña, PIN o patrón del equipo.')
@@ -5263,11 +5304,381 @@ export async function handleRpc(command: string, payload: Payload, token: string
       return orderDto(db, getOrderOrFail(db, id))
     }
 
+    case 'orders.createWarranty': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'createOrder')
+      const original = getOrderOrFail(db, text(payload?.id, 'Orden original', 1, 80))
+      if (original.status !== 'entregado') {
+        fail('Solo se puede registrar garantía de una OT entregada.')
+      }
+      const originalWarranty = warrantyForOrder(db, original)
+      if (!originalWarranty || originalWarranty.status === 'vencida') {
+        fail('La garantía de esta OT está vencida o no aplica.')
+      }
+      const openClaim = db.get<any>(
+        "SELECT id, number FROM work_orders WHERE warranty_of_order_id = ? AND status NOT IN ('entregado','no_reparado','abandonado') LIMIT 1",
+        original.id
+      )
+      if (openClaim) fail(`Ya existe un reclamo de garantía abierto: ${openClaim.number}.`)
+      const customer = db.get<any>('SELECT * FROM customers WHERE id = ?', original.customer_id)
+      if (!customer) fail('El cliente de la OT original ya no existe.')
+      const reason = text(
+        payload?.reason ?? 'El cliente reporta falla; el equipo funciona correctamente en el taller.',
+        'Motivo de la garantía',
+        5,
+        1000
+      )
+      const requestedTechnicianId =
+        typeof payload?.technicianId === 'string' && payload.technicianId
+          ? payload.technicianId
+          : original.technician_id
+      const technician = requestedTechnicianId
+        ? db.get<any>(
+            "SELECT * FROM users WHERE id = ? AND active = 1 AND role IN ('tecnico', 'admin')",
+            requestedTechnicianId
+          )
+        : null
+      const nowIso = new Date().toISOString()
+      const promisedAt = payload?.promisedAt
+        ? isoDate(payload.promisedAt, 'Fecha de promesa')
+        : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+      const id = `wo_${sha256(`${original.id}|warranty|${Date.now()}|${Math.random()}`).slice(0, 20)}`
+      const number = db.orderNumber()
+      let trackingCode = ''
+      do {
+        trackingCode = `SG-${randomBytes(8).toString('hex').toUpperCase()}`
+      } while (db.get('SELECT id FROM work_orders WHERE tracking_code = ?', trackingCode))
+      let originalIntake: any = {}
+      try {
+        originalIntake = original.intake_json ? JSON.parse(original.intake_json) : {}
+      } catch {
+        originalIntake = {}
+      }
+      const legal = createSnapshot(db, nowIso, originalIntake?.technicalSheet)
+      const intake = {
+        ...originalIntake,
+        category: original.device_category,
+        categoryLabel: original.category_label,
+        serviceKind: 'falla',
+        serviceType: 'Garantía',
+        serviceDetail: reason,
+        estimate: 0,
+        diagnosticFee: 0,
+        receivedBy: displayUser(session).name,
+        receivedAt: nowIso,
+        legal,
+        warrantyOfOrderId: original.id,
+        warrantyOfNumber: original.number,
+        warrantyReason: reason
+      }
+      const checks = {
+        workshopTests: '',
+        homeConditions: '',
+        result: 'pendiente',
+        recommendations: '',
+        updatedAt: nowIso,
+        updatedBy: displayUser(session).name
+      }
+      db.tx(() => {
+        db.run(
+          `INSERT INTO work_orders
+            (id, number, tracking_code, customer_id, equipment_id, device_category, category_label, equipment_type, brand, model, serial,
+             accessories, physical_condition, reported_issue, diagnosis, status, technician_id, created_at,
+             promised_at, notes, intake_json, received_by, created_by, updated_at,
+             warranty_of_order_id, warranty_claim_reason, warranty_checks_json, warranty_result)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 'recibido', ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, 'pendiente')`,
+          id,
+          number,
+          trackingCode,
+          original.customer_id,
+          original.equipment_id ?? null,
+          original.device_category,
+          original.category_label,
+          original.equipment_type,
+          original.brand,
+          original.model,
+          original.serial,
+          original.accessories,
+          original.physical_condition,
+          `Revisión de garantía de ${original.number}: ${reason}`,
+          technician?.id ?? null,
+          nowIso,
+          promisedAt,
+          `Garantía de ${original.number}. ${reason}`,
+          JSON.stringify(intake),
+          displayUser(session).name,
+          session.userId,
+          nowIso,
+          original.id,
+          reason,
+          JSON.stringify(checks)
+        )
+        db.run(
+          `INSERT INTO work_order_events
+            (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
+           VALUES (?, ?, 'recibido', 'Equipo recibido en garantía', ?, ?, ?, 'current', ?)`,
+          `evt_${Date.now()}`,
+          id,
+          `Reclamo de garantía de ${original.number}. ${reason}`,
+          session.userId,
+          displayUser(session).name,
+          nowIso
+        )
+        if (technician) {
+          db.run(
+            `INSERT INTO work_order_assignments
+              (id, work_order_id, from_user_id, from_name, to_user_id, to_name, reason, assigned_by, assigned_by_name, created_at)
+             VALUES (?, ?, NULL, NULL, ?, ?, 'Asignación de garantía', ?, ?, ?)`,
+            `asg_${sha256(`${id}|${technician.id}|${nowIso}`).slice(0, 20)}`,
+            id,
+            technician.id,
+            technician.name,
+            session.userId,
+            displayUser(session).name,
+            nowIso
+          )
+          db.run(
+            `INSERT INTO work_order_events
+              (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
+             VALUES (?, ?, 'recibido', 'Asignación de técnico', ?, ?, ?, 'done', ?)`,
+            `evt_${Date.now()}_tech`,
+            id,
+            `OT de garantía asignada a ${technician.name}.`,
+            session.userId,
+            displayUser(session).name,
+            nowIso
+          )
+        }
+        audit(
+          db,
+          session,
+          'Registro de garantía',
+          'Orden de trabajo',
+          `${number} · garantía de ${original.number} · ${reason}`,
+          id
+        )
+      })
+      return orderDto(db, getOrderOrFail(db, id))
+    }
+
+    case 'orders.updateWarranty': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'diagnoseOrder')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      if (!row.warranty_of_order_id) fail('Esta OT no es un reclamo de garantía.')
+      if (isTerminalOrderStatus(row.status)) fail('La OT de garantía ya está cerrada.')
+      const raw = payload?.checks && typeof payload.checks === 'object' ? payload.checks : {}
+      const checks = {
+        workshopTests:
+          typeof raw.workshopTests === 'string' ? raw.workshopTests.trim().slice(0, 2000) : '',
+        homeConditions:
+          typeof raw.homeConditions === 'string' ? raw.homeConditions.trim().slice(0, 2000) : '',
+        result: schema(
+          raw.result ?? 'pendiente',
+          z.enum(['pendiente', 'sin_falla', 'falla_reproducida', 'no_cubierta'])
+        ),
+        recommendations:
+          typeof raw.recommendations === 'string'
+            ? raw.recommendations.trim().slice(0, 2000)
+            : '',
+        updatedAt: new Date().toISOString(),
+        updatedBy: displayUser(session).name
+      }
+      db.tx(() => {
+        db.run(
+          'UPDATE work_orders SET warranty_checks_json = ?, warranty_result = ?, updated_at = ? WHERE id = ?',
+          JSON.stringify(checks),
+          checks.result,
+          checks.updatedAt,
+          row.id
+        )
+        audit(
+          db,
+          session,
+          'Pruebas de garantía actualizadas',
+          'Orden de trabajo',
+          `${row.number} · resultado ${checks.result}`,
+          row.id
+        )
+      })
+      return orderDto(db, getOrderOrFail(db, row.id))
+    }
+
+    case 'orders.deliverWarranty': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'authorizeNoCharge')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      if (!row.warranty_of_order_id) fail('Esta OT no es un reclamo de garantía.')
+      if (row.status !== 'listo') fail('La OT de garantía debe estar Lista para entrega.')
+      if (row.warranty_result === 'pendiente') {
+        fail('Registra el resultado de las pruebas de garantía antes de entregar.')
+      }
+      if (row.warranty_result === 'no_cubierta') {
+        fail('La garantía no está cubierta. Crea una OT normal para cobrar la reparación.')
+      }
+      const activeInvoice = db.get<any>(
+        "SELECT id FROM invoices WHERE order_id = ? AND status = 'activa' LIMIT 1",
+        row.id
+      )
+      if (activeInvoice) fail('La OT de garantía no debe tener factura activa.')
+      const nowIso = new Date().toISOString()
+      db.tx(() => {
+        db.run('UPDATE work_order_events SET state = ? WHERE work_order_id = ? AND state = ?', 'done', row.id, 'current')
+        db.run(
+          `INSERT INTO work_order_events
+            (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
+           VALUES (?, ?, 'entregado', 'Garantía entregada', ?, ?, ?, 'current', ?)`,
+          `evt_${Date.now()}`,
+          row.id,
+          `Equipo entregado sin cobro por garantía. Resultado: ${row.warranty_result}.`,
+          session.userId,
+          displayUser(session).name,
+          nowIso
+        )
+        db.run(
+          "UPDATE work_orders SET status = 'entregado', delivered_at = ?, updated_at = ? WHERE id = ?",
+          nowIso,
+          nowIso,
+          row.id
+        )
+        purgeOrderCredentials(db, session, row.id, row.number, 'Entrega de garantía')
+        audit(
+          db,
+          session,
+          'Entrega de garantía',
+          'Orden de trabajo',
+          `${row.number} · garantía de ${row.warranty_of_order_id} · sin cobro`,
+          row.id
+        )
+      })
+      return orderDto(db, getOrderOrFail(db, row.id))
+    }
+
+    case 'orders.abandonToDisassembly': {
+      requireModuleAccess(session, 'orders')
+      requireCap(session, 'authorizeNoCharge')
+      const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
+      if (isTerminalOrderStatus(row.status)) fail('La OT ya está cerrada.')
+      if (row.disassembly_product_id) fail('Esta OT ya fue trasladada a despiece.')
+      const confirmation = text(payload?.confirmation, 'Confirmación', 3, 80)
+      if (confirmation !== row.number && confirmation.toUpperCase() !== 'DESPIECE') {
+        fail(`Escribe ${row.number} para confirmar el traslado a despiece.`)
+      }
+      let intake: any = {}
+      try {
+        intake = row.intake_json ? JSON.parse(row.intake_json) : {}
+      } catch {
+        intake = {}
+      }
+      const legal = db.getSetting<any>('legal_config', { abandonmentDays: 45 })
+      const abandonmentDays = Math.max(
+        1,
+        Math.round(Number(intake?.legal?.abandonmentDays ?? legal?.abandonmentDays ?? 45))
+      )
+      const createdAt = new Date(row.created_at)
+      const abandonmentAt = new Date(createdAt.getTime() + abandonmentDays * 24 * 60 * 60 * 1000)
+      if (!Number.isFinite(createdAt.getTime()) || Date.now() < abandonmentAt.getTime()) {
+        fail(`La OT aún no cumple los ${abandonmentDays} días de abandono.`)
+      }
+      const reason = text(
+        payload?.reason ?? 'Equipo no reclamado por el cliente.',
+        'Motivo del abandono',
+        5,
+        500
+      )
+      const nowIso = new Date().toISOString()
+      const productId = `prod_despiece_${sha256(`${row.id}|${Date.now()}`).slice(0, 20)}`
+      const name = `Despiece · ${row.brand} ${row.model} · ${row.number}`.slice(0, 160)
+      const generated = resolveInternalSku({
+        aiSku: '',
+        name,
+        supplierSku: '',
+        existingSkus: db.all<{ sku: string }>('SELECT sku FROM products').map((item) => item.sku)
+      })
+      const sku = generated.sku || `DESP-${Date.now().toString().slice(-8)}`
+      const usedSlugs = new Set(
+        db.all<{ slug: string }>("SELECT slug FROM products WHERE slug <> ''").map((item) => item.slug)
+      )
+      const slug = uniqueSlug(slugify(name) || slugify(sku), usedSlugs)
+      db.tx(() => {
+        db.run(
+          `INSERT INTO products
+            (id, name, sku, barcode, supplier_sku, category, location, condition, origin, stock, min_stock, cost_cents, price_cents,
+             image_path, image_thumb_path, image_updated_at, description, internal_notes, slug,
+             warranty_days, is_service, service_type, alert_enabled, publish_web, rotation, active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, '', 'Despiece', 'Caja de despiece', 'Para repuesto', 'Cliente', 1, 0, 0, 0,
+             NULL, NULL, NULL, ?, ?, ?, 0, 0, NULL, 0, 0, 'no_rotativo', 1, ?, ?)`,
+          productId,
+          name,
+          sku,
+          sku,
+          `Equipo recibido en abandono de la OT ${row.number}. Cliente: ${row.customer_name}.`,
+          `Traspaso a despiece por abandono. OT ${row.number}. Cliente ${row.customer_name}. Serial ${row.serial}. Motivo: ${reason}`,
+          slug,
+          nowIso,
+          nowIso
+        )
+        db.run(
+          `INSERT INTO stock_movements
+            (id, product_id, type, quantity, unit_cost_cents, reason, reference_type, reference_id, user_id, user_name, created_at)
+           VALUES (?, ?, 'traspaso_despiece', 1, 0, ?, 'work_order', ?, ?, ?, ?)`,
+          `sm_${Date.now()}`,
+          productId,
+          `Traspaso a despiece por abandono ${row.number}`,
+          row.id,
+          session.userId,
+          displayUser(session).name,
+          nowIso
+        )
+        if (row.serial && !['Serial no visible', 'Sin serial'].includes(String(row.serial))) {
+          db.run(
+            'INSERT INTO product_serials (id, product_id, serial, status, created_at) VALUES (?, ?, ?, ?, ?)',
+            `ps_${sha256(`${productId}|${row.serial}`).slice(0, 20)}`,
+            productId,
+            String(row.serial),
+            'disponible',
+            nowIso
+          )
+        }
+        db.run('UPDATE work_order_events SET state = ? WHERE work_order_id = ? AND state = ?', 'done', row.id, 'current')
+        db.run(
+          `INSERT INTO work_order_events
+            (id, work_order_id, status, title, description, user_id, user_name, state, created_at)
+           VALUES (?, ?, 'abandonado', 'Equipo declarado en abandono', ?, ?, ?, 'current', ?)`,
+          `evt_${Date.now()}`,
+          row.id,
+          `Equipo trasladado a despiece. Motivo: ${reason}. Producto: ${sku}.`,
+          session.userId,
+          displayUser(session).name,
+          nowIso
+        )
+        db.run(
+          "UPDATE work_orders SET status = 'abandonado', abandoned_at = ?, disassembly_product_id = ?, updated_at = ? WHERE id = ?",
+          nowIso,
+          productId,
+          nowIso,
+          row.id
+        )
+        purgeOrderCredentials(db, session, row.id, row.number, 'Abandono y traslado a despiece')
+        audit(
+          db,
+          session,
+          'Abandono y traslado a despiece',
+          'Orden de trabajo',
+          `${row.number} · ${row.brand} ${row.model} · ${reason} · producto ${sku}`,
+          row.id
+        )
+      })
+      scheduleCatalogPublish(db, runtime)
+      return orderDto(db, getOrderOrFail(db, row.id))
+    }
+
     case 'orders.reassignTechnician': {
       requireModuleAccess(session, 'orders')
       requireCap(session, 'assignTechnician')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
-      if (['entregado', 'no_reparado'].includes(row.status)) {
+      if (['entregado', 'no_reparado', 'abandonado'].includes(row.status)) {
         fail('La OT ya está cerrada; no se puede reasignar.')
       }
       const technicianId = text(payload?.technicianId, 'Técnico', 1, 80)
@@ -5326,7 +5737,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
     case 'orders.update': {
       requireModuleAccess(session, 'orders')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
-      if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada.')
+      if (['entregado', 'no_reparado', 'abandonado'].includes(row.status)) fail('La OT ya está cerrada.')
       const updates: string[] = []
       const params: any[] = []
       if (typeof payload?.diagnosis === 'string') {
@@ -5358,7 +5769,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireModuleAccess(session, 'orders')
       requireCap(session, 'diagnoseOrder')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
-      if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada.')
+      if (['entregado', 'no_reparado', 'abandonado'].includes(row.status)) fail('La OT ya está cerrada.')
       const nextStatus = text(payload?.status, 'Estado', 2, 40)
       if (nextStatus === 'entregado') fail('La entrega se registra desde Cobrar y entregar para asegurar el pago.')
       if (nextStatus === 'no_reparado') {
@@ -5426,7 +5837,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
         requireCap(session, 'diagnoseOrder')
       }
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
-      if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada.')
+      if (['entregado', 'no_reparado', 'abandonado'].includes(row.status)) fail('La OT ya está cerrada.')
       if (
         db.get(
           "SELECT id FROM invoices WHERE order_id = ? AND status = 'activa' LIMIT 1",
@@ -5438,7 +5849,13 @@ export async function handleRpc(command: string, payload: Payload, token: string
       const type = schema(payload?.type, z.enum(['servicio', 'repuesto']))
       const description = text(payload?.description, 'Descripción', 2, 300)
       const quantity = numberValue(payload?.quantity ?? 1, 'Cantidad', { min: 0.01 })
-      const unitPrice = numberValue(payload?.unitPrice, 'Valor', { min: 0 })
+      const warrantyCovered = Boolean(payload?.warrantyCovered)
+      if (warrantyCovered && !row.warranty_of_order_id) {
+        fail('Solo una OT de garantía puede marcar ítems cubiertos.')
+      }
+      const unitPrice = warrantyCovered
+        ? 0
+        : numberValue(payload?.unitPrice, 'Valor', { min: 0 })
       const productId = typeof payload?.productId === 'string' && payload.productId ? payload.productId : null
       let unitCost = 0
       let product: any = null
@@ -5464,8 +5881,8 @@ export async function handleRpc(command: string, payload: Payload, token: string
       db.tx(() => {
         db.run(
           `INSERT INTO work_order_items
-            (id, work_order_id, type, description, quantity, unit_price_cents, product_id, unit_cost_cents, warranty_days, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, work_order_id, type, description, quantity, unit_price_cents, product_id, unit_cost_cents, warranty_days, warranty_covered, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           itemId,
           row.id,
           type,
@@ -5475,6 +5892,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           productId,
           unitCost,
           warrantyDays,
+          warrantyCovered ? 1 : 0,
           nowIso
         )
         if (product && !product.is_service) {
@@ -5487,7 +5905,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
             product.id,
             -Math.abs(quantity),
             unitCost,
-            `Consumo en ${row.number}`,
+            `${warrantyCovered ? 'Consumo en garantía' : 'Consumo en'} ${row.number}`,
             row.id,
             session.userId,
             displayUser(session).name,
@@ -5500,7 +5918,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
           session,
           'Ítem agregado a OT',
           'Orden de trabajo',
-          `${row.number} · ${description} × ${quantity} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(unitPrice)}${warrantyDays > 0 ? ` · garantía ${warrantyDays} días` : ''}`,
+          `${row.number} · ${description} × ${quantity} · ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(unitPrice)}${warrantyDays > 0 ? ` · garantía ${warrantyDays} días` : ''}${warrantyCovered ? ' · cubierto por garantía' : ''}`,
           row.id
         )
       })
@@ -5512,7 +5930,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       requireModuleAccess(session, 'orders')
       requireCap(session, 'settleOrder')
       const row = getOrderOrFail(db, text(payload?.id, 'Orden', 1, 80))
-      if (['entregado', 'no_reparado'].includes(row.status)) fail('La OT ya está cerrada; no admite anticipos.')
+      if (['entregado', 'no_reparado', 'abandonado'].includes(row.status)) fail('La OT ya está cerrada; no admite anticipos.')
       const invoice = db.get<any>(
         "SELECT * FROM invoices WHERE order_id = ? AND status = 'activa' ORDER BY created_at DESC LIMIT 1",
         row.id
@@ -5765,7 +6183,7 @@ export async function handleRpc(command: string, payload: Payload, token: string
       }
       const changeCents = method === 'Efectivo' && !noCharge && !credit ? Math.max(received - chargeCents, 0) : 0
       const nowIso = new Date().toISOString()
-      if (!credit) requireCashSession(db)
+      if (!credit && !noCharge) requireCashSession(db)
       const paymentNumber = !noCharge && !credit && chargeCents > 0 ? db.paymentNumber() : ''
       const paymentId =
         paymentNumber

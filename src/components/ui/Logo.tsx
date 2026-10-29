@@ -1,4 +1,5 @@
 import logoFull from '@/assets/brand/bitacoretech-logo.png'
+import logoFullDark from '@/assets/brand/bitacoretech-logo-dark.png'
 import logoMark from '@/assets/brand/bitacoretech-mark.png'
 import { cn } from '@/lib/utils'
 
@@ -18,7 +19,7 @@ export function Logo({
   if (full) {
     return (
       <img
-        src={logoFull}
+        src={invert ? logoFullDark : logoFull}
         alt="BitacoreTech"
         className={cn('h-9 w-auto select-none', className)}
         draggable={false}

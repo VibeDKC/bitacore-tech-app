@@ -105,7 +105,7 @@ async function launch() {
   assert(missingSlugs === 0, `Productos sin slug: ${missingSlugs}`)
   assert(duplicateSlugs === 0, `Slugs duplicados: ${duplicateSlugs}`)
   assert(wrongCover === 0, `Portadas no sincronizadas: ${wrongCover}`)
-  assert(version === 18, `Versión de esquema: ${version}`)
+  assert(version >= 18, `Versión de esquema: ${version}`)
   assert(columns.includes('description'), 'Falta products.description')
   assert(columns.includes('internal_notes'), 'Falta products.internal_notes')
   assert(columns.includes('slug'), 'Falta products.slug')

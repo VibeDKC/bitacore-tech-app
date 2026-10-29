@@ -321,7 +321,7 @@ async function main() {
     db.close()
     check(
       'esquema 18 con galería y campos de catálogo',
-      version === 18 &&
+      version >= 18 &&
         productColumns.includes('description') &&
         productColumns.includes('internal_notes') &&
         productColumns.includes('slug') &&

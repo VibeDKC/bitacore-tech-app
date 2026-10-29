@@ -318,7 +318,13 @@ CREATE TABLE IF NOT EXISTS work_orders (
   intake_json TEXT,
   received_by TEXT,
   created_by TEXT,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  warranty_of_order_id TEXT REFERENCES work_orders(id),
+  warranty_claim_reason TEXT NOT NULL DEFAULT '',
+  warranty_checks_json TEXT,
+  warranty_result TEXT NOT NULL DEFAULT '',
+  abandoned_at TEXT,
+  disassembly_product_id TEXT REFERENCES products(id)
 );
 
 CREATE TABLE IF NOT EXISTS work_order_items (
@@ -331,6 +337,7 @@ CREATE TABLE IF NOT EXISTS work_order_items (
   product_id TEXT REFERENCES products(id),
   unit_cost_cents INTEGER NOT NULL DEFAULT 0,
   warranty_days INTEGER NOT NULL DEFAULT 0,
+  warranty_covered INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -675,6 +682,13 @@ CREATE TABLE IF NOT EXISTS order_status_config (
   is_terminal INTEGER NOT NULL DEFAULT 0,
   requires_payment INTEGER NOT NULL DEFAULT 0,
   is_cancel INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  username TEXT PRIMARY KEY,
+  fails INTEGER NOT NULL DEFAULT 0,
+  blocked_until TEXT,
+  updated_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);

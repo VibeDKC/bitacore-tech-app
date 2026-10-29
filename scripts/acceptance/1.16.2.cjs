@@ -165,7 +165,7 @@ async function main() {
     check('login normal después de la actualización', true)
     check(
       'versión visible actual',
-      (await page.getByText(/v1\.17\.0/i).count()) >= 1
+      (await page.getByText(/v1\.18\.0/i).count()) >= 1
     )
     await page.screenshot({ path: path.join(shots, 'dashboard.png') })
 

@@ -37,10 +37,25 @@ import {
   Wrench
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { LegalConfig, LockType, PaymentMethod, PowerState, Product, TechnicianOption, WorkOrderStatus } from '@/types'
+import type {
+  LegalConfig,
+  LockType,
+  PaymentMethod,
+  PowerState,
+  Product,
+  TechnicianOption,
+  WorkOrderStatus,
+  WorkOrderWarrantyChecks
+} from '@/types'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
-import { canCancelWorkOrder, nextWorkOrderStatus, workOrderStatusConfig, workOrderStatusOrder } from '@/lib/status'
+import {
+  canCancelWorkOrder,
+  getWorkOrderProgress,
+  nextWorkOrderStatus,
+  workOrderStatusConfig,
+  workOrderStatusOrder
+} from '@/lib/status'
 import { lineTotal } from '@/lib/orders'
 import { formatCurrency, formatDate, formatDateTime, formatShortDate } from '@/lib/format'
 import { api, errorMessage } from '@/lib/backend'
@@ -167,6 +182,19 @@ export function OrderDetailPage() {
   const [noCharge, setNoCharge] = useState(false)
   const [exceptionReason, setExceptionReason] = useState('')
   const [cancelReason, setCancelReason] = useState('')
+  const [warrantyModal, setWarrantyModal] = useState(false)
+  const [warrantyReason, setWarrantyReason] = useState('')
+  const [warrantySaving, setWarrantySaving] = useState(false)
+  const [warrantyChecks, setWarrantyChecks] = useState<WorkOrderWarrantyChecks>({
+    workshopTests: '',
+    homeConditions: '',
+    result: 'pendiente',
+    recommendations: ''
+  })
+  const [warrantyChecksSaving, setWarrantyChecksSaving] = useState(false)
+  const [abandonModal, setAbandonModal] = useState(false)
+  const [abandonReason, setAbandonReason] = useState('')
+  const [abandonSaving, setAbandonSaving] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentReceipt, setPaymentReceipt] = useState<ReceiptDraft | null>(null)
@@ -184,18 +212,29 @@ export function OrderDetailPage() {
     unitPrice: string
     productId: string
     warrantyDays: string
+    warrantyCovered: boolean
   }>({
     type: 'servicio',
     description: '',
     quantity: '1',
     unitPrice: '',
     productId: '',
-    warrantyDays: ''
+    warrantyDays: '',
+    warrantyCovered: false
   })
 
   useEffect(() => {
     setDiagnosis(order?.diagnosis ?? '')
   }, [order?.id, order?.diagnosis])
+
+  useEffect(() => {
+    setWarrantyChecks({
+      workshopTests: order?.warrantyChecks?.workshopTests ?? '',
+      homeConditions: order?.warrantyChecks?.homeConditions ?? '',
+      result: order?.warrantyChecks?.result ?? order?.warrantyResult ?? 'pendiente',
+      recommendations: order?.warrantyChecks?.recommendations ?? ''
+    })
+  }, [order?.id, order?.warrantyChecks, order?.warrantyResult])
 
   const status = order?.status ?? 'recibido'
   const items = order?.items ?? []
@@ -208,13 +247,38 @@ export function OrderDetailPage() {
   const paid = order?.paidAmount ?? payments.reduce((sum, payment) => sum + payment.amount, 0)
   const balance = order?.balance ?? Math.max(total - paid, 0)
   const hasInvoice = Boolean(order?.invoiceNumber)
-  const canInvoice = status === 'listo' && can(role, 'settleOrder') && !hasInvoice
-  const canSettle = status === 'listo' && can(role, 'settleOrder') && hasInvoice
+  const isWarrantyClaim = Boolean(order?.isWarrantyClaim || order?.warrantyOf)
+  const hasOpenWarrantyClaim = Boolean(
+    order?.warrantyClaims?.some(
+      (claim) => !['entregado', 'no_reparado', 'abandonado'].includes(claim.status)
+    )
+  )
+  const canInvoice =
+    status === 'listo' && can(role, 'settleOrder') && !hasInvoice && !isWarrantyClaim
+  const canSettle =
+    status === 'listo' && can(role, 'settleOrder') && hasInvoice && !isWarrantyClaim
   const canCredit =
     canSettle &&
     can(role, 'authorizeCredit') &&
     Boolean(customer?.creditEnabled) &&
     balance > 0
+  const canCreateWarranty =
+    status === 'entregado' &&
+    Boolean(order?.warranty) &&
+    order?.warranty?.status !== 'vencida' &&
+    !isWarrantyClaim &&
+    !hasOpenWarrantyClaim &&
+    can(role, 'createOrder')
+  const canAbandon =
+    Boolean(order?.abandonment?.atRisk) &&
+    !isWarrantyClaim &&
+    can(role, 'authorizeNoCharge')
+  const canDeliverWarranty =
+    isWarrantyClaim &&
+    status === 'listo' &&
+    can(role, 'authorizeNoCharge') &&
+    order?.warrantyResult !== 'pendiente' &&
+    order?.warrantyResult !== 'no_cubierta'
   const loyaltyActive = Boolean(
     customer?.loyaltyActive &&
       (!customer.loyaltyValidUntil || new Date(`${customer.loyaltyValidUntil}T23:59:59`).getTime() >= Date.now()) &&
@@ -235,19 +299,23 @@ export function OrderDetailPage() {
   const settleBalance = Math.max(settleTotal - paid, 0)
   const canManualDiscount = can(role, 'applyDiscount')
   const next = nextWorkOrderStatus(status)
-  const canAdvance = Boolean(next) && (next === 'entregado' ? can(role, 'settleOrder') : can(role, 'diagnoseOrder'))
+  const canAdvance =
+    Boolean(next) &&
+    !(isWarrantyClaim && next === 'entregado') &&
+    (next === 'entregado' ? can(role, 'settleOrder') : can(role, 'diagnoseOrder'))
   const canAddItem = can(role, 'diagnoseOrder') || can(role, 'createOrder')
-  const orderTerminal = ['entregado', 'no_reparado'].includes(status)
+  const orderTerminal = ['entregado', 'no_reparado', 'abandonado'].includes(status)
   const canManageCredentials =
     Boolean(order) &&
     !orderTerminal &&
     (role === 'admin' || role === 'superadmin' || (role === 'tecnico' && order?.technicianId === user?.id))
-  const canDeposit = can(role, 'settleOrder') && !orderTerminal && total > 0 && balance > 0
+  const canDeposit =
+    can(role, 'settleOrder') && !orderTerminal && !isWarrantyClaim && total > 0 && balance > 0
   const canAuthorizeNoCharge = can(role, 'authorizeNoCharge')
   const canReassignTechnician =
-    can(role, 'assignTechnician') && !['entregado', 'no_reparado'].includes(status)
+    can(role, 'assignTechnician') && !['entregado', 'no_reparado', 'abandonado'].includes(status)
   const activeConditions = intake
-    ? Object.entries(intake.conditions)
+    ? Object.entries(intake.conditions ?? {})
         .filter(([, active]) => active)
         .map(([key]) => conditionLabels[key] ?? key)
     : []
@@ -271,6 +339,95 @@ export function OrderDetailPage() {
   function applyOrder(updated: typeof order) {
     if (!updated) return
     setData((current) => (current ? { ...current, order: updated } : current))
+  }
+
+  function openWarrantyModal() {
+    setWarrantyReason(
+      'El cliente reporta falla; el equipo funciona correctamente en el taller.'
+    )
+    setWarrantyModal(true)
+  }
+
+  async function createWarranty() {
+    if (!order || warrantySaving) return
+    if (warrantyReason.trim().length < 5) {
+      toast.error('Describe el motivo de la garantía')
+      return
+    }
+    setWarrantySaving(true)
+    try {
+      const updated = await api.orders.createWarranty(order.id, {
+        reason: warrantyReason.trim()
+      })
+      setWarrantyModal(false)
+      toast.success('Reclamo de garantía creado', {
+        description: `${updated.number} quedó vinculada a ${order.number}.`
+      })
+      navigate(`/ordenes/${updated.id}`)
+    } catch (failure) {
+      toast.error('No se pudo registrar la garantía', { description: errorMessage(failure) })
+    } finally {
+      setWarrantySaving(false)
+    }
+  }
+
+  async function saveWarrantyChecks() {
+    if (!order || warrantyChecksSaving) return
+    setWarrantyChecksSaving(true)
+    try {
+      const updated = await api.orders.updateWarranty(order.id, warrantyChecks)
+      applyOrder(updated)
+      toast.success('Pruebas de garantía guardadas')
+    } catch (failure) {
+      toast.error('No se pudieron guardar las pruebas', { description: errorMessage(failure) })
+    } finally {
+      setWarrantyChecksSaving(false)
+    }
+  }
+
+  async function deliverWarranty() {
+    if (!order || settling) return
+    setSettling(true)
+    try {
+      const updated = await api.orders.deliverWarranty(order.id)
+      applyOrder(updated)
+      toast.success('Garantía entregada sin cobro', {
+        description: `${order.number} quedó entregada y cerrada.`
+      })
+    } catch (failure) {
+      toast.error('No se pudo entregar la garantía', { description: errorMessage(failure) })
+    } finally {
+      setSettling(false)
+    }
+  }
+
+  function openAbandonModal() {
+    setAbandonReason('Equipo no reclamado por el cliente.')
+    setAbandonModal(true)
+  }
+
+  async function confirmAbandon() {
+    if (!order || abandonSaving) return
+    if (abandonReason.trim().length < 5) {
+      toast.error('Escribe el motivo del abandono')
+      return
+    }
+    setAbandonSaving(true)
+    try {
+      const updated = await api.orders.abandonToDisassembly(order.id, {
+        confirmation: order.number,
+        reason: abandonReason.trim()
+      })
+      applyOrder(updated)
+      setAbandonModal(false)
+      toast.success('Equipo trasladado a despiece', {
+        description: `${order.number} quedó cerrada como abandonada y el equipo entró al inventario de despiece.`
+      })
+    } catch (failure) {
+      toast.error('No se pudo trasladar a despiece', { description: errorMessage(failure) })
+    } finally {
+      setAbandonSaving(false)
+    }
   }
 
   async function openTechModal() {
@@ -485,7 +642,10 @@ export function OrderDetailPage() {
 
   async function addItem() {
     if (!order || saving) return
-    if (!newItem.description.trim() || parseMoney(newItem.unitPrice) <= 0) {
+    if (
+      !newItem.description.trim() ||
+      (!newItem.warrantyCovered && parseMoney(newItem.unitPrice) <= 0)
+    ) {
       toast.error('Completa la descripción y el precio')
       return
     }
@@ -500,12 +660,21 @@ export function OrderDetailPage() {
         type: newItem.type,
         description: newItem.description.trim(),
         quantity,
-        unitPrice: parseMoney(newItem.unitPrice),
+        unitPrice: newItem.warrantyCovered ? 0 : parseMoney(newItem.unitPrice),
         productId: newItem.productId || null,
-        warrantyDays
+        warrantyDays,
+        warrantyCovered: newItem.warrantyCovered
       })
       applyOrder(updated)
-      setNewItem({ type: 'servicio', description: '', quantity: '1', unitPrice: '', productId: '', warrantyDays: '' })
+      setNewItem({
+        type: 'servicio',
+        description: '',
+        quantity: '1',
+        unitPrice: '',
+        productId: '',
+        warrantyDays: '',
+        warrantyCovered: false
+      })
       setItemModal(false)
       toast.success('Ítem agregado a la OT')
       reload()
@@ -775,6 +944,26 @@ export function OrderDetailPage() {
           <Button variant="secondary" size="sm" leftIcon={<MessageCircle className="h-3.5 w-3.5" />} onClick={openWhatsApp}>
             WhatsApp
           </Button>
+          {canDeliverWarranty ? (
+            <Button
+              size="sm"
+              onClick={() => void deliverWarranty()}
+              loading={settling}
+              leftIcon={<ShieldCheck className="h-3.5 w-3.5" />}
+            >
+              Entregar garantía
+            </Button>
+          ) : null}
+          {canCreateWarranty ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={openWarrantyModal}
+              leftIcon={<ShieldCheck className="h-3.5 w-3.5" />}
+            >
+              Registrar garantía
+            </Button>
+          ) : null}
           {canInvoice ? (
             <Button size="sm" onClick={openInvoice} leftIcon={<FileText className="h-3.5 w-3.5" />}>
               Facturar
@@ -812,10 +1001,63 @@ export function OrderDetailPage() {
         </div>
       </div>
 
+      {order.warrantyOf ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-100 bg-brand-50/60 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+            <div>
+              <p className="text-[11px] font-semibold text-brand-800">
+                Garantía de{' '}
+                <Link to={`/ordenes/${order.warrantyOf.id}`} className="underline underline-offset-2">
+                  {order.warrantyOf.number}
+                </Link>
+              </p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-brand-700">
+                {order.warrantyOf.warranty
+                  ? `Vigente hasta ${formatDate(order.warrantyOf.warranty.until)} · ${order.warrantyOf.warranty.daysLeft} días restantes`
+                  : 'La OT original no tiene garantía vigente.'}
+                {' '}· Resultado actual: {order.warrantyResult ?? 'pendiente'}
+              </p>
+            </div>
+          </div>
+          <Badge variant={order.warrantyResult === 'no_cubierta' ? 'danger' : order.warrantyResult === 'pendiente' ? 'warning' : 'success'}>
+            {order.warrantyResult === 'sin_falla'
+              ? 'Sin falla reproducida'
+              : order.warrantyResult === 'falla_reproducida'
+                ? 'Falla reproducida'
+                : order.warrantyResult === 'no_cubierta'
+                  ? 'No cubierta'
+                  : 'Pruebas pendientes'}
+          </Badge>
+        </div>
+      ) : null}
+
+      {order.warrantyClaims?.length ? (
+        <div className="rounded-2xl border border-line bg-white px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+              Reclamos de garantía
+            </p>
+            <Badge variant="neutral">{order.warrantyClaims.length}</Badge>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {order.warrantyClaims.map((claim) => (
+              <Link
+                key={claim.id}
+                to={`/ordenes/${claim.id}`}
+                className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-line bg-slate-50 px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 transition hover:border-brand-200 hover:text-brand-700"
+              >
+                {claim.number} · {claim.result}
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {order.abandonment?.atRisk ? (
         <div className="flex items-start gap-3 rounded-2xl border border-warning-200 bg-warning-50/70 px-4 py-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-600" />
-          <div>
+          <div className="flex-1">
             <p className="text-[11px] font-semibold text-warning-800">
               Equipo en riesgo de abandono
             </p>
@@ -824,6 +1066,11 @@ export function OrderDetailPage() {
               registra el cierre de la OT.
             </p>
           </div>
+          {canAbandon ? (
+            <Button size="sm" variant="secondary" onClick={openAbandonModal} leftIcon={<Package className="h-3.5 w-3.5" />}>
+              Enviar a despiece
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -897,7 +1144,7 @@ export function OrderDetailPage() {
           <div
             className="h-full rounded-r-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all duration-500"
             style={{
-              width: `${status === 'no_reparado' ? 100 : ((workOrderStatusOrder.indexOf(status) + 1) / workOrderStatusOrder.length) * 100}%`
+              width: `${getWorkOrderProgress(status)}%`
             }}
           />
         </div>
@@ -923,13 +1170,13 @@ export function OrderDetailPage() {
                 ['Técnico receptor', intake?.receivedBy ?? order.technician],
                 ['Accesorios', order.accessories],
                 ['Condición física', order.physicalCondition],
-                ['Estado de encendido', intake ? powerLabels[intake.powerState] : 'No registrado'],
+                ['Estado de encendido', intake ? powerLabels[intake.powerState] ?? 'No registrado' : 'No registrado'],
                 [
                   'Bloqueo de seguridad',
                   intake
                     ? intake.lockType === 'sin_bloqueo'
                       ? 'Sin bloqueo'
-                      : `${lockLabels[intake.lockType]} · ${
+                      : `${lockLabels[intake.lockType] ?? 'No registrado'} · ${
                           intake.customerWithheldCredentials
                             ? 'el cliente no suministra credenciales'
                             : intake.customerAuthorizesAccess
@@ -1144,6 +1391,110 @@ export function OrderDetailPage() {
             </div>
           </div>
 
+          {isWarrantyClaim ? (
+            <div className="card p-5 lg:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-[16px] font-bold text-ink">Pruebas de garantía</h2>
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    Registra qué se probó en taller y en las condiciones del cliente.
+                  </p>
+                </div>
+                <Badge
+                  variant={
+                    warrantyChecks.result === 'no_cubierta'
+                      ? 'danger'
+                      : warrantyChecks.result === 'pendiente'
+                        ? 'warning'
+                        : 'success'
+                  }
+                >
+                  {warrantyChecks.result === 'sin_falla'
+                    ? 'Sin falla reproducida'
+                    : warrantyChecks.result === 'falla_reproducida'
+                      ? 'Falla reproducida'
+                      : warrantyChecks.result === 'no_cubierta'
+                        ? 'No cubierta'
+                        : 'Pendiente'}
+                </Badge>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="field-label">Pruebas realizadas en taller</span>
+                  <textarea
+                    value={warrantyChecks.workshopTests ?? ''}
+                    onChange={(event) =>
+                      setWarrantyChecks({ ...warrantyChecks, workshopTests: event.target.value })
+                    }
+                    rows={3}
+                    className="field resize-y"
+                    placeholder="Encendido, carga, video, red, temperatura, batería, etc."
+                    maxLength={2000}
+                  />
+                </label>
+                <label className="block">
+                  <span className="field-label">Condiciones en casa del cliente</span>
+                  <textarea
+                    value={warrantyChecks.homeConditions ?? ''}
+                    onChange={(event) =>
+                      setWarrantyChecks({ ...warrantyChecks, homeConditions: event.target.value })
+                    }
+                    rows={3}
+                    className="field resize-y"
+                    placeholder="Toma, cargador, red, monitor, accesorios, etc."
+                    maxLength={2000}
+                  />
+                </label>
+                <label className="block">
+                  <span className="field-label">Resultado</span>
+                  <select
+                    value={warrantyChecks.result ?? 'pendiente'}
+                    onChange={(event) =>
+                      setWarrantyChecks({
+                        ...warrantyChecks,
+                        result: event.target.value as WorkOrderWarrantyChecks['result']
+                      })
+                    }
+                    className="field"
+                  >
+                    <option value="pendiente">Pendiente</option>
+                    <option value="sin_falla">Sin falla reproducida</option>
+                    <option value="falla_reproducida">Falla reproducida</option>
+                    <option value="no_cubierta">No cubierta por garantía</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="field-label">Recomendaciones</span>
+                  <textarea
+                    value={warrantyChecks.recommendations ?? ''}
+                    onChange={(event) =>
+                      setWarrantyChecks({ ...warrantyChecks, recommendations: event.target.value })
+                    }
+                    rows={3}
+                    className="field resize-y"
+                    placeholder="Pruebas que debe repetir el cliente, accesorios a revisar, etc."
+                    maxLength={2000}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-[9px] leading-relaxed text-slate-400">
+                  La OT original conserva su fecha de garantía. Este reclamo no extiende la garantía.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => void saveWarrantyChecks()}
+                  loading={warrantyChecksSaving}
+                  disabled={orderTerminal}
+                >
+                  Guardar pruebas
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           {canManageCredentials ? (
             <div className="card p-5 lg:p-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1233,6 +1584,11 @@ export function OrderDetailPage() {
                         {item.type === 'repuesto' && item.warrantyDays > 0 ? (
                           <Badge variant="outline" className="mt-1">
                             Garantía {item.warrantyDays} días
+                          </Badge>
+                        ) : null}
+                        {item.warrantyCovered ? (
+                          <Badge variant="success" className="mt-1">
+                            Cubierto por garantía
                           </Badge>
                         ) : null}
                       </td>
@@ -1655,6 +2011,30 @@ export function OrderDetailPage() {
               className="field"
             />
           </label>
+          {isWarrantyClaim ? (
+            <label className="flex items-start gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={newItem.warrantyCovered}
+                onChange={(event) =>
+                  setNewItem({
+                    ...newItem,
+                    warrantyCovered: event.target.checked,
+                    unitPrice: event.target.checked ? '0' : newItem.unitPrice
+                  })
+                }
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+              />
+              <span>
+                <span className="block text-[11px] font-semibold text-brand-800">
+                  Cubierto por garantía
+                </span>
+                <span className="mt-0.5 block text-[9.5px] leading-relaxed text-brand-700">
+                  Descuenta stock y registra el costo real, pero el cliente no paga este ítem.
+                </span>
+              </span>
+            </label>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="field-label">Cantidad</span>
@@ -1672,7 +2052,8 @@ export function OrderDetailPage() {
                 onChange={(event) => setNewItem({ ...newItem, unitPrice: event.target.value })}
                 inputMode="numeric"
                 placeholder="0"
-                className="field text-right tabular"
+                disabled={newItem.warrantyCovered}
+                className="field text-right tabular disabled:bg-slate-100 disabled:text-slate-400"
               />
             </label>
           </div>
@@ -2277,6 +2658,84 @@ export function OrderDetailPage() {
         <p className="text-[11px] leading-relaxed text-slate-600">
           La credencial se eliminará de la OT y no podrá recuperarse. La consulta y la eliminación quedan en auditoría.
         </p>
+      </Modal>
+
+      <Modal
+        open={warrantyModal}
+        onClose={() => setWarrantyModal(false)}
+        title="Registrar garantía"
+        description={order ? `${order.number} · ${order.customerName}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setWarrantyModal(false)} disabled={warrantySaving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void createWarranty()} loading={warrantySaving} leftIcon={<ShieldCheck className="h-4 w-4" />}>
+              Crear OT de garantía
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-[11px] leading-relaxed text-slate-600">
+            Se creará una OT nueva vinculada a {order?.number}, con el mismo cliente y equipo.
+            No genera venta ni cobro.
+          </p>
+          <label className="block">
+            <span className="field-label">Motivo del reclamo *</span>
+            <textarea
+              value={warrantyReason}
+              onChange={(event) => setWarrantyReason(event.target.value)}
+              rows={3}
+              className="field resize-none"
+              placeholder="Ej. el equipo funciona en el taller pero no en casa del cliente."
+              maxLength={1000}
+            />
+          </label>
+          <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-2.5 text-[10px] leading-relaxed text-brand-800">
+            La garantía original se conserva. Este reclamo no extiende automáticamente la fecha de garantía.
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={abandonModal}
+        onClose={() => setAbandonModal(false)}
+        title="Declarar abandono y enviar a despiece"
+        description={order ? `${order.number} · ${order.brand} ${order.model}` : undefined}
+        size="sm"
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setAbandonModal(false)} disabled={abandonSaving}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={() => void confirmAbandon()} loading={abandonSaving} leftIcon={<Package className="h-4 w-4" />}>
+              Confirmar traslado
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-[11px] leading-relaxed text-slate-600">
+            La OT quedará cerrada como <strong>Abandonado</strong> y se creará un producto en el
+            inventario de <strong>Despiece</strong>, ubicación <strong>Caja de despiece</strong>.
+            La deuda pendiente no se cancela automáticamente.
+          </p>
+          <label className="block">
+            <span className="field-label">Motivo *</span>
+            <textarea
+              value={abandonReason}
+              onChange={(event) => setAbandonReason(event.target.value)}
+              rows={3}
+              className="field resize-none"
+              maxLength={500}
+            />
+          </label>
+          <p className="text-[10px] text-slate-500">
+            Se usará el número <strong>{order?.number}</strong> como confirmación interna.
+          </p>
+        </div>
       </Modal>
 
       <DocumentPreviewModal

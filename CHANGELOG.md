@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.18.0 ? 2026-10-29
+
+### Garant?as
+- Reclamo de garant?a vinculado a una OT entregada con garant?a vigente.
+- OT de garant?a con cliente y equipo precargados, sin venta ni cobro.
+- Registro de pruebas en taller, condiciones del cliente, resultado y recomendaciones.
+- Resultados: sin falla reproducida, falla reproducida o no cubierta.
+- Entrega de garant?a sin cobro, sin factura ni pago.
+- Repuestos cubiertos descuentan stock y registran costo, pero no se cobran.
+- La pesta?a Garant?as muestra la OT original y sus reclamos.
+
+### Abandono y despiece
+- Acci?n para declarar abandono despu?s de los d?as configurados.
+- Cierre de la OT como abandonada.
+- Creaci?n de un producto en la categor?a Despiece, ubicaci?n Caja de despiece.
+- Movimiento de inventario y evento de trazabilidad.
+- La deuda pendiente no se cancela autom?ticamente.
+
+### Acceso y marca
+- Bloqueo de 5 intentos fallidos persistente entre reinicios.
+- Variante del logo para fondos oscuros en la pantalla 404.
+- Se mantiene la recuperaci?n de clave del propietario fuera de alcance.
+
+### Calidad
+- Aceptaci?n 1.18.0: 16/16.
+- Bloqueo persistente: 4/4.
+- Migraci?n 1.18.0 sobre base real: OK.
+- Regresi?n 1.17.0: 20/20.
+- Regresi?n 1.16.2: 16/16.
+- Regresi?n 1.16.0: 36/36.
+- Regresi?n 1.15.0: 44/44.
+- Regresi?n 1.14.1: 19/19.
+- Regresi?n 1.16.1: 6/6.
+- Esquema 19: garant?a, despiece y bloqueo persistente.
+
 ## 1.17.0 — 2026-10-28
 
 ### Inventario

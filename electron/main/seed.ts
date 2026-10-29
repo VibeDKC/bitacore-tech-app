@@ -303,7 +303,8 @@ export function ensureDictionaries(db: Database) {
       'Insumos',
       'Servicios',
       'Equipos reacondicionados',
-      'Herramientas e insumos'
+      'Herramientas e insumos',
+      'Despiece'
     ])
     seedRoots('inventory_location', ['Bodega A', 'Bodega B', 'Mostrador', 'Taller', 'Caja de despiece', 'Estante A'])
     seedRoots('inventory_condition', ['Nuevo', 'Usado', 'Reacondicionado', 'Para repuesto', 'Otro'])

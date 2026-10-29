@@ -52,7 +52,8 @@ import type {
   StockMovement,
   Supplier,
   TechnicianOption,
-  WorkOrder
+  WorkOrder,
+  WorkOrderWarrantyChecks
 } from '@/types'
 import type { AuthSession } from '@/types'
 import type { BitacoreBridge } from '@/types/ipc'
@@ -194,6 +195,7 @@ export interface OrderItemInput {
   unitPrice: number
   productId?: string | null
   warrantyDays?: number
+  warrantyCovered?: boolean
 }
 
 export interface SettleInput {
@@ -392,6 +394,21 @@ export const api = {
     },
     create(input: NewOrderInput) {
       return rpc<WorkOrder>('orders.create', input as unknown as Record<string, unknown>)
+    },
+    createWarranty(
+      id: string,
+      input: { reason?: string; technicianId?: string; promisedAt?: string } = {}
+    ) {
+      return rpc<WorkOrder>('orders.createWarranty', { id, ...input })
+    },
+    updateWarranty(id: string, checks: WorkOrderWarrantyChecks) {
+      return rpc<WorkOrder>('orders.updateWarranty', { id, checks })
+    },
+    deliverWarranty(id: string) {
+      return rpc<WorkOrder>('orders.deliverWarranty', { id })
+    },
+    abandonToDisassembly(id: string, input: { confirmation: string; reason: string }) {
+      return rpc<WorkOrder>('orders.abandonToDisassembly', { id, ...input })
     },
     reassignTechnician(id: string, technicianId: string, reason: string) {
       return rpc<WorkOrder>('orders.reassignTechnician', { id, technicianId, reason })

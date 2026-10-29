@@ -4,12 +4,13 @@ import { paymentReceiptUrl } from './paymentReceipts'
 import { evidenceDto, evidenceSetHash } from './evidence'
 import { calculateNitDv } from './nit'
 import { resolvePromotionForProductRow } from './promotions'
+import { isTerminalOrderStatus, warrantyForOrder } from './orderStatus'
 
 export const money = (cents: number | null | undefined) => Math.round(Number(cents ?? 0)) / 100
 export const toCents = (value: number | null | undefined) => Math.round(Number(value ?? 0) * 100)
 export const bool = (value: unknown) => Number(value) === 1
 
-const STATUS_ORDER = ['recibido', 'diagnostico', 'aprobacion', 'reparacion', 'pruebas', 'listo', 'entregado', 'no_reparado']
+const STATUS_ORDER = ['recibido', 'diagnostico', 'aprobacion', 'reparacion', 'pruebas', 'listo', 'entregado', 'no_reparado', 'abandonado']
 
 export function customerDto(db: Database, row: any) {
   const purchases =
@@ -20,7 +21,7 @@ export function customerDto(db: Database, row: any) {
   const orders = db.get<{ count: number }>('SELECT COUNT(*) AS count FROM work_orders WHERE customer_id = ?', row.id)?.count ?? 0
   const openOrders =
     db.get<{ count: number }>(
-      "SELECT COUNT(*) AS count FROM work_orders WHERE customer_id = ? AND status NOT IN ('entregado','no_reparado')",
+      "SELECT COUNT(*) AS count FROM work_orders WHERE customer_id = ? AND status NOT IN ('entregado','no_reparado','abandonado')",
       row.id
     )?.count ?? 0
   const lastInvoice = db.get<{ date: string }>(
@@ -345,7 +346,8 @@ export function orderDto(db: Database, row: any) {
     description: item.description,
     quantity: Number(item.quantity),
     unitPrice: money(item.unit_price_cents),
-    warrantyDays: Number(item.warranty_days ?? 0)
+    warrantyDays: Number(item.warranty_days ?? 0),
+    warrantyCovered: bool(item.warranty_covered)
   }))
   const payments = paymentRows.map((payment) => paymentDto(db, payment))
   const itemsTotal = itemRows.reduce((sum, item) => sum + Number(item.unit_price_cents) * Number(item.quantity), 0)
@@ -358,36 +360,50 @@ export function orderDto(db: Database, row: any) {
   const paidCents = paymentRows.reduce((sum, payment) => sum + Number(payment.amount_cents), 0)
   const isExceptionInvoice = Boolean(invoiceRow && String(invoiceRow.notes ?? '').startsWith('Excepción:'))
   const isCreditInvoice = Boolean(invoiceRow?.credit_authorized)
-  const isNoChargeDelivery = row.status === 'entregado' && isExceptionInvoice
+  const isWarrantyClaim = Boolean(row.warranty_of_order_id)
+  const isNoChargeDelivery = row.status === 'entregado' && (isExceptionInvoice || isWarrantyClaim)
   const balanceCents = isNoChargeDelivery ? 0 : Math.max(totalCents - paidCents, 0)
   const balance = money(balanceCents)
   const dayMs = 24 * 60 * 60 * 1000
   const legal = db.getSetting<any>('legal_config', { warrantyDays: 90, abandonmentDays: 45 })
-  const warrantyDays = Math.max(
-    0,
-    Math.round(Number(intake?.legal?.warrantyDays ?? legal?.warrantyDays ?? 0))
-  )
-  let warranty: any = null
-  if (row.status === 'entregado' && row.delivered_at && warrantyDays > 0) {
-    const startsAt = new Date(row.delivered_at)
-    if (Number.isFinite(startsAt.getTime())) {
-      const until = new Date(startsAt.getTime() + warrantyDays * dayMs)
-      const daysLeft = Math.ceil((until.getTime() - Date.now()) / dayMs)
-      warranty = {
-        days: warrantyDays,
-        startsAt: startsAt.toISOString(),
-        until: until.toISOString(),
-        daysLeft,
-        status: daysLeft < 0 ? 'vencida' : daysLeft <= 30 ? 'por_vencer' : 'vigente'
+  const warranty = isWarrantyClaim ? null : warrantyForOrder(db, row)
+  const warrantyOfRow = row.warranty_of_order_id
+    ? db.get<any>('SELECT * FROM work_orders WHERE id = ?', row.warranty_of_order_id)
+    : null
+  const warrantyOf = warrantyOfRow
+    ? {
+        id: warrantyOfRow.id,
+        number: warrantyOfRow.number,
+        status: warrantyOfRow.status,
+        deliveredAt: warrantyOfRow.delivered_at ?? null,
+        warranty: warrantyForOrder(db, warrantyOfRow)
       }
-    }
+    : null
+  const warrantyClaims = db
+    .all<any>(
+      'SELECT id, number, status, warranty_result, created_at, delivered_at FROM work_orders WHERE warranty_of_order_id = ? ORDER BY created_at DESC',
+      row.id
+    )
+    .map((claim) => ({
+      id: claim.id,
+      number: claim.number,
+      status: claim.status,
+      result: claim.warranty_result || 'pendiente',
+      createdAt: claim.created_at,
+      deliveredAt: claim.delivered_at ?? null
+    }))
+  let warrantyChecks: any = null
+  try {
+    warrantyChecks = row.warranty_checks_json ? JSON.parse(row.warranty_checks_json) : null
+  } catch {
+    warrantyChecks = null
   }
   const abandonmentDays = Math.max(
     1,
     Math.round(Number(intake?.legal?.abandonmentDays ?? legal?.abandonmentDays ?? 45))
   )
   let abandonment: any = null
-  if (!['entregado', 'no_reparado'].includes(row.status) && row.created_at) {
+  if (!isTerminalOrderStatus(row.status) && row.created_at) {
     const createdAt = new Date(row.created_at)
     if (Number.isFinite(createdAt.getTime())) {
       const at = new Date(createdAt.getTime() + abandonmentDays * dayMs)
@@ -425,12 +441,12 @@ export function orderDto(db: Database, row: any) {
             invoiceNumber: invoiceRow?.number,
             creditAuthorizedBy: invoiceRow?.credit_authorized_by ?? null
           }
-      : isException
+      : isException || isWarrantyClaim
         ? {
             status: 'exento',
             amount: 0,
             paidAt: row.delivered_at ?? invoiceRow?.created_at ?? row.updated_at,
-            exceptionReason
+            exceptionReason: isWarrantyClaim ? 'Garantía' : exceptionReason
           }
         : {
             status: 'pagado',
@@ -503,6 +519,14 @@ export function orderDto(db: Database, row: any) {
     evidenceVerified:
       activeEvidence.length > 0 && activeEvidence.every((item) => Boolean(item.verified_at)),
     warranty,
+    warrantyOf,
+    warrantyClaims,
+    warrantyClaimReason: row.warranty_claim_reason ?? '',
+    warrantyChecks,
+    warrantyResult: row.warranty_result || 'pendiente',
+    isWarrantyClaim,
+    abandonedAt: row.abandoned_at ?? null,
+    disassemblyProductId: row.disassembly_product_id ?? null,
     abandonment,
     statusOrder: STATUS_ORDER
   }

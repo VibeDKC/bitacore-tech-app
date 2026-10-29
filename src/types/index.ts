@@ -182,6 +182,7 @@ export type WorkOrderStatus =
   | 'listo'
   | 'entregado'
   | 'no_reparado'
+  | 'abandonado'
 
 export type DeviceCategory = 'laptop' | 'pc_torre' | 'celular' | 'consola' | 'impresora' | 'otro'
 
@@ -393,6 +394,7 @@ export interface WorkOrderItem {
   unitPrice: number
   /** Solo aplica a repuestos vinculados a un producto del inventario. */
   warrantyDays: number
+  warrantyCovered?: boolean
 }
 
 export interface TimelineEvent {
@@ -435,6 +437,34 @@ export interface WorkOrderAbandonment {
   at: string
   daysLeft: number
   atRisk: boolean
+}
+
+export type WarrantyResult = 'pendiente' | 'sin_falla' | 'falla_reproducida' | 'no_cubierta'
+
+export interface WorkOrderWarrantyChecks {
+  workshopTests?: string
+  homeConditions?: string
+  result?: WarrantyResult
+  recommendations?: string
+  updatedAt?: string
+  updatedBy?: string
+}
+
+export interface WorkOrderWarrantyClaim {
+  id: string
+  number: string
+  status: WorkOrderStatus
+  result: WarrantyResult
+  createdAt: string
+  deliveredAt: string | null
+}
+
+export interface WorkOrderWarrantyOf {
+  id: string
+  number: string
+  status: WorkOrderStatus
+  deliveredAt: string | null
+  warranty: WorkOrderWarranty | null
 }
 
 export interface WorkOrder {
@@ -480,6 +510,14 @@ export interface WorkOrder {
   evidenceSetHash?: string | null
   evidenceVerified?: boolean
   warranty?: WorkOrderWarranty | null
+  warrantyOf?: WorkOrderWarrantyOf | null
+  warrantyClaims?: WorkOrderWarrantyClaim[]
+  warrantyClaimReason?: string
+  warrantyChecks?: WorkOrderWarrantyChecks | null
+  warrantyResult?: WarrantyResult
+  isWarrantyClaim?: boolean
+  abandonedAt?: string | null
+  disassemblyProductId?: string | null
   abandonment?: WorkOrderAbandonment | null
 }
 

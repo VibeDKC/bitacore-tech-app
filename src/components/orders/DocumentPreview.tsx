@@ -87,7 +87,7 @@ function buildData(order: WorkOrder, customer: Customer | null, legal: LegalConf
   const intake = order.intake
   const snapshot = intake?.legal
   const conditions = intake
-    ? (Object.entries(intake.conditions) as Array<[IntakeConditionKey, boolean | undefined]>)
+    ? (Object.entries(intake.conditions ?? {}) as Array<[IntakeConditionKey, boolean | undefined]>)
         .filter(([, active]) => active)
         .map(([key]) => conditionLabels[key])
     : []
@@ -103,7 +103,7 @@ function buildData(order: WorkOrder, customer: Customer | null, legal: LegalConf
   }
   const lockParts = intake
     ? [
-        `Bloqueo: ${lockLabels[intake.lockType]}`,
+        `Bloqueo: ${lockLabels[intake.lockType] ?? 'No registrado'}`,
         intake.customerWithheldCredentials
           ? 'El cliente no suministra credenciales'
           : intake.customerAuthorizesAccess
@@ -127,7 +127,7 @@ function buildData(order: WorkOrder, customer: Customer | null, legal: LegalConf
       ? intake.accessories.join(', ')
       : order.accessories || 'Sin accesorios',
     conditionSummary: conditionParts.filter(Boolean).join(' · ') || 'Sin observaciones',
-    powerState: intake ? powerLabels[intake.powerState] : 'No registrado',
+    powerState: intake ? powerLabels[intake.powerState] ?? 'No registrado' : 'No registrado',
     lockSummary: lockParts.join(' · ') || 'Sin bloqueo registrado',
     receivedBy: intake?.receivedBy ?? order.technician,
     receivedAt: intake?.receivedAt ?? order.createdAt,

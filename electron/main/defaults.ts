@@ -207,5 +207,16 @@ export const STATUS_CONFIG = [
     isTerminal: 1,
     requiresPayment: 0,
     isCancel: 1
+  },
+  {
+    status: 'abandonado',
+    label: 'Abandonado',
+    shortLabel: 'Abandonado',
+    description: 'Equipo no reclamado y trasladado a despiece.',
+    tone: 'danger',
+    position: 8,
+    isTerminal: 1,
+    requiresPayment: 0,
+    isCancel: 1
   }
 ] as const
